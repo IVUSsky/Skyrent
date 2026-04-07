@@ -1,0 +1,828 @@
+import React, { useState, useEffect, useRef, useCallback } from 'react'
+
+const CATEGORIES = ['ток','вода','ремонт','застраховка','такса','счетоводство','друго']
+const CURRENCIES  = ['BGN','EUR','USD']
+const PAYER_IBAN  = 'BG75PRCB92301053911901'
+
+const fmt = n => n != null && !isNaN(n)
+  ? Number(n).toLocaleString('bg-BG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  : '—'
+
+function validateIBAN(iban) {
+  if (!iban || iban.length < 15) return false
+  const r = (iban.slice(4)+iban.slice(0,4)).toUpperCase().split('').map(c => {
+    const n = c.charCodeAt(0); return n>=65&&n<=90 ? String(n-55) : c
+  }).join('')
+  let rem = 0
+  for (const ch of r) rem = (rem*10+parseInt(ch,10))%97
+  return rem === 1
+}
+
+const STATUS_LABEL = { pending:'⏳ Изчакване', processing:'⚡ AI...', done:'✅ Готово', error:'❌ Грешка' }
+const STATUS_COLOR = {
+  pending:'bg-gray-100 text-gray-600',
+  processing:'bg-yellow-100 text-yellow-800',
+  done:'bg-green-100 text-green-800',
+  error:'bg-red-100 text-red-800'
+}
+const CAT_COLOR = {
+  ток:'bg-yellow-50 border-yellow-200',
+  вода:'bg-blue-50 border-blue-200',
+  ремонт:'bg-orange-50 border-orange-200',
+  застраховка:'bg-purple-50 border-purple-200',
+  такса:'bg-gray-50 border-gray-200',
+  счетоводство:'bg-indigo-50 border-indigo-200',
+  друго:'bg-gray-50 border-gray-200',
+}
+
+// ── Autocomplete input ────────────────────────────────────────
+function AutocompleteInput({ value, onChange, suggestions, onSelect, placeholder, className }) {
+  const [open, setOpen] = useState(false)
+  const filtered = suggestions.filter(s =>
+    s.name.toLowerCase().includes((value||'').toLowerCase()) && (value||'').length >= 2
+  ).slice(0,6)
+
+  return (
+    <div className="relative">
+      <input
+        type="text"
+        value={value||''}
+        onChange={e => { onChange(e.target.value); setOpen(true) }}
+        onBlur={() => setTimeout(() => setOpen(false), 180)}
+        placeholder={placeholder}
+        className={className}
+      />
+      {open && filtered.length > 0 && (
+        <div className="absolute z-50 top-full left-0 right-0 bg-white border border-blue-300 rounded-b-lg shadow-lg max-h-40 overflow-y-auto">
+          {filtered.map(s => (
+            <div
+              key={s.id}
+              onMouseDown={() => { onSelect(s); setOpen(false) }}
+              className="px-3 py-2 cursor-pointer hover:bg-blue-50 text-sm"
+            >
+              <div className="font-semibold text-blue-800">{s.name}</div>
+              <div className="text-xs text-gray-500 font-mono">{s.iban} · {s.bic||'—'} · {s.currency||'BGN'}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Invoice Card ──────────────────────────────────────────────
+function InvoiceCard({ inv, properties, counterparties, API, onChange, onDelete, selected, onSelect }) {
+  const [form, setForm] = useState({
+    supplier_name: inv.supplier_name||'',
+    supplier_iban: inv.supplier_iban||'',
+    supplier_bic:  inv.supplier_bic||'',
+    amount:        inv.amount||'',
+    currency:      inv.currency||'BGN',
+    reason:        inv.reason||'',
+    property_id:   inv.property_id||'',
+    expense_category: inv.expense_category||'',
+    месец:         inv.месец||'',
+    paid:          !!inv.paid,
+  })
+  const [saving, setSaving] = useState(false)
+
+  // Re-sync form when AI extraction completes (inv updates from parent)
+  useEffect(() => {
+    setForm(f => ({
+      ...f,
+      supplier_name: inv.supplier_name || f.supplier_name,
+      supplier_iban: inv.supplier_iban || f.supplier_iban,
+      supplier_bic:  inv.supplier_bic  || f.supplier_bic,
+      amount:        inv.amount        != null ? inv.amount : f.amount,
+      currency:      inv.currency      || f.currency,
+      reason:        inv.reason        || f.reason,
+      paid:          !!inv.paid,
+    }))
+  }, [inv.status, inv.supplier_name, inv.supplier_iban, inv.amount])
+
+  const upd = (field, val) => setForm(f => ({ ...f, [field]: val }))
+
+  const save = () => {
+    setSaving(true)
+    fetch(`${API}/api/expenses/${inv.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...form, amount: Number(form.amount)||0, property_id: form.property_id||null }),
+    }).then(() => { setSaving(false); onChange() }).catch(() => setSaving(false))
+  }
+
+  const togglePaid = () => {
+    const newPaid = !form.paid
+    upd('paid', newPaid)
+    fetch(`${API}/api/expenses/${inv.id}/paid`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paid: newPaid, paid_date: newPaid ? new Date().toISOString().slice(0,10) : null }),
+    }).then(() => onChange())
+  }
+
+  const ibanOK = form.supplier_iban ? validateIBAN(form.supplier_iban) : null
+  const ibanStyle = ibanOK === true ? 'border-green-400' : ibanOK === false ? 'border-red-400' : ''
+  const catStyle  = CAT_COLOR[form.expense_category] || 'bg-white border-gray-200'
+
+  return (
+    <div className={`rounded-xl border-2 p-4 mb-3 transition-all ${catStyle} ${selected ? 'ring-2 ring-blue-400' : ''}`}>
+      {/* Header */}
+      <div className="flex items-center justify-between mb-3 gap-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <input type="checkbox" checked={selected} onChange={e => onSelect(inv.id, e.target.checked)}
+            className="w-4 h-4 rounded text-blue-600 flex-shrink-0"/>
+          <span className="text-sm font-semibold text-gray-700 truncate">📄 {inv.filename}</span>
+        </div>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_COLOR[inv.status]||STATUS_COLOR.pending}`}>
+            {STATUS_LABEL[inv.status]||inv.status}
+          </span>
+          {inv.ai_notes && <span className="text-xs text-orange-600 max-w-[160px] truncate" title={inv.ai_notes}>ℹ {inv.ai_notes}</span>}
+          <button onClick={() => onDelete(inv.id)} className="text-red-400 hover:text-red-600 ml-1 text-lg leading-none">×</button>
+        </div>
+      </div>
+
+      {/* Invoice metadata row (from AI extraction) */}
+      {(inv.invoice_number || inv.invoice_date || inv.amount_no_vat != null || inv.vat_amount != null) && (
+        <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-600 bg-white/60 rounded px-2 py-1.5 mb-2 border border-gray-100">
+          {(inv.invoice_number || inv.invoice_date) && (
+            <span>
+              📋 <span className="font-medium">Фактура №:</span>{' '}
+              {inv.invoice_number || '—'}
+              {inv.invoice_date && <> от <span className="font-medium">{inv.invoice_date}</span></>}
+            </span>
+          )}
+          {inv.supplier_eik && (
+            <span>ЕИК: <span className="font-medium font-mono">{inv.supplier_eik}</span></span>
+          )}
+          {(inv.amount_no_vat != null || inv.vat_amount != null) && (
+            <span>
+              Без ДДС: <span className="font-medium">{fmt(inv.amount_no_vat)}</span>
+              {' | '}ДДС: <span className="font-medium">{fmt(inv.vat_amount)}</span>
+              {' | '}ОБЩО: <span className="font-semibold text-gray-800">{fmt(inv.amount)}</span>
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Fields grid */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+        {/* Supplier - full width */}
+        <div className="col-span-2 md:col-span-4">
+          <label className="block text-gray-500 uppercase font-bold mb-0.5">Доставчик</label>
+          <AutocompleteInput
+            value={form.supplier_name}
+            onChange={v => upd('supplier_name', v)}
+            suggestions={counterparties}
+            onSelect={cp => setForm(f => ({ ...f, supplier_name: cp.name, supplier_iban: cp.iban, supplier_bic: cp.bic||'', currency: cp.currency||'BGN' }))}
+            placeholder="Firma OOD / Company Ltd"
+            className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400"
+          />
+        </div>
+
+        {/* IBAN */}
+        <div className="col-span-2">
+          <label className="block text-gray-500 uppercase font-bold mb-0.5">
+            IBAN {ibanOK === true ? '✅' : ibanOK === false ? '❌' : ''}
+          </label>
+          <input type="text" value={form.supplier_iban}
+            onChange={e => upd('supplier_iban', e.target.value.toUpperCase().replace(/\s/g,''))}
+            className={`w-full border rounded px-2 py-1.5 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-blue-400 ${ibanStyle||'border-gray-300'}`}
+            placeholder="BG72UNCR..."/>
+          {ibanOK === false && (
+            <div className="mt-1 px-2 py-1 bg-red-50 border border-red-300 rounded text-xs text-red-700 font-medium">
+              ⚠ IBAN невалиден — моля проверете ръчно
+            </div>
+          )}
+        </div>
+
+        {/* BIC */}
+        <div>
+          <label className="block text-gray-500 uppercase font-bold mb-0.5">BIC</label>
+          <input type="text" value={form.supplier_bic}
+            onChange={e => upd('supplier_bic', e.target.value.toUpperCase())}
+            className="w-full border border-gray-300 rounded px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
+            placeholder="UNCRBGSF"/>
+        </div>
+
+        {/* Amount + Currency */}
+        <div>
+          <label className="block text-gray-500 uppercase font-bold mb-0.5">Сума</label>
+          <div className="flex gap-1">
+            <input type="number" step="0.01" min="0" value={form.amount}
+              onChange={e => upd('amount', e.target.value)}
+              className="flex-1 min-w-0 border border-gray-300 rounded px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
+              placeholder="0.00"/>
+            <select value={form.currency} onChange={e => upd('currency', e.target.value)}
+              className="border border-gray-300 rounded px-1 py-1.5 text-xs focus:outline-none">
+              {CURRENCIES.map(c => <option key={c}>{c}</option>)}
+            </select>
+          </div>
+        </div>
+
+        {/* Category */}
+        <div>
+          <label className="block text-gray-500 uppercase font-bold mb-0.5">Категория</label>
+          <select value={form.expense_category} onChange={e => upd('expense_category', e.target.value)}
+            className="w-full border border-gray-300 rounded px-2 py-1.5 text-xs focus:outline-none">
+            <option value="">— изберете —</option>
+            {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </div>
+
+        {/* Property */}
+        <div>
+          <label className="block text-gray-500 uppercase font-bold mb-0.5">Имот</label>
+          <select value={form.property_id} onChange={e => upd('property_id', e.target.value)}
+            className="w-full border border-gray-300 rounded px-2 py-1.5 text-xs focus:outline-none">
+            <option value="">— общ разход —</option>
+            {properties.map(p => <option key={p.id} value={p.id}>#{p.id} {p['адрес']}</option>)}
+          </select>
+        </div>
+
+        {/* Month */}
+        <div>
+          <label className="block text-gray-500 uppercase font-bold mb-0.5">Месец</label>
+          <input type="month" value={form.месец}
+            onChange={e => upd('месец', e.target.value)}
+            className="w-full border border-gray-300 rounded px-2 py-1.5 text-xs focus:outline-none"/>
+        </div>
+
+        {/* Reason - full width */}
+        <div className="col-span-2 md:col-span-4">
+          <label className="block text-gray-500 uppercase font-bold mb-0.5">Основание (латиница, до 90 знака)</label>
+          <input type="text" maxLength={90} value={form.reason}
+            onChange={e => upd('reason', e.target.value)}
+            className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400"
+            placeholder="Invoice No ..."/>
+        </div>
+      </div>
+
+      {/* Footer */}
+      <div className="flex items-center gap-3 mt-3 pt-3 border-t border-gray-200">
+        <label className="flex items-center gap-1.5 cursor-pointer text-sm">
+          <input type="checkbox" checked={form.paid} onChange={togglePaid}
+            className="w-4 h-4 rounded text-green-600"/>
+          <span className={form.paid ? 'text-green-700 font-semibold' : 'text-gray-500'}>
+            {form.paid ? '✓ Платена' : 'Неплатена'}
+          </span>
+        </label>
+        {inv.xml_exported ? <span className="text-xs text-blue-500">📥 XML</span> : null}
+        <div className="ml-auto">
+          <button onClick={save} disabled={saving}
+            className="px-3 py-1.5 text-xs font-semibold bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50">
+            {saving ? 'Запазва...' : 'Запази'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── XML Export Modal ──────────────────────────────────────────
+function XmlModal({ invoices, selectedIds, onClose, API }) {
+  const [payerIban, setPayerIban] = useState(PAYER_IBAN)
+  const [execDate, setExecDate]   = useState(new Date().toISOString().slice(0,10))
+  const [format, setFormat]       = useState('BISERA6')
+  const [ids, setIds]             = useState(selectedIds.length ? selectedIds : invoices.map(i => i.id))
+  const [exporting, setExporting] = useState(false)
+
+  const toggle = id => setIds(prev => prev.includes(id) ? prev.filter(x => x!==id) : [...prev, id])
+
+  const doExport = async () => {
+    if (!ids.length) return
+    setExporting(true)
+    try {
+      const resp = await fetch(`${API}/api/expenses/export-xml`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids, payer_iban: payerIban, exec_date: execDate, format }),
+      })
+      if (!resp.ok) throw new Error(await resp.text())
+      const blob = await resp.blob()
+      const url  = URL.createObjectURL(blob)
+      const a    = document.createElement('a')
+      a.href = url; a.download = `SKAYCAP_${format}_${execDate.replace(/-/g,'')}.xml`
+      document.body.appendChild(a); a.click(); document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+      onClose(true)
+    } catch(e) { alert('Грешка: ' + e.message) }
+    finally { setExporting(false) }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col">
+        <div className="px-6 py-4 border-b flex justify-between items-center">
+          <h3 className="font-bold text-gray-900 text-lg">📥 Експорт XML — ISO 20022</h3>
+          <button onClick={() => onClose(false)} className="text-gray-400 hover:text-gray-600 text-xl">×</button>
+        </div>
+
+        <div className="px-6 py-4 space-y-3 overflow-y-auto flex-1">
+          <div>
+            <label className="text-xs font-bold text-gray-500 uppercase block mb-1">Сметка на Скай Кепитъл (наредител)</label>
+            <input type="text" value={payerIban} onChange={e => setPayerIban(e.target.value.toUpperCase().replace(/\s/g,''))}
+              className="w-full border rounded px-3 py-2 font-mono text-sm focus:outline-none focus:ring-1 focus:ring-blue-400"/>
+          </div>
+          <div className="flex gap-3">
+            <div className="flex-1">
+              <label className="text-xs font-bold text-gray-500 uppercase block mb-1">Дата на изпълнение</label>
+              <input type="date" value={execDate} onChange={e => setExecDate(e.target.value)}
+                className="w-full border rounded px-3 py-2 text-sm focus:outline-none"/>
+            </div>
+            <div>
+              <label className="text-xs font-bold text-gray-500 uppercase block mb-1">Формат</label>
+              <div className="flex border rounded overflow-hidden">
+                {['BISERA6','SEPA'].map(f => (
+                  <button key={f} onClick={() => setFormat(f)}
+                    className={`px-4 py-2 text-sm font-bold ${format===f ? 'bg-blue-700 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>
+                    {f}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <label className="text-xs font-bold text-gray-500 uppercase block mb-1">Включени фактури ({ids.length})</label>
+            <div className="max-h-48 overflow-y-auto border rounded divide-y">
+              {invoices.map(inv => (
+                <label key={inv.id} className="flex items-center gap-2 px-3 py-2 hover:bg-gray-50 cursor-pointer">
+                  <input type="checkbox" checked={ids.includes(inv.id)} onChange={() => toggle(inv.id)}
+                    className="w-4 h-4 rounded text-blue-600"/>
+                  <span className="text-sm flex-1 truncate">{inv.supplier_name||inv.filename}</span>
+                  <span className="text-xs text-gray-500 font-mono">{fmt(inv.amount)} {inv.currency}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div className="bg-blue-50 border border-blue-200 rounded px-3 py-2 text-sm">
+            <strong>Общо:</strong> {invoices.filter(i => ids.includes(i.id)).reduce((s,i) => s+(i.amount||0),0).toFixed(2)} (смесени валути)
+            · <strong>{ids.length}</strong> плащания
+          </div>
+        </div>
+
+        <div className="px-6 py-4 border-t flex gap-3 justify-end">
+          <button onClick={() => onClose(false)} className="px-4 py-2 text-sm text-gray-600 bg-gray-100 rounded hover:bg-gray-200">Отказ</button>
+          <button onClick={doExport} disabled={exporting || !ids.length}
+            className="px-5 py-2 text-sm font-bold text-white bg-blue-700 rounded hover:bg-blue-800 disabled:opacity-50">
+            {exporting ? 'Генерира...' : '📥 Изтегли XML'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Counterparties subtab ─────────────────────────────────────
+function CounterpartiesTab({ API }) {
+  const [cps, setCps]   = useState([])
+  const [form, setForm] = useState({ name:'', iban:'', bic:'', currency:'BGN' })
+  const [search, setSearch] = useState('')
+
+  const load = () => fetch(`${API}/api/counterparties`).then(r => r.json()).then(setCps)
+  useEffect(() => { load() }, [])
+
+  const add = () => {
+    if (!form.name || !form.iban) return
+    fetch(`${API}/api/counterparties`, {
+      method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(form)
+    }).then(() => { setForm({ name:'', iban:'', bic:'', currency:'BGN' }); load() })
+  }
+
+  const del = id => fetch(`${API}/api/counterparties/${id}`, { method:'DELETE' }).then(load)
+
+  const filtered = cps.filter(c =>
+    !search || c.name.toLowerCase().includes(search.toLowerCase()) || c.iban.includes(search.toUpperCase())
+  )
+
+  const ibanValid = form.iban ? validateIBAN(form.iban) : null
+
+  return (
+    <div>
+      {/* Add form */}
+      <div className="bg-white rounded-xl border border-gray-200 p-4 mb-4 shadow-sm">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 items-end">
+          <div className="md:col-span-2">
+            <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Наименование</label>
+            <input type="text" value={form.name} onChange={e => setForm(f=>({...f,name:e.target.value}))}
+              className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400"
+              placeholder="Фирма ООД"/>
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-gray-500 uppercase mb-1">
+              IBAN {ibanValid===true?'✅':ibanValid===false?'❌':''}
+            </label>
+            <input type="text" value={form.iban}
+              onChange={e => setForm(f=>({...f,iban:e.target.value.toUpperCase().replace(/\s/g,'')}))}
+              className={`w-full border rounded px-3 py-2 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-blue-400 ${ibanValid===false?'border-red-400':ibanValid===true?'border-green-400':'border-gray-300'}`}
+              placeholder="BG72UNCR..."/>
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-gray-500 uppercase mb-1">BIC</label>
+            <input type="text" value={form.bic} onChange={e => setForm(f=>({...f,bic:e.target.value.toUpperCase()}))}
+              className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none"
+              placeholder="UNCRBGSF"/>
+          </div>
+          <div className="flex gap-2 items-end">
+            <div className="flex-1">
+              <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Валута</label>
+              <select value={form.currency} onChange={e => setForm(f=>({...f,currency:e.target.value}))}
+                className="w-full border border-gray-300 rounded px-2 py-2 text-sm">
+                {CURRENCIES.map(c=><option key={c}>{c}</option>)}
+              </select>
+            </div>
+            <button onClick={add}
+              className="px-4 py-2 text-sm font-bold text-white bg-blue-700 rounded hover:bg-blue-800">
+              + Добави
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <input type="text" value={search} onChange={e => setSearch(e.target.value)}
+        placeholder="🔍 Търси по наименование или IBAN..."
+        className="w-full border border-gray-200 rounded-lg px-4 py-2 mb-3 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400"/>
+
+      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
+        <table className="min-w-full divide-y divide-gray-100 text-sm">
+          <thead className="bg-gray-50">
+            <tr>
+              {['Наименование','IBAN','BIC','Валута','IBAN ✓',''].map(h=>(
+                <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {filtered.map(cp => (
+              <tr key={cp.id} className="hover:bg-gray-50">
+                <td className="px-4 py-2 font-medium">{cp.name}</td>
+                <td className="px-4 py-2 font-mono text-xs text-gray-600">{cp.iban}</td>
+                <td className="px-4 py-2 text-gray-500">{cp.bic||'—'}</td>
+                <td className="px-4 py-2 text-gray-500">{cp.currency||'BGN'}</td>
+                <td className="px-4 py-2 text-center">
+                  {validateIBAN(cp.iban) ? <span className="text-green-600 font-bold">✓</span> : <span className="text-red-500">✗</span>}
+                </td>
+                <td className="px-4 py-2">
+                  <button onClick={() => del(cp.id)} className="text-red-400 hover:text-red-600 text-lg leading-none">×</button>
+                </td>
+              </tr>
+            ))}
+            {!filtered.length && (
+              <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">Няма контрагенти.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+// ── Analysis subtab ───────────────────────────────────────────
+function AnalysisTab({ API }) {
+  const [summary, setSummary] = useState(null)
+  const [month, setMonth]     = useState('')
+  const [loading, setLoading] = useState(false)
+
+  const load = useCallback(() => {
+    setLoading(true)
+    const q = month ? `?month=${month}` : ''
+    fetch(`${API}/api/expenses/summary${q}`)
+      .then(r => r.json())
+      .then(d => { setSummary(d); setLoading(false) })
+      .catch(() => setLoading(false))
+  }, [month, API])
+
+  useEffect(() => { load() }, [load])
+
+  if (loading || !summary) return <div className="py-12 text-center text-gray-400">Зарежда...</div>
+
+  const cats = (summary.by_category||[]).reduce((acc, r) => {
+    if (!acc[r.expense_category]) acc[r.expense_category] = {}
+    acc[r.expense_category][r.currency] = r.total
+    return acc
+  }, {})
+  const allCatsSorted = Object.entries(cats).sort((a,b) => (b[1].BGN||0)+(b[1].EUR||0) - (a[1].BGN||0)-(a[1].EUR||0))
+  const maxVal = Math.max(...allCatsSorted.map(([,v]) => (v.BGN||0)+(v.EUR||0)), 1)
+
+  return (
+    <div className="space-y-6">
+      {/* Filter */}
+      <div className="flex items-center gap-3">
+        <label className="text-sm font-medium text-gray-600">Месец:</label>
+        <input type="month" value={month} onChange={e => setMonth(e.target.value)}
+          className="border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none"/>
+        {month && <button onClick={() => setMonth('')} className="text-xs text-gray-400 hover:text-gray-600">× всички</button>}
+      </div>
+
+      {/* KPI cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        {[
+          { label:'Общо разходи BGN', value: fmt(summary.total_bgn), color:'text-red-700', bg:'bg-red-50 border-red-200' },
+          { label:'Общо разходи EUR', value: fmt(summary.total_eur), color:'text-orange-700', bg:'bg-orange-50 border-orange-200' },
+          { label:'Брой фактури',     value: summary.count||0,        color:'text-blue-700',  bg:'bg-blue-50 border-blue-200' },
+          { label:'Платени',          value: `${summary.paid_count||0} / ${summary.count||0}`, color:'text-green-700', bg:'bg-green-50 border-green-200' },
+        ].map(c => (
+          <div key={c.label} className={`border rounded-xl p-4 ${c.bg}`}>
+            <div className="text-xs font-semibold text-gray-500 uppercase">{c.label}</div>
+            <div className={`text-2xl font-bold mt-1 ${c.color}`}>{c.value}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Bar chart by category */}
+      {allCatsSorted.length > 0 && (
+        <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
+          <h3 className="font-bold text-gray-800 mb-4">Разходи по категория</h3>
+          <div className="space-y-3">
+            {allCatsSorted.map(([cat, vals]) => {
+              const total = (vals.BGN||0) + (vals.EUR||0)
+              const pct   = Math.round(total / maxVal * 100)
+              return (
+                <div key={cat} className="flex items-center gap-3">
+                  <div className="w-24 text-sm text-gray-600 capitalize text-right flex-shrink-0">{cat||'—'}</div>
+                  <div className="flex-1 bg-gray-100 rounded-full h-5 overflow-hidden">
+                    <div className="h-5 rounded-full bg-red-400 transition-all" style={{ width: `${pct}%` }}/>
+                  </div>
+                  <div className="w-28 text-xs text-gray-700 flex-shrink-0">
+                    {vals.BGN ? <span className="mr-1">{fmt(vals.BGN)} BGN</span> : null}
+                    {vals.EUR ? <span>{fmt(vals.EUR)} EUR</span> : null}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* By property */}
+      {summary.by_property?.length > 0 && (
+        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
+          <div className="px-5 py-3 border-b">
+            <h3 className="font-bold text-gray-800">Разходи по имот</h3>
+          </div>
+          <table className="min-w-full divide-y divide-gray-100 text-sm">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-4 py-2 text-left text-xs font-semibold text-gray-500 uppercase">Имот</th>
+                <th className="px-4 py-2 text-right text-xs font-semibold text-gray-500 uppercase">Сума BGN</th>
+                <th className="px-4 py-2 text-right text-xs font-semibold text-gray-500 uppercase">Сума EUR</th>
+                <th className="px-4 py-2 text-right text-xs font-semibold text-gray-500 uppercase">Бр.</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {Object.entries(
+                summary.by_property.reduce((acc, r) => {
+                  const key = r.property_id
+                  if (!acc[key]) acc[key] = { адрес: r['адрес'], BGN:0, EUR:0, count:0 }
+                  acc[key][r.currency] = (acc[key][r.currency]||0) + r.total
+                  acc[key].count += r.count
+                  return acc
+                }, {})
+              ).map(([pid, d]) => (
+                <tr key={pid} className="hover:bg-gray-50">
+                  <td className="px-4 py-2 font-medium text-gray-800">#{pid} {d['адрес']||'—'}</td>
+                  <td className="px-4 py-2 text-right text-red-700">{d.BGN ? fmt(d.BGN) : '—'}</td>
+                  <td className="px-4 py-2 text-right text-orange-700">{d.EUR ? fmt(d.EUR) : '—'}</td>
+                  <td className="px-4 py-2 text-right text-gray-500">{d.count}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Main component ────────────────────────────────────────────
+export default function Expenses({ API }) {
+  const [subTab, setSubTab]         = useState('invoices')
+  const [invoices, setInvoices]     = useState([])
+  const [properties, setProperties] = useState([])
+  const [counterparties, setCPs]    = useState([])
+  const [loading, setLoading]       = useState(false)
+  const [filterMonth, setFilterMonth] = useState('')
+  const [filterCat, setFilterCat]   = useState('')
+  const [filterPaid, setFilterPaid] = useState('')
+  const [selected, setSelected]     = useState([])
+  const [xmlModal, setXmlModal]     = useState(false)
+  const [dragging, setDragging]     = useState(false)
+  const [uploading, setUploading]   = useState(false)
+  const [extracting, setExtracting] = useState(false)
+  const fileRef = useRef()
+
+  const loadInvoices = useCallback(() => {
+    const params = new URLSearchParams()
+    if (filterMonth) params.set('month', filterMonth)
+    if (filterCat)   params.set('category', filterCat)
+    if (filterPaid)  params.set('paid', filterPaid)
+    return fetch(`${API}/api/expenses?${params}`).then(r => r.json()).then(setInvoices)
+  }, [API, filterMonth, filterCat, filterPaid])
+
+  useEffect(() => {
+    Promise.all([
+      fetch(`${API}/api/properties`).then(r => r.json()),
+      fetch(`${API}/api/counterparties`).then(r => r.json()),
+    ]).then(([pr, cp]) => { setProperties(pr); setCPs(cp) })
+  }, [API])
+
+  useEffect(() => { loadInvoices() }, [loadInvoices])
+
+  const reloadCPs = () => fetch(`${API}/api/counterparties`).then(r => r.json()).then(setCPs)
+
+  // Upload files
+  const uploadFiles = async (files) => {
+    if (!files.length) return
+    setUploading(true)
+    const fd = new FormData()
+    for (const f of files) fd.append('files', f)
+    try {
+      const r = await fetch(`${API}/api/expenses/upload`, { method: 'POST', body: fd })
+      await r.json()
+      await loadInvoices()
+    } catch(e) { alert('Upload error: ' + e.message) }
+    setUploading(false)
+  }
+
+  const handleDrop = e => {
+    e.preventDefault(); setDragging(false)
+    uploadFiles(Array.from(e.dataTransfer.files))
+  }
+
+  // AI extraction
+  const extractAI = async () => {
+    const ids = invoices.filter(i => i.status === 'pending').map(i => i.id)
+    if (!ids.length) { alert('Няма нови фактури за извличане'); return }
+    setExtracting(true)
+    try {
+      const r = await fetch(`${API}/api/expenses/extract-ai`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids })
+      })
+      const data = await r.json()
+      if (data.error) throw new Error(data.error)
+      await loadInvoices(); await reloadCPs()
+    } catch(e) { alert('AI грешка: ' + e.message) }
+    setExtracting(false)
+  }
+
+  const deleteInvoice = async (id) => {
+    if (!confirm('Изтриване на фактурата?')) return
+    await fetch(`${API}/api/expenses/${id}`, { method: 'DELETE' })
+    setSelected(s => s.filter(x => x !== id))
+    loadInvoices()
+  }
+
+  const toggleSelect = (id, checked) => {
+    setSelected(s => checked ? [...s, id] : s.filter(x => x !== id))
+  }
+
+  const addManual = () => {
+    const месец = new Date().toISOString().slice(0,7)
+    fetch(`${API}/api/expenses/upload`, { method: 'POST', body: new FormData() })
+      .catch(() => {})
+    // Insert via POST with blank data workaround — use PUT after fake upload
+    // Simpler: POST to a /manual endpoint... but we don't have one.
+    // Just create a dummy FormData with a fake blob
+    const fd = new FormData()
+    fd.append('files', new File([''], 'Ръчен запис.pdf', { type: 'application/pdf' }))
+    fetch(`${API}/api/expenses/upload`, { method: 'POST', body: fd })
+      .then(r => r.json()).then(() => loadInvoices())
+  }
+
+  // Summary totals
+  const totalBGN = invoices.filter(i => i.currency === 'BGN').reduce((s,i) => s+(i.amount||0), 0)
+  const totalEUR = invoices.filter(i => i.currency === 'EUR').reduce((s,i) => s+(i.amount||0), 0)
+  const paidCount = invoices.filter(i => i.paid).length
+
+  const pendingIds = invoices.filter(i => i.status === 'pending').map(i => i.id)
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-5">
+        <h2 className="text-2xl font-bold text-gray-800">💸 Разходи</h2>
+        {/* Sub-tabs */}
+        <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
+          {[['invoices','📄 Фактури'],['counterparties','🏢 Контрагенти'],['analysis','📊 Анализ']].map(([id,lbl]) => (
+            <button key={id} onClick={() => setSubTab(id)}
+              className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${subTab===id ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-600 hover:text-gray-800'}`}>
+              {lbl}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* ── ФАКТУРИ ── */}
+      {subTab === 'invoices' && (
+        <div>
+          {/* Toolbar */}
+          <div className="flex gap-2 flex-wrap items-center mb-4">
+            <input type="month" value={filterMonth} onChange={e => setFilterMonth(e.target.value)}
+              className="border border-gray-300 rounded px-3 py-1.5 text-sm"/>
+            <select value={filterCat} onChange={e => setFilterCat(e.target.value)}
+              className="border border-gray-300 rounded px-3 py-1.5 text-sm">
+              <option value="">Всички категории</option>
+              {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+            <select value={filterPaid} onChange={e => setFilterPaid(e.target.value)}
+              className="border border-gray-300 rounded px-3 py-1.5 text-sm">
+              <option value="">Всички</option>
+              <option value="true">Платени</option>
+              <option value="false">Неплатени</option>
+            </select>
+            <div className="ml-auto flex gap-2 flex-wrap">
+              <button onClick={() => fileRef.current.click()} disabled={uploading}
+                className="px-3 py-1.5 text-sm font-semibold bg-gray-700 text-white rounded hover:bg-gray-800 disabled:opacity-50">
+                {uploading ? '⏳ Качва...' : '📤 Качи'}
+              </button>
+              <input ref={fileRef} type="file" multiple accept=".pdf,image/*" className="hidden"
+                onChange={e => { uploadFiles(Array.from(e.target.files)); e.target.value='' }}/>
+              <button onClick={extractAI} disabled={extracting || !pendingIds.length}
+                className="px-3 py-1.5 text-sm font-semibold bg-yellow-500 text-white rounded hover:bg-yellow-600 disabled:opacity-50">
+                {extracting ? '⚡ Извлича...' : `⚡ AI (${pendingIds.length})`}
+              </button>
+              <button onClick={() => setXmlModal(true)} disabled={!invoices.length}
+                className="px-3 py-1.5 text-sm font-semibold bg-blue-700 text-white rounded hover:bg-blue-800 disabled:opacity-50">
+                📥 XML
+              </button>
+              <button onClick={addManual}
+                className="px-3 py-1.5 text-sm font-semibold bg-white text-gray-700 border border-gray-300 rounded hover:bg-gray-50">
+                ➕ Ръчно
+              </button>
+            </div>
+          </div>
+
+          {/* Drag & drop zone */}
+          <div
+            onDragOver={e => { e.preventDefault(); setDragging(true) }}
+            onDragLeave={() => setDragging(false)}
+            onDrop={handleDrop}
+            onClick={() => fileRef.current.click()}
+            className={`border-2 border-dashed rounded-xl p-6 text-center cursor-pointer mb-4 transition-all
+              ${dragging ? 'border-blue-500 bg-blue-50' : 'border-gray-300 bg-white hover:border-blue-400 hover:bg-blue-50'}`}
+          >
+            <div className="text-3xl mb-1">📄</div>
+            <div className="text-sm text-gray-500">
+              <strong className="text-blue-700">Плъзнете PDF/изображения тук</strong> или кликнете за избор
+            </div>
+          </div>
+
+          {/* Summary bar */}
+          {invoices.length > 0 && (
+            <div className="flex gap-4 flex-wrap bg-white border border-gray-200 rounded-lg px-4 py-3 mb-4 text-sm shadow-sm">
+              <span className="font-semibold text-gray-700">{invoices.length} фактури</span>
+              <span className="text-gray-400">|</span>
+              {totalBGN > 0 && <span className="text-red-700 font-medium">BGN: {fmt(totalBGN)}</span>}
+              {totalEUR > 0 && <span className="text-orange-700 font-medium">EUR: {fmt(totalEUR)}</span>}
+              <span className="text-gray-400">|</span>
+              <span className={paidCount === invoices.length ? 'text-green-700' : 'text-gray-600'}>
+                {paidCount} платени / {invoices.length - paidCount} неплатени
+              </span>
+              {selected.length > 0 && <span className="ml-auto text-blue-600 font-medium">{selected.length} избрани</span>}
+            </div>
+          )}
+
+          {/* Invoice cards */}
+          {invoices.length === 0 ? (
+            <div className="text-center py-16 text-gray-400">
+              <div className="text-5xl mb-3">📂</div>
+              <div>Няма фактури. Качете PDF файлове горе.</div>
+            </div>
+          ) : (
+            invoices.map(inv => (
+              <InvoiceCard
+                key={inv.id}
+                inv={inv}
+                properties={properties}
+                counterparties={counterparties}
+                API={API}
+                onChange={() => { loadInvoices(); reloadCPs() }}
+                onDelete={deleteInvoice}
+                selected={selected.includes(inv.id)}
+                onSelect={toggleSelect}
+              />
+            ))
+          )}
+        </div>
+      )}
+
+      {/* ── КОНТРАГЕНТИ ── */}
+      {subTab === 'counterparties' && <CounterpartiesTab API={API} />}
+
+      {/* ── АНАЛИЗ ── */}
+      {subTab === 'analysis' && <AnalysisTab API={API} />}
+
+      {/* XML Modal */}
+      {xmlModal && (
+        <XmlModal
+          invoices={invoices.filter(i => i.status === 'done' || i.amount)}
+          selectedIds={selected}
+          API={API}
+          onClose={refresh => { setXmlModal(false); if(refresh) loadInvoices() }}
+        />
+      )}
+    </div>
+  )
+}
