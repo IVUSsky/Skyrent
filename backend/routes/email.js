@@ -1,5 +1,5 @@
 const express = require('express');
-const nodemailer = require('nodemailer');
+const { Resend } = require('resend');
 const fs = require('fs');
 const path = require('path');
 
@@ -8,43 +8,30 @@ const LOGO_PATH = path.join(__dirname, '../data/logos/sky_capital_logo.png');
 module.exports = function(db) {
   const router = express.Router();
 
-  function getSmtpSettings() {
-    const row = db.prepare("SELECT value FROM settings WHERE key = 'smtp'").get();
-    if (!row) return null;
-    try { return JSON.parse(row.value); } catch { return null; }
+  function getResend() {
+    const apiKey = process.env.RESEND_API_KEY;
+    if (!apiKey) return null;
+    return new Resend(apiKey);
   }
 
-  function createTransport(smtp) {
-    return nodemailer.createTransport({
-      host:   smtp.host,
-      port:   Number(smtp.port) || 587,
-      secure: smtp.port == 465,
-      auth:   { user: smtp.user, pass: smtp.pass },
-      tls:    { rejectUnauthorized: false },
-    });
+  function getFromEmail() {
+    return process.env.RESEND_FROM_EMAIL || 'onboarding@resend.dev';
   }
 
   function buildHtml(bodyHtml, senderName) {
-    const hasLogo = fs.existsSync(LOGO_PATH);
-    const logoTag = hasLogo
-      ? `<img src="cid:skylogo" alt="Sky Capital" style="height:44px;display:block;">`
-      : `<span style="color:#e8eaf2;font-size:16px;font-weight:bold;letter-spacing:2px;">SKY CAPITAL</span>`;
     return `<!DOCTYPE html><html><head><meta charset="utf-8"></head>
 <body style="margin:0;padding:0;background:#f0f2f8;font-family:Arial,sans-serif;">
   <table width="100%" cellpadding="0" cellspacing="0" style="background:#f0f2f8;padding:30px 0;">
     <tr><td align="center">
       <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:10px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.10);">
-        <!-- Header -->
         <tr><td style="background:#1a1a2e;padding:18px 32px;">
-          ${logoTag}
+          <span style="color:#e8eaf2;font-size:16px;font-weight:bold;letter-spacing:2px;">SKY CAPITAL</span>
         </td></tr>
-        <!-- Body -->
         <tr><td style="padding:32px 32px 24px;color:#1a1a2e;font-size:14px;line-height:1.7;">
           ${bodyHtml}
         </td></tr>
-        <!-- Footer -->
         <tr><td style="background:#e8eaf2;padding:14px 32px;text-align:center;font-size:11px;color:#6b7280;border-top:1px solid #d1d5db;">
-          <strong>${senderName || 'Sky Capital OOD'}</strong> &nbsp;|&nbsp; info@skycapital.pro &nbsp;|&nbsp; +359 888 64 64 20
+          <strong>${senderName || 'Sky Capital OOD'}</strong>
         </td></tr>
       </table>
     </td></tr>
@@ -52,21 +39,13 @@ module.exports = function(db) {
 </body></html>`;
   }
 
-  function logoAttachment() {
-    if (!fs.existsSync(LOGO_PATH)) return [];
-    return [{ filename: 'logo.png', path: LOGO_PATH, cid: 'skylogo' }];
-  }
-
-  // Test SMTP connection
+  // Test connection
   router.post('/test', async (req, res) => {
-    const smtp = getSmtpSettings();
-    if (!smtp) return res.status(400).json({ error: 'SMTP не е конфигуриран' });
+    const resend = getResend();
+    if (!resend) return res.status(400).json({ error: 'RESEND_API_KEY не е зададен в сървъра' });
     try {
-      const transporter = createTransport(smtp);
-      const timeout = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('Timeout — провери host/port или дали портът е блокиран')), 10000)
-      );
-      await Promise.race([transporter.verify(), timeout]);
+      const result = await resend.domains.list();
+      if (result.error) return res.status(400).json({ error: result.error.message });
       res.json({ ok: true });
     } catch (err) {
       res.status(400).json({ error: err.message });
@@ -78,8 +57,8 @@ module.exports = function(db) {
     const { to, tenant_name, property_address, amount, month_label, from_name } = req.body;
     if (!to) return res.status(400).json({ error: 'Липсва email адрес' });
 
-    const smtp = getSmtpSettings();
-    if (!smtp) return res.status(400).json({ error: 'SMTP не е конфигуриран в Настройки' });
+    const resend = getResend();
+    if (!resend) return res.status(400).json({ error: 'RESEND_API_KEY не е зададен' });
 
     const subject = `Напомняне за наем — ${month_label}`;
     const bodyHtml = `
@@ -92,15 +71,13 @@ module.exports = function(db) {
       <p style="margin-top:24px;">С уважение,<br><strong>${from_name || 'Sky Capital'}</strong></p>`;
 
     try {
-      const transporter = createTransport(smtp);
-      await transporter.sendMail({
-        from: `"${from_name || 'Sky Capital'}" <${smtp.user}>`,
+      const { error } = await resend.emails.send({
+        from: `${from_name || 'Sky Capital'} <${getFromEmail()}>`,
         to,
         subject,
-        text: `Уважаеми/а ${tenant_name},\n\nНапомняме Ви, че наемът за ${month_label} за имот ${property_address} в размер на ${amount} € все още не е постъпил.\n\nМоля наредете плащането.\n\nС уважение,\n${from_name || 'Sky Capital'}`,
         html: buildHtml(bodyHtml, from_name),
-        attachments: logoAttachment(),
       });
+      if (error) return res.status(500).json({ error: error.message });
       res.json({ ok: true });
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -112,12 +89,10 @@ module.exports = function(db) {
     const { tenants, month_label, from_name } = req.body;
     if (!tenants || !tenants.length) return res.status(400).json({ error: 'Няма наематели' });
 
-    const smtp = getSmtpSettings();
-    if (!smtp) return res.status(400).json({ error: 'SMTP не е конфигуриран в Настройки' });
+    const resend = getResend();
+    if (!resend) return res.status(400).json({ error: 'RESEND_API_KEY не е зададен' });
 
-    const transporter = createTransport(smtp);
     const results = [];
-
     for (const t of tenants) {
       if (!t.email) { results.push({ name: t.name, ok: false, error: 'Няма email' }); continue; }
       const bodyHtml = `
@@ -128,15 +103,13 @@ module.exports = function(db) {
         <p>Моля, наредете плащането възможно най-скоро.</p>
         <p style="margin-top:24px;">С уважение,<br><strong>${from_name || 'Sky Capital'}</strong></p>`;
       try {
-        await transporter.sendMail({
-          from: `"${from_name || 'Sky Capital'}" <${smtp.user}>`,
+        const { error } = await resend.emails.send({
+          from: `${from_name || 'Sky Capital'} <${getFromEmail()}>`,
           to: t.email,
           subject: `Напомняне за наем — ${month_label}`,
-          text: `Уважаеми/а ${t.name},\n\nНапомняме Ви, че наемът за ${month_label} за имот ${t.address} в размер на ${t.amount} € все още не е постъпил.\n\nС уважение,\n${from_name || 'Sky Capital'}`,
           html: buildHtml(bodyHtml, from_name),
-          attachments: logoAttachment(),
         });
-        results.push({ name: t.name, ok: true });
+        results.push({ name: t.name, ok: !error, error: error?.message });
       } catch (err) {
         results.push({ name: t.name, ok: false, error: err.message });
       }
