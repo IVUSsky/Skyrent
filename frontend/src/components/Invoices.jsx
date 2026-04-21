@@ -1,3 +1,4 @@
+import { apiFetch } from '../api'
 import React, { useState, useEffect, useCallback } from 'react'
 
 const BG_MONTHS = ['Януари','Февруари','Март','Април','Май','Юни','Юли','Август','Септември','Октомври','Ноември','Декември']
@@ -63,8 +64,8 @@ export default function Invoices({ API }) {
   const load = useCallback(() => {
     setLoading(true)
     Promise.all([
-      fetch(`${API}/api/invoices?${buildQuery()}`).then(r => r.json()),
-      fetch(`${API}/api/properties`).then(r => r.json()),
+      apiFetch(`${API}/api/invoices?${buildQuery()}`).then(r => r.json()),
+      apiFetch(`${API}/api/properties`).then(r => r.json()),
     ]).then(([inv, props]) => {
       setInvoices(Array.isArray(inv) ? inv : [])
       setProperties(props)
@@ -91,7 +92,7 @@ export default function Invoices({ API }) {
   })
 
   const toggleInvoiceEnabled = (propId, enabled) => {
-    fetch(`${API}/api/properties/${propId}`, {
+    apiFetch(`${API}/api/properties/${propId}`, {
       method: 'PUT', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ invoice_enabled: enabled ? 1 : 0 }),
     }).then(() => load())
@@ -105,7 +106,7 @@ export default function Invoices({ API }) {
   }
 
   const saveRecipient = () => {
-    fetch(`${API}/api/properties/${recipientModal.id}`, {
+    apiFetch(`${API}/api/properties/${recipientModal.id}`, {
       method: 'PUT', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ invoice_recipient: JSON.stringify(recipientForm) }),
     }).then(() => { setRecipientModal(null); load(); showToast('Данните са запазени') })
@@ -113,7 +114,7 @@ export default function Invoices({ API }) {
 
   const generate = (prop) => {
     setGenerating(prop.id)
-    fetch(`${API}/api/invoices/generate`, {
+    apiFetch(`${API}/api/invoices/generate`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ property_id: prop.id, month: filterMonth }),
     })
@@ -130,14 +131,14 @@ export default function Invoices({ API }) {
 
   const sendInvoice = (inv) => {
     setSending(inv.id)
-    fetch(`${API}/api/invoices/${inv.id}/send`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+    apiFetch(`${API}/api/invoices/${inv.id}/send`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
       .then(r => r.json())
       .then(d => { setSending(null); d.ok ? (showToast('Изпратена успешно'), load()) : showToast('Грешка: ' + d.error, 'error') })
       .catch(e => { setSending(null); showToast(e.message, 'error') })
   }
 
   const createCreditNote = () => {
-    fetch(`${API}/api/invoices/${cnModal.id}/credit-note`, {
+    apiFetch(`${API}/api/invoices/${cnModal.id}/credit-note`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(cnForm),
     })
@@ -148,7 +149,7 @@ export default function Invoices({ API }) {
 
   const deleteInvoice = (inv) => {
     if (!window.confirm(`Изтриване на ${inv.type === 'credit_note' ? 'кредитно известие' : 'фактура'} ${inv.invoice_number}?`)) return
-    fetch(`${API}/api/invoices/${inv.id}`, { method: 'DELETE' })
+    apiFetch(`${API}/api/invoices/${inv.id}`, { method: 'DELETE' })
       .then(() => { load(); showToast('Изтрито') })
   }
 

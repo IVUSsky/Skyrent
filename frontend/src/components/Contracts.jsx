@@ -1,3 +1,4 @@
+import { apiFetch } from '../api'
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 
 const STATUS_LABELS = {
@@ -298,9 +299,9 @@ export default function Contracts({ API }) {
     if (filterStatus) q.set('status', filterStatus)
     if (search) q.set('q', search)
     Promise.all([
-      fetch(`${API}/api/contracts?${q}`).then(r => r.json()),
-      fetch(`${API}/api/contracts/templates`).then(r => r.json()),
-      fetch(`${API}/api/properties`).then(r => r.json()),
+      apiFetch(`${API}/api/contracts?${q}`).then(r => r.json()),
+      apiFetch(`${API}/api/contracts/templates`).then(r => r.json()),
+      apiFetch(`${API}/api/properties`).then(r => r.json()),
     ]).then(([c, t, p]) => {
       setContracts(Array.isArray(c) ? c : [])
       setTemplates(Array.isArray(t) ? t : [])
@@ -346,14 +347,14 @@ export default function Contracts({ API }) {
 
   const deleteTemplate = (t) => {
     if (!window.confirm(`Изтриване на шаблон "${t.name}"?`)) return
-    fetch(`${API}/api/contracts/templates/${t.id}`, { method: 'DELETE' }).then(() => { load(); showToast('Изтрито') })
+    apiFetch(`${API}/api/contracts/templates/${t.id}`, { method: 'DELETE' }).then(() => { load(); showToast('Изтрито') })
   }
 
   const createContract = () => {
     if (!newForm.template_id) { showToast('Изберете шаблон', 'error'); return }
     if (!newForm.tenant_name) { showToast('Въведете наемател', 'error'); return }
     setCreating(true)
-    fetch(`${API}/api/contracts`, {
+    apiFetch(`${API}/api/contracts`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(newForm),
     })
@@ -368,7 +369,7 @@ export default function Contracts({ API }) {
 
   const activateContract = (c) => {
     if (!window.confirm(`Активиране ще обнови портфолиото с данните на наемателя. Продължи?`)) return
-    fetch(`${API}/api/contracts/${c.id}/activate`, { method: 'POST' })
+    apiFetch(`${API}/api/contracts/${c.id}/activate`, { method: 'POST' })
       .then(r => r.json())
       .then(d => { d.ok ? (showToast('Договорът е активен — портфолиото е обновено'), load()) : showToast('Грешка: ' + d.error, 'error') })
   }
@@ -376,14 +377,14 @@ export default function Contracts({ API }) {
   const sendContract = (c) => {
     if (!c.tenant_email) { showToast('Няма email адрес на наемателя', 'error'); return }
     setSending(c.id)
-    fetch(`${API}/api/contracts/${c.id}/send`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+    apiFetch(`${API}/api/contracts/${c.id}/send`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
       .then(r => r.json())
       .then(d => { setSending(null); d.ok ? (showToast('Договорът е изпратен'), load()) : showToast('Грешка: ' + d.error, 'error') })
       .catch(e => { setSending(null); showToast(e.message, 'error') })
   }
 
   const terminateContract = () => {
-    fetch(`${API}/api/contracts/${termModal.id}/terminate`, {
+    apiFetch(`${API}/api/contracts/${termModal.id}/terminate`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ end_date: termDate }),
     })
@@ -393,7 +394,7 @@ export default function Contracts({ API }) {
 
   const deleteContract = (c) => {
     if (!window.confirm(`Изтриване на договор ${c.contract_number}?`)) return
-    fetch(`${API}/api/contracts/${c.id}`, { method: 'DELETE' }).then(() => { load(); showToast('Изтрито') })
+    apiFetch(`${API}/api/contracts/${c.id}`, { method: 'DELETE' }).then(() => { load(); showToast('Изтрито') })
   }
 
   return (

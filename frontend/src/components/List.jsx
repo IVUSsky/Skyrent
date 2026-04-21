@@ -1,3 +1,4 @@
+import { apiFetch } from '../api'
 import React, { useState, useEffect } from 'react'
 
 const APARTMENT_TYPES = new Set(['1-стаен', '2-стаен', '3-стаен', 'Мезонет'])
@@ -29,7 +30,7 @@ export default function List({ API }) {
   const [calcPrice, setCalcPrice] = useState('')
 
   useEffect(() => {
-    fetch(`${API}/api/properties`)
+    apiFetch(`${API}/api/properties`)
       .then(r => r.json())
       .then(data => { setProperties(data); setLoading(false) })
       .catch(e => { setError(e.message); setLoading(false) })

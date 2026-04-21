@@ -1,3 +1,4 @@
+import { apiFetch } from '../api'
 import React, { useState, useEffect } from 'react'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell
@@ -55,10 +56,10 @@ export default function Dashboard({ API }) {
 
   useEffect(() => {
     Promise.all([
-      fetch(`${API}/api/metrics`).then(r => r.json()),
-      fetch(`${API}/api/import/monthly`).then(r => r.json()),
-      fetch(`${API}/api/properties`).then(r => r.json()),
-      fetch(`${API}/api/expenses/summary`).then(r => r.json()).catch(() => null),
+      apiFetch(`${API}/api/metrics`).then(r => r.json()),
+      apiFetch(`${API}/api/import/monthly`).then(r => r.json()),
+      apiFetch(`${API}/api/properties`).then(r => r.json()),
+      apiFetch(`${API}/api/expenses/summary`).then(r => r.json()).catch(() => null),
     ])
       .then(([m, mo, pr, es]) => {
         setMetrics(m)

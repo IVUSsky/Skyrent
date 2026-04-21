@@ -1,4 +1,5 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
+import Login from './components/Login'
 import Portfolio from './components/Portfolio'
 import List from './components/List'
 import Dashboard from './components/Dashboard'
@@ -31,6 +32,11 @@ const TABS = [
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard')
+  const [authenticated, setAuthenticated] = useState(!!localStorage.getItem('skyrent_token'))
+
+  if (!authenticated) {
+    return <Login API={API} onLogin={() => setAuthenticated(true)} />
+  }
 
   return (
     <div className="min-h-screen" style={{ background: '#f0f2f8' }}>
@@ -40,7 +46,7 @@ export default function App() {
           <div className="shrink-0" style={{ background: 'white', borderRadius: '7px', padding: '4px 10px', display: 'inline-flex', alignItems: 'center' }}>
             <img src="/sky_capital_logo.png" alt="Sky Capital" style={{ height: '42px', display: 'block' }} />
           </div>
-          <nav className="flex gap-1 flex-wrap">
+          <nav className="flex gap-1 flex-wrap items-center">
             {TABS.map(tab => (
               <button
                 key={tab.id}
@@ -56,6 +62,12 @@ export default function App() {
               </button>
             ))}
           </nav>
+          <button
+            onClick={() => { localStorage.removeItem('skyrent_token'); setAuthenticated(false) }}
+            className="ml-auto text-xs text-slate-400 hover:text-white px-2 py-1 rounded hover:bg-white/10 transition-colors"
+          >
+            Изход
+          </button>
         </div>
       </header>
 

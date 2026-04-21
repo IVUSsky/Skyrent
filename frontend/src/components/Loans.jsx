@@ -1,3 +1,4 @@
+import { apiFetch } from '../api'
 import React, { useState, useEffect } from 'react'
 
 const fmt = (n) => (n || 0).toLocaleString('bg-BG')
@@ -12,8 +13,8 @@ export default function Loans({ API }) {
   const [saving, setSaving] = useState(false)
 
   const load = () => Promise.all([
-    fetch(`${API}/api/loans`).then(r => r.json()),
-    fetch(`${API}/api/properties`).then(r => r.json()),
+    apiFetch(`${API}/api/loans`).then(r => r.json()),
+    apiFetch(`${API}/api/properties`).then(r => r.json()),
   ]).then(([l, p]) => { setLoans(l); setProperties(p); setLoading(false) })
    .catch(e => { setError(e.message); setLoading(false) })
 
@@ -32,7 +33,7 @@ export default function Loans({ API }) {
 
   const saveEdit = () => {
     setSaving(true)
-    fetch(`${API}/api/loans/${editingLoan.id}`, {
+    apiFetch(`${API}/api/loans/${editingLoan.id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(editForm),

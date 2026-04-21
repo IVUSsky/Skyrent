@@ -1,3 +1,4 @@
+import { apiFetch } from '../api'
 import React, { useState, useEffect } from 'react'
 
 export default function Settings({ API }) {
@@ -19,7 +20,7 @@ export default function Settings({ API }) {
   }
 
   useEffect(() => {
-    fetch(`${API}/api/settings`)
+    apiFetch(`${API}/api/settings`)
       .then(r => r.json())
       .then(data => {
         setSettings(data)
@@ -67,7 +68,7 @@ export default function Settings({ API }) {
     })
 
     setSaving(true)
-    fetch(`${API}/api/settings`, {
+    apiFetch(`${API}/api/settings`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ tenant_map, expense_cats: expenseCats, smtp, issuer }),
@@ -286,7 +287,7 @@ export default function Settings({ API }) {
             disabled={testingSmtp || !smtp.host || !smtp.user || !smtp.pass}
             onClick={() => {
               setTestingSmtp(true)
-              fetch(`${API}/api/email/test`, { method: 'POST' })
+              apiFetch(`${API}/api/email/test`, { method: 'POST' })
                 .then(r => r.json())
                 .then(d => { setTestingSmtp(false); d.ok ? showToast('Връзката е успешна!') : showToast('Грешка: ' + d.error, 'error') })
                 .catch(e => { setTestingSmtp(false); showToast('Грешка: ' + e.message, 'error') })

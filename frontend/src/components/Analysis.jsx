@@ -1,3 +1,4 @@
+import { apiFetch } from '../api'
 import React, { useState, useEffect } from 'react'
 
 const fmt = (n, d = 0) => n != null && !isNaN(n)
@@ -71,10 +72,10 @@ export default function Analysis({ API }) {
 
   useEffect(() => {
     Promise.all([
-      fetch(`${API}/api/properties`).then(r => r.json()),
-      fetch(`${API}/api/metrics`).then(r => r.json()),
-      fetch(`${API}/api/loans`).then(r => r.json()).catch(() => []),
-      fetch(`${API}/api/expenses/summary`).then(r => r.json()).catch(() => null),
+      apiFetch(`${API}/api/properties`).then(r => r.json()),
+      apiFetch(`${API}/api/metrics`).then(r => r.json()),
+      apiFetch(`${API}/api/loans`).then(r => r.json()).catch(() => []),
+      apiFetch(`${API}/api/expenses/summary`).then(r => r.json()).catch(() => null),
     ])
       .then(([p, m, l, es]) => {
         setProperties(p)

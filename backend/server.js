@@ -150,6 +150,13 @@ async function main() {
   )`);
   console.log('tenant_history table ready');
 
+  // Auth (public)
+  app.use('/api/auth', require('./routes/auth')());
+
+  // Protected routes
+  const authMiddleware = require('./middleware/auth');
+  app.use('/api', authMiddleware);
+
   // Routes
   app.use('/api/properties', require('./routes/properties')(db));
   app.use('/api/loans',      require('./routes/loans')(db));

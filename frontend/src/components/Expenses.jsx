@@ -1,3 +1,4 @@
+import { apiFetch } from '../api'
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 
 const CATEGORIES = ['ток','вода','ремонт','застраховка','такса','счетоводство','друго']
@@ -104,7 +105,7 @@ function InvoiceCard({ inv, properties, counterparties, API, onChange, onDelete,
 
   const save = () => {
     setSaving(true)
-    fetch(`${API}/api/expenses/${inv.id}`, {
+    apiFetch(`${API}/api/expenses/${inv.id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ...form, amount: Number(form.amount)||0, property_id: form.property_id||null }),
@@ -114,7 +115,7 @@ function InvoiceCard({ inv, properties, counterparties, API, onChange, onDelete,
   const togglePaid = () => {
     const newPaid = !form.paid
     upd('paid', newPaid)
-    fetch(`${API}/api/expenses/${inv.id}/paid`, {
+    apiFetch(`${API}/api/expenses/${inv.id}/paid`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ paid: newPaid, paid_date: newPaid ? new Date().toISOString().slice(0,10) : null }),
@@ -303,7 +304,7 @@ function XmlModal({ invoices, selectedIds, onClose, API }) {
     if (!ids.length) return
     setExporting(true)
     try {
-      const resp = await fetch(`${API}/api/expenses/export-xml`, {
+      const resp = await apiFetch(`${API}/api/expenses/export-xml`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ids, payer_iban: payerIban, exec_date: execDate, format }),
@@ -391,17 +392,17 @@ function CounterpartiesTab({ API }) {
   const [form, setForm] = useState({ name:'', iban:'', bic:'', currency:'BGN' })
   const [search, setSearch] = useState('')
 
-  const load = () => fetch(`${API}/api/counterparties`).then(r => r.json()).then(setCps)
+  const load = () => apiFetch(`${API}/api/counterparties`).then(r => r.json()).then(setCps)
   useEffect(() => { load() }, [])
 
   const add = () => {
     if (!form.name || !form.iban) return
-    fetch(`${API}/api/counterparties`, {
+    apiFetch(`${API}/api/counterparties`, {
       method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(form)
     }).then(() => { setForm({ name:'', iban:'', bic:'', currency:'BGN' }); load() })
   }
 
-  const del = id => fetch(`${API}/api/counterparties/${id}`, { method:'DELETE' }).then(load)
+  const del = id => apiFetch(`${API}/api/counterparties/${id}`, { method:'DELETE' }).then(load)
 
   const filtered = cps.filter(c =>
     !search || c.name.toLowerCase().includes(search.toLowerCase()) || c.iban.includes(search.toUpperCase())
@@ -498,7 +499,7 @@ function AnalysisTab({ API }) {
   const load = useCallback(() => {
     setLoading(true)
     const q = month ? `?month=${month}` : ''
-    fetch(`${API}/api/expenses/summary${q}`)
+    apiFetch(`${API}/api/expenses/summary${q}`)
       .then(r => r.json())
       .then(d => { setSummary(d); setLoading(false) })
       .catch(() => setLoading(false))
@@ -631,19 +632,19 @@ export default function Expenses({ API }) {
     if (filterMonth) params.set('month', filterMonth)
     if (filterCat)   params.set('category', filterCat)
     if (filterPaid)  params.set('paid', filterPaid)
-    return fetch(`${API}/api/expenses?${params}`).then(r => r.json()).then(setInvoices)
+    return apiFetch(`${API}/api/expenses?${params}`).then(r => r.json()).then(setInvoices)
   }, [API, filterMonth, filterCat, filterPaid])
 
   useEffect(() => {
     Promise.all([
-      fetch(`${API}/api/properties`).then(r => r.json()),
-      fetch(`${API}/api/counterparties`).then(r => r.json()),
+      apiFetch(`${API}/api/properties`).then(r => r.json()),
+      apiFetch(`${API}/api/counterparties`).then(r => r.json()),
     ]).then(([pr, cp]) => { setProperties(pr); setCPs(cp) })
   }, [API])
 
   useEffect(() => { loadInvoices() }, [loadInvoices])
 
-  const reloadCPs = () => fetch(`${API}/api/counterparties`).then(r => r.json()).then(setCPs)
+  const reloadCPs = () => apiFetch(`${API}/api/counterparties`).then(r => r.json()).then(setCPs)
 
   // Upload files
   const uploadFiles = async (files) => {
@@ -652,7 +653,7 @@ export default function Expenses({ API }) {
     const fd = new FormData()
     for (const f of files) fd.append('files', f)
     try {
-      const r = await fetch(`${API}/api/expenses/upload`, { method: 'POST', body: fd })
+      const r = await apiFetch(`${API}/api/expenses/upload`, { method: 'POST', body: fd })
       await r.json()
       await loadInvoices()
     } catch(e) { alert('Upload error: ' + e.message) }
@@ -670,7 +671,7 @@ export default function Expenses({ API }) {
     if (!ids.length) { alert('Няма нови фактури за извличане'); return }
     setExtracting(true)
     try {
-      const r = await fetch(`${API}/api/expenses/extract-ai`, {
+      const r = await apiFetch(`${API}/api/expenses/extract-ai`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids })
       })
       const data = await r.json()
@@ -682,7 +683,7 @@ export default function Expenses({ API }) {
 
   const deleteInvoice = async (id) => {
     if (!confirm('Изтриване на фактурата?')) return
-    await fetch(`${API}/api/expenses/${id}`, { method: 'DELETE' })
+    await apiFetch(`${API}/api/expenses/${id}`, { method: 'DELETE' })
     setSelected(s => s.filter(x => x !== id))
     loadInvoices()
   }
@@ -694,7 +695,7 @@ export default function Expenses({ API }) {
   const saveManual = () => {
     if (!manualForm.amount) return alert('Сумата е задължителна')
     setManualSaving(true)
-    fetch(`${API}/api/expenses/manual`, {
+    apiFetch(`${API}/api/expenses/manual`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ...manualForm, amount: Number(manualForm.amount), property_id: manualForm.property_id || null }),

@@ -1,3 +1,4 @@
+import { apiFetch } from '../api'
 import React, { useState, useEffect, useCallback } from 'react'
 
 const fmt = (n) => (n || 0).toLocaleString('bg-BG', { minimumFractionDigits: 0, maximumFractionDigits: 0 })
@@ -44,7 +45,7 @@ export default function Tenants({ API }) {
 
   const load = useCallback(() => {
     setLoading(true)
-    fetch(`${API}/api/properties/rent-status?month=${month}`)
+    apiFetch(`${API}/api/properties/rent-status?month=${month}`)
       .then(r => r.json())
       .then(d => { setData(d); setLoading(false) })
       .catch(e => { setError(e.message); setLoading(false) })
@@ -60,7 +61,7 @@ export default function Tenants({ API }) {
 
   const saveContact = (propId) => {
     setSavingContact(true)
-    fetch(`${API}/api/properties/${propId}`, {
+    apiFetch(`${API}/api/properties/${propId}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(contactForm),
@@ -78,7 +79,7 @@ export default function Tenants({ API }) {
 
   const saveMarkPaid = (propId) => {
     setSavingMark(true)
-    fetch(`${API}/api/properties/${propId}/mark-paid`, {
+    apiFetch(`${API}/api/properties/${propId}/mark-paid`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ month, ...markForm, amount: Number(markForm.amount) || 0 }),
@@ -89,14 +90,14 @@ export default function Tenants({ API }) {
   }
 
   const unmarkPaid = (propId) => {
-    fetch(`${API}/api/properties/${propId}/mark-paid?month=${month}`, { method: 'DELETE' })
+    apiFetch(`${API}/api/properties/${propId}/mark-paid?month=${month}`, { method: 'DELETE' })
       .then(r => r.json())
       .then(() => { load(); showToast('Плащането е премахнато') })
       .catch(e => showToast('Грешка: ' + e.message, 'error'))
   }
 
   const sendReminder = (prop) => {
-    fetch(`${API}/api/email/reminder`, {
+    apiFetch(`${API}/api/email/reminder`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -118,7 +119,7 @@ export default function Tenants({ API }) {
   const sendReminderAll = () => {
     const unpaidWithEmail = (data?.properties || []).filter(p => !p.is_paid && p.email)
     if (!unpaidWithEmail.length) { showToast('Няма наематели с email адрес', 'error'); return }
-    fetch(`${API}/api/email/reminder-bulk`, {
+    apiFetch(`${API}/api/email/reminder-bulk`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

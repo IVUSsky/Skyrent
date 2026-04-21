@@ -1,3 +1,4 @@
+import { apiFetch } from '../api'
 import React, { useState, useEffect } from 'react'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine
@@ -20,7 +21,7 @@ function TenantHistory({ propertyId, API }) {
   const [form, setForm] = useState({ tenant_name:'', start_date:'', end_date:'', monthly_rent:'', deposit:'', conditions:'', notes:'' })
   const [saving, setSaving] = useState(false)
 
-  const load = () => fetch(`${API}/api/properties/${propertyId}/tenants`)
+  const load = () => apiFetch(`${API}/api/properties/${propertyId}/tenants`)
     .then(r => r.json()).then(setHistory).catch(() => setHistory([]))
 
   useEffect(() => { if (propertyId) load() }, [propertyId])
@@ -28,7 +29,7 @@ function TenantHistory({ propertyId, API }) {
   const save = () => {
     if (!form.tenant_name) return alert('Името на наемателя е задължително')
     setSaving(true)
-    fetch(`${API}/api/properties/${propertyId}/tenants`, {
+    apiFetch(`${API}/api/properties/${propertyId}/tenants`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(form),
@@ -40,7 +41,7 @@ function TenantHistory({ propertyId, API }) {
 
   const del = (tid) => {
     if (!confirm('Изтриване на записа?')) return
-    fetch(`${API}/api/properties/tenants/${tid}`, { method: 'DELETE' }).then(load)
+    apiFetch(`${API}/api/properties/tenants/${tid}`, { method: 'DELETE' }).then(load)
   }
 
   return (
@@ -149,7 +150,7 @@ function PropertyChart({ property, API }) {
   useEffect(() => {
     if (!property) return
     setLoading(true)
-    fetch(`${API}/api/properties/${property.id}/monthly`)
+    apiFetch(`${API}/api/properties/${property.id}/monthly`)
       .then(r => r.json())
       .then(rows => {
         setData(rows.map(r => ({ ...r, месец: fmtMonth(r.месец), нетно: (r.наем || 0) - (r.разходи || 0) })))
@@ -221,7 +222,7 @@ export default function History({ API }) {
   const [activeTab, setActiveTab] = useState('chart')
 
   useEffect(() => {
-    fetch(`${API}/api/properties`)
+    apiFetch(`${API}/api/properties`)
       .then(r => r.json())
       .then(data => {
         setProperties(data)

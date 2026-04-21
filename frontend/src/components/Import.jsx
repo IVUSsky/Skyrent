@@ -1,3 +1,4 @@
+import { apiFetch } from '../api'
 import React, { useState, useRef, useCallback, useEffect } from 'react'
 
 const CATEGORY_STYLES = {
@@ -33,10 +34,10 @@ export default function Import({ API }) {
   const fileInputRef = useRef()
 
   const loadUnmatched = () =>
-    fetch(`${API}/api/import/unmatched`).then(r => r.json()).then(setUnmatched).catch(() => {})
+    apiFetch(`${API}/api/import/unmatched`).then(r => r.json()).then(setUnmatched).catch(() => {})
 
   useEffect(() => {
-    fetch(`${API}/api/properties`).then(r => r.json()).then(setProperties).catch(() => {})
+    apiFetch(`${API}/api/properties`).then(r => r.json()).then(setProperties).catch(() => {})
     loadUnmatched()
   }, [API])
 
@@ -46,7 +47,7 @@ export default function Import({ API }) {
     setUnmatchedSaving(true)
     Promise.all(
       pairs.map(([id, pid]) =>
-        fetch(`${API}/api/import/transactions/${id}`, {
+        apiFetch(`${API}/api/import/transactions/${id}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ property_id: Number(pid) }),
@@ -76,7 +77,7 @@ export default function Import({ API }) {
     const formData = new FormData()
     formData.append('file', file)
 
-    fetch(`${API}/api/import/parse`, { method: 'POST', body: formData })
+    apiFetch(`${API}/api/import/parse`, { method: 'POST', body: formData })
       .then(r => r.json())
       .then(data => {
         if (data.error) throw new Error(data.error)
@@ -111,7 +112,7 @@ export default function Import({ API }) {
   const handleSave = () => {
     if (!transactions.length) return
     setSaving(true)
-    fetch(`${API}/api/import/save`, {
+    apiFetch(`${API}/api/import/save`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ filename: fileName, transactions }),

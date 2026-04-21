@@ -1,3 +1,4 @@
+import { apiFetch } from '../api'
 import React, { useState, useEffect } from 'react'
 
 const STATUS_COLORS = {
@@ -22,7 +23,7 @@ export default function Portfolio({ API }) {
 
   const load = () => {
     setLoading(true)
-    fetch(`${API}/api/properties`)
+    apiFetch(`${API}/api/properties`)
       .then(r => r.json())
       .then(data => { setProperties(data); setLoading(false) })
       .catch(e => { setError(e.message); setLoading(false) })
@@ -51,7 +52,7 @@ export default function Portfolio({ API }) {
   const saveNew = () => {
     if (!newForm.адрес) return alert('Адресът е задължителен')
     setSaving(true)
-    fetch(`${API}/api/properties`, {
+    apiFetch(`${API}/api/properties`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -75,7 +76,7 @@ export default function Portfolio({ API }) {
   const saveEdit = () => {
     setSaving(true)
     console.log('Saving property:', editingProp.id, JSON.stringify(editForm))
-    fetch(`${API}/api/properties/${editingProp.id}`, {
+    apiFetch(`${API}/api/properties/${editingProp.id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
