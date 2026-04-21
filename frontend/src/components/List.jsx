@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react'
 const APARTMENT_TYPES = new Set(['1-стаен', '2-стаен', '3-стаен', 'Мезонет'])
 const GARAGE_TYPES = new Set(['Гараж'])
 const PARKING_TYPES = new Set(['Паркомясто'])
+const BASEMENT_TYPES = new Set(['Мазе'])
 
 const fmt = (n) => (n || 0).toLocaleString('bg-BG')
 
@@ -17,6 +18,7 @@ const TYPE_GROUPS = [
   { key: 'apartment', label: 'Апартаменти', types: APARTMENT_TYPES },
   { key: 'garage', label: 'Гаражи', types: GARAGE_TYPES },
   { key: 'parking', label: 'Паркоместа', types: PARKING_TYPES },
+  { key: 'basement', label: 'Мазета', types: BASEMENT_TYPES },
 ]
 
 export default function List({ API }) {
@@ -38,6 +40,7 @@ export default function List({ API }) {
   const apartments = activeProps.filter(p => APARTMENT_TYPES.has(p['тип']))
   const garages = activeProps.filter(p => GARAGE_TYPES.has(p['тип']))
   const parkings = activeProps.filter(p => PARKING_TYPES.has(p['тип']))
+  const basements = activeProps.filter(p => BASEMENT_TYPES.has(p['тип']))
 
   const kpiCards = [
     {
@@ -61,12 +64,20 @@ export default function List({ API }) {
       color: 'purple',
       icon: '🅿️',
     },
+    {
+      label: 'Мазета',
+      count: basements.length,
+      rent: basements.reduce((s, p) => s + (p['наем'] || 0), 0),
+      color: 'stone',
+      icon: '🏚️',
+    },
   ]
 
   const colorMap = {
     blue: { card: 'bg-blue-50 border-blue-200', text: 'text-blue-700', badge: 'bg-blue-600' },
     green: { card: 'bg-green-50 border-green-200', text: 'text-green-700', badge: 'bg-green-600' },
     purple: { card: 'bg-purple-50 border-purple-200', text: 'text-purple-700', badge: 'bg-purple-600' },
+    stone: { card: 'bg-stone-50 border-stone-200', text: 'text-stone-700', badge: 'bg-stone-600' },
   }
 
   const currentGroup = TYPE_GROUPS.find(g => g.key === activeGroup)

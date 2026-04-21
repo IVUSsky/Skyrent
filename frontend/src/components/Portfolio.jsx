@@ -33,6 +33,8 @@ export default function Portfolio({ API }) {
   const openEdit = (prop) => {
     setEditingProp(prop)
     setEditForm({
+      адрес: prop['адрес'] || '',
+      район: prop['район'] || '',
       наем: prop['наем'] || 0,
       наемател: prop['наемател'] || '',
       статус: prop['статус'] || '✅',
@@ -77,6 +79,8 @@ export default function Portfolio({ API }) {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        адрес: editForm.адрес,
+        район: editForm.район,
         наем: Number(editForm.наем) || 0,
         наемател: editForm.наемател,
         статус: editForm.статус,
@@ -246,6 +250,26 @@ export default function Portfolio({ API }) {
 
             {/* Scrollable fields */}
             <div className="px-6 py-4 space-y-4 overflow-y-auto flex-1">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Адрес</label>
+                <input
+                  type="text"
+                  value={editForm.адрес}
+                  onChange={e => setEditForm(f => ({ ...f, адрес: e.target.value }))}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Адрес на имота"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Район</label>
+                <input
+                  type="text"
+                  value={editForm.район}
+                  onChange={e => setEditForm(f => ({ ...f, район: e.target.value }))}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Район"
+                />
+              </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Статус</label>
                 <select

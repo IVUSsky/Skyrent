@@ -109,6 +109,8 @@ module.exports = function(db) {
       }
 
       // Merge - ако ново поле липсва, пази старото
+      const адрес      = body.адрес      !== undefined ? body.адрес      : current.адрес;
+      const район      = body.район      !== undefined ? body.район      : current.район;
       const наем       = body.наем       !== undefined ? body.наем       : current.наем;
       const наемател   = body.наемател   !== undefined ? body.наемател   : current.наемател;
       const статус     = body.статус     !== undefined ? body.статус     : current.статус;
@@ -124,10 +126,10 @@ module.exports = function(db) {
 
       db.prepare(`
         UPDATE properties
-        SET наем=?, наемател=?, статус=?, market_val=?, тип=?, площ=?, покупна=?, ремонт=?,
+        SET адрес=?, район=?, наем=?, наемател=?, статус=?, market_val=?, тип=?, площ=?, покупна=?, ремонт=?,
             email=?, телефон=?, invoice_enabled=?, invoice_recipient=?, updated_at=CURRENT_TIMESTAMP
         WHERE id=?
-      `).run(наем, наемател, статус, market_val, тип, площ, покупна, ремонт, email, телефон, invoice_enabled, invoice_recipient, id);
+      `).run(адрес, район, наем, наемател, статус, market_val, тип, площ, покупна, ремонт, email, телефон, invoice_enabled, invoice_recipient, id);
 
       const updated = db.prepare('SELECT * FROM properties WHERE id = ?').get(id);
       console.log('Saved тип:', updated.тип, '| покупна:', updated.покупна, '| ремонт:', updated.ремонт);
