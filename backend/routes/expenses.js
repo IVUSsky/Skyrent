@@ -133,6 +133,36 @@ module.exports = function(db) {
     res.json({ uploaded: inserted });
   });
 
+  // POST /manual — ръчен разход (в брой / касова бележка)
+  expRouter.post('/manual', (req, res) => {
+    try {
+      const { supplier_name, amount, currency, reason, property_id, expense_category, месец, payment_type, notes } = req.body;
+      if (!amount || !payment_type) return res.status(400).json({ error: 'amount и payment_type са задължителни' });
+      const now = new Date();
+      const ефМесец = месец || `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+      const r = db.prepare(`
+        INSERT INTO expense_invoices
+          (filename, status, supplier_name, amount, currency, reason, property_id, expense_category, месец, payment_type, ai_notes, paid, paid_date)
+        VALUES (?, 'done', ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+      `).run(
+        payment_type === 'в брой' ? '💵 В брой' : '🧾 Касова бележка',
+        supplier_name || '',
+        Number(amount),
+        currency || 'EUR',
+        reason || '',
+        property_id || null,
+        expense_category || 'друго',
+        ефМесец,
+        payment_type,
+        notes || null,
+        now.toISOString().slice(0,10)
+      );
+      res.status(201).json({ id: r.lastInsertRowid, ok: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // POST /extract-ai  { ids: [1,2,3] }
   expRouter.post('/extract-ai', async (req, res) => {
     const { ids } = req.body || {};

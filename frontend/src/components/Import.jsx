@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from 'react'
+import React, { useState, useRef, useCallback, useEffect } from 'react'
 
 const CATEGORY_STYLES = {
   'наем':         'bg-green-100 text-green-800 border-green-200',
@@ -25,7 +25,12 @@ export default function Import({ API }) {
   const [showMatchModal, setShowMatchModal] = useState(false)
   const [matchAssignments, setMatchAssignments] = useState({})
   const [filterCat, setFilterCat] = useState('all')
+  const [properties, setProperties] = useState([])
   const fileInputRef = useRef()
+
+  useEffect(() => {
+    fetch(`${API}/api/properties`).then(r => r.json()).then(setProperties).catch(() => {})
+  }, [API])
 
   const showToast = (msg, type = 'success') => {
     setToast({ msg, type })
@@ -186,13 +191,16 @@ export default function Import({ API }) {
                 <div key={i} className="border border-gray-200 rounded-lg p-3">
                   <div className="font-medium text-gray-800 text-sm">{ut.контрагент}</div>
                   <div className="text-xs text-gray-500 mb-2 truncate">{ut.основание}</div>
-                  <input
-                    type="number"
-                    placeholder="Имот ID (опционално)"
+                  <select
                     value={matchAssignments[ut.контрагент] || ''}
                     onChange={e => setMatchAssignments(prev => ({ ...prev, [ut.контрагент]: e.target.value }))}
                     className="border border-gray-300 rounded px-2 py-1 text-sm w-full focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  />
+                  >
+                    <option value="">— Избери имот —</option>
+                    {properties.map(p => (
+                      <option key={p.id} value={p.id}>#{p.id} {p['адрес']} ({p['тип']})</option>
+                    ))}
+                  </select>
                 </div>
               ))}
             </div>

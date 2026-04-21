@@ -132,7 +132,16 @@ function InvoiceCard({ inv, properties, counterparties, API, onChange, onDelete,
         <div className="flex items-center gap-2 min-w-0">
           <input type="checkbox" checked={selected} onChange={e => onSelect(inv.id, e.target.checked)}
             className="w-4 h-4 rounded text-blue-600 flex-shrink-0"/>
-          <span className="text-sm font-semibold text-gray-700 truncate">📄 {inv.filename}</span>
+          <span className="text-sm font-semibold text-gray-700 truncate">
+            {inv.payment_type === 'в брой' ? '💵' : inv.payment_type === 'касова бележка' ? '🧾' : inv.payment_type === 'банков_импорт' ? '🏦' : '📄'} {inv.filename}
+          </span>
+          {inv.payment_type && inv.payment_type !== 'фактура' && (
+            <span className={`text-xs px-1.5 py-0.5 rounded font-medium flex-shrink-0 ${
+              inv.payment_type === 'в брой' ? 'bg-green-100 text-green-700' :
+              inv.payment_type === 'касова бележка' ? 'bg-orange-100 text-orange-700' :
+              'bg-blue-100 text-blue-700'
+            }`}>{inv.payment_type}</span>
+          )}
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
           <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_COLOR[inv.status]||STATUS_COLOR.pending}`}>
@@ -609,6 +618,9 @@ export default function Expenses({ API }) {
   const [filterPaid, setFilterPaid] = useState('')
   const [selected, setSelected]     = useState([])
   const [xmlModal, setXmlModal]     = useState(false)
+  const [manualModal, setManualModal] = useState(false)
+  const [manualForm, setManualForm] = useState({ supplier_name:'', amount:'', currency:'EUR', reason:'', property_id:'', expense_category:'друго', месец: new Date().toISOString().slice(0,7), payment_type:'в брой', notes:'' })
+  const [manualSaving, setManualSaving] = useState(false)
   const [dragging, setDragging]     = useState(false)
   const [uploading, setUploading]   = useState(false)
   const [extracting, setExtracting] = useState(false)
@@ -679,17 +691,17 @@ export default function Expenses({ API }) {
     setSelected(s => checked ? [...s, id] : s.filter(x => x !== id))
   }
 
-  const addManual = () => {
-    const месец = new Date().toISOString().slice(0,7)
-    fetch(`${API}/api/expenses/upload`, { method: 'POST', body: new FormData() })
-      .catch(() => {})
-    // Insert via POST with blank data workaround — use PUT after fake upload
-    // Simpler: POST to a /manual endpoint... but we don't have one.
-    // Just create a dummy FormData with a fake blob
-    const fd = new FormData()
-    fd.append('files', new File([''], 'Ръчен запис.pdf', { type: 'application/pdf' }))
-    fetch(`${API}/api/expenses/upload`, { method: 'POST', body: fd })
-      .then(r => r.json()).then(() => loadInvoices())
+  const saveManual = () => {
+    if (!manualForm.amount) return alert('Сумата е задължителна')
+    setManualSaving(true)
+    fetch(`${API}/api/expenses/manual`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...manualForm, amount: Number(manualForm.amount), property_id: manualForm.property_id || null }),
+    })
+      .then(r => r.json())
+      .then(() => { setManualSaving(false); setManualModal(false); loadInvoices() })
+      .catch(e => { setManualSaving(false); alert('Грешка: ' + e.message) })
   }
 
   // Summary totals
@@ -747,9 +759,9 @@ export default function Expenses({ API }) {
                 className="px-3 py-1.5 text-sm font-semibold bg-blue-700 text-white rounded hover:bg-blue-800 disabled:opacity-50">
                 📥 XML
               </button>
-              <button onClick={addManual}
-                className="px-3 py-1.5 text-sm font-semibold bg-white text-gray-700 border border-gray-300 rounded hover:bg-gray-50">
-                ➕ Ръчно
+              <button onClick={() => setManualModal(true)}
+                className="px-3 py-1.5 text-sm font-semibold bg-green-600 text-white rounded hover:bg-green-700">
+                💵 В брой / Касова
               </button>
             </div>
           </div>
@@ -813,6 +825,93 @@ export default function Expenses({ API }) {
 
       {/* ── АНАЛИЗ ── */}
       {subTab === 'analysis' && <AnalysisTab API={API} />}
+
+      {/* Manual Cash/Receipt Modal */}
+      {manualModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md flex flex-col" style={{ maxHeight: '90vh' }}>
+            <div className="px-6 py-4 border-b flex justify-between items-center flex-shrink-0">
+              <h3 className="font-bold text-gray-900 text-lg">Добави разход</h3>
+              <button onClick={() => setManualModal(false)} className="text-gray-400 hover:text-gray-600 text-xl">×</button>
+            </div>
+            <div className="px-6 py-4 space-y-3 overflow-y-auto flex-1">
+              {/* Payment type */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Тип разход *</label>
+                <div className="flex gap-2">
+                  {['в брой', 'касова бележка'].map(t => (
+                    <button key={t} onClick={() => setManualForm(f => ({ ...f, payment_type: t }))}
+                      className={`flex-1 py-2 text-sm font-semibold rounded-lg border-2 transition-colors ${
+                        manualForm.payment_type === t
+                          ? t === 'в брой' ? 'border-green-500 bg-green-50 text-green-700' : 'border-orange-500 bg-orange-50 text-orange-700'
+                          : 'border-gray-200 text-gray-500 hover:border-gray-300'
+                      }`}>
+                      {t === 'в брой' ? '💵 В брой' : '🧾 Касова бележка'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Доставчик / Описание</label>
+                <input type="text" value={manualForm.supplier_name}
+                  onChange={e => setManualForm(f => ({ ...f, supplier_name: e.target.value }))}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                  placeholder="напр. Строителен магазин"/>
+              </div>
+              <div className="flex gap-2">
+                <div className="flex-1">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Сума *</label>
+                  <input type="number" step="0.01" min="0" value={manualForm.amount}
+                    onChange={e => setManualForm(f => ({ ...f, amount: e.target.value }))}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                    placeholder="0.00"/>
+                </div>
+                <div className="w-24">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Валута</label>
+                  <select value={manualForm.currency} onChange={e => setManualForm(f => ({ ...f, currency: e.target.value }))}
+                    className="w-full border border-gray-300 rounded-lg px-2 py-2 text-sm focus:outline-none">
+                    {CURRENCIES.map(c => <option key={c}>{c}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Категория</label>
+                <select value={manualForm.expense_category} onChange={e => setManualForm(f => ({ ...f, expense_category: e.target.value }))}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none">
+                  {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Имот</label>
+                <select value={manualForm.property_id} onChange={e => setManualForm(f => ({ ...f, property_id: e.target.value }))}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none">
+                  <option value="">— общ разход —</option>
+                  {properties.map(p => <option key={p.id} value={p.id}>#{p.id} {p['адрес']}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Месец</label>
+                <input type="month" value={manualForm.месец} onChange={e => setManualForm(f => ({ ...f, месец: e.target.value }))}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none"/>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Основание / Бележки</label>
+                <input type="text" value={manualForm.reason} onChange={e => setManualForm(f => ({ ...f, reason: e.target.value }))}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+                  placeholder="напр. Боя за стая, ремонт баня..."/>
+              </div>
+            </div>
+            <div className="flex-shrink-0 px-6 py-4 border-t flex justify-end gap-2">
+              <button onClick={() => setManualModal(false)}
+                className="px-4 py-2 text-sm text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg">Отказ</button>
+              <button onClick={saveManual} disabled={manualSaving}
+                className="px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 disabled:opacity-50 rounded-lg">
+                {manualSaving ? 'Запазва...' : 'Добави разход'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* XML Modal */}
       {xmlModal && (

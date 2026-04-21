@@ -4,3 +4,7 @@ node_modules/
 storage/
 dist/
 .DS_Store
+
+# Uploaded/generated files
+backend/data/contracts/
+backend/data/invoices/

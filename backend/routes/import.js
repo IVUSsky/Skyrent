@@ -179,11 +179,17 @@ module.exports = function(db) {
         VALUES (@session_id, @дата, @контрагент, @основание, @сума, @operation, @категория, @property_id, @месец)
       `);
 
+      const insertExpense = db.prepare(`
+        INSERT INTO expense_invoices
+          (filename, status, supplier_name, amount, currency, reason, property_id, expense_category, месец, payment_type, bank_tx_id, paid, paid_date)
+        VALUES (?, 'done', ?, ?, 'EUR', ?, ?, ?, ?, 'банков_импорт', ?, 1, ?)
+      `);
+
       const doImport = db.transaction(() => {
         const sessionResult = insertSession.run(filename || 'upload.xlsx', transactions.length, month_from, month_to);
         const session_id = sessionResult.lastInsertRowid;
         for (const tx of transactions) {
-          insertTx.run({
+          const txResult = insertTx.run({
             session_id,
             дата: tx.дата || null,
             контрагент: tx.контрагент || '',
@@ -194,6 +200,21 @@ module.exports = function(db) {
             property_id: tx.property_id || null,
             месец: tx.месец || null,
           });
+
+          // Дт разходи → expense_invoices
+          if (tx.operation === 'Дт' && (tx.категория === 'разход' || tx.категория === 'разход_друг')) {
+            insertExpense.run(
+              `🏦 ${tx.контрагент || 'Банков разход'}`,
+              tx.контрагент || '',
+              tx.сума || 0,
+              tx.основание || '',
+              tx.property_id || null,
+              tx.категория === 'разход' ? 'разход' : 'друго',
+              tx.месец || null,
+              txResult.lastInsertRowid,
+              tx.дата || null
+            );
+          }
         }
         return session_id;
       });

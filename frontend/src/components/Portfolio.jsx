@@ -6,6 +6,8 @@ const STATUS_COLORS = {
   '❌': 'bg-red-100 text-red-800',
 }
 
+const EMPTY_FORM = { адрес:'', район:'', статус:'✅', наем:0, наемател:'', площ:'', тип:'2-стаен', покупна:0, ремонт:0, market_val:'' }
+
 const fmt = (n) => (n || 0).toLocaleString('bg-BG')
 
 export default function Portfolio({ API }) {
@@ -15,6 +17,8 @@ export default function Portfolio({ API }) {
   const [editingProp, setEditingProp] = useState(null)
   const [editForm, setEditForm] = useState({})
   const [saving, setSaving] = useState(false)
+  const [addingNew, setAddingNew] = useState(false)
+  const [newForm, setNewForm] = useState(EMPTY_FORM)
 
   const load = () => {
     setLoading(true)
@@ -41,6 +45,30 @@ export default function Portfolio({ API }) {
   }
 
   const closeEdit = () => { setEditingProp(null); setEditForm({}) }
+
+  const saveNew = () => {
+    if (!newForm.адрес) return alert('Адресът е задължителен')
+    setSaving(true)
+    fetch(`${API}/api/properties`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        адрес: newForm.адрес,
+        район: newForm.район,
+        статус: newForm.статус,
+        наем: Number(newForm.наем) || 0,
+        наемател: newForm.наемател,
+        площ: newForm.площ !== '' ? Number(newForm.площ) : null,
+        тип: newForm.тип,
+        покупна: Number(newForm.покупна) || 0,
+        ремонт: Number(newForm.ремонт) || 0,
+        market_val: newForm.market_val !== '' ? Number(newForm.market_val) : null,
+      }),
+    })
+      .then(r => r.json())
+      .then(() => { setSaving(false); setAddingNew(false); setNewForm(EMPTY_FORM); load() })
+      .catch(e => { setSaving(false); alert('Грешка: ' + e.message) })
+  }
 
   const saveEdit = () => {
     setSaving(true)
@@ -73,9 +101,17 @@ export default function Portfolio({ API }) {
     <div>
       <div className="flex justify-between items-center mb-4">
         <h2 className="text-2xl font-bold text-gray-800">Портфолио имоти</h2>
+        <div className="flex items-center gap-3">
+        <button
+          onClick={() => { setAddingNew(true); setNewForm(EMPTY_FORM) }}
+          className="px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-lg transition-colors"
+        >
+          + Добави имот
+        </button>
         <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-2 text-sm">
           <span className="text-gray-500">Общ месечен наем: </span>
           <span className="font-bold text-blue-700 text-base">{fmt(totalRent)} €</span>
+        </div>
         </div>
       </div>
 
@@ -134,6 +170,69 @@ export default function Portfolio({ API }) {
           </table>
         </div>
       </div>
+
+      {/* Add New Property Modal */}
+      {addingNew && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md flex flex-col" style={{ maxHeight: '90vh' }}>
+            <div className="px-6 py-4 border-b border-gray-200 flex-shrink-0">
+              <h3 className="text-lg font-bold text-gray-900">Добави нов имот</h3>
+            </div>
+            <div className="px-6 py-4 space-y-3 overflow-y-auto flex-1">
+              {[
+                { label: 'Адрес *', key: 'адрес', type: 'text', placeholder: 'ул. Примерна 1, ап.5' },
+                { label: 'Район', key: 'район', type: 'text', placeholder: 'напр. Младост 1' },
+                { label: 'Наемател', key: 'наемател', type: 'text', placeholder: 'Име на наемател' },
+                { label: 'Месечен наем (EUR €)', key: 'наем', type: 'number' },
+                { label: 'Площ (м²)', key: 'площ', type: 'number', placeholder: 'кв. метра' },
+                { label: 'Покупна цена (EUR €)', key: 'покупна', type: 'number' },
+                { label: 'Ремонт (EUR €)', key: 'ремонт', type: 'number' },
+                { label: 'Пазарна стойност (EUR €)', key: 'market_val', type: 'number', placeholder: 'По избор' },
+              ].map(({ label, key, type, placeholder }) => (
+                <div key={key}>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
+                  <input
+                    type={type}
+                    value={newForm[key]}
+                    onChange={e => setNewForm(f => ({ ...f, [key]: e.target.value }))}
+                    placeholder={placeholder || ''}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-500 text-sm"
+                    min={type === 'number' ? '0' : undefined}
+                  />
+                </div>
+              ))}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Тип имот</label>
+                <select value={newForm.тип} onChange={e => setNewForm(f => ({ ...f, тип: e.target.value }))}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-500 text-sm">
+                  {['1-стаен','2-стаен','3-стаен','Мезонет','Студио','Паркомясто','Гараж','Мазе','Друго'].map(t => (
+                    <option key={t} value={t}>{t}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Статус</label>
+                <select value={newForm.статус} onChange={e => setNewForm(f => ({ ...f, статус: e.target.value }))}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-500 text-sm">
+                  <option value="✅">✅ Активен</option>
+                  <option value="🔶">🔶 В процес</option>
+                  <option value="❌">❌ Неактивен</option>
+                </select>
+              </div>
+            </div>
+            <div className="flex-shrink-0 px-6 py-4 border-t border-gray-200 flex justify-end gap-2">
+              <button onClick={() => setAddingNew(false)}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg">
+                Отказ
+              </button>
+              <button onClick={saveNew} disabled={saving}
+                className="px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 disabled:opacity-50 rounded-lg">
+                {saving ? 'Запазва...' : 'Добави'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Edit Modal */}
       {editingProp && (

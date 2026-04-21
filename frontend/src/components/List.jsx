@@ -103,8 +103,8 @@ export default function List({ API }) {
                 </span>
               </div>
               <div className="text-base font-semibold text-gray-700">{card.label}</div>
-              <div className={`text-xl font-bold mt-1 ${c.text}`}>{fmt(card.rent)} лв./мес</div>
-              <div className="text-xs text-gray-500 mt-0.5">{fmt(card.rent * 12)} лв./год</div>
+              <div className={`text-xl font-bold mt-1 ${c.text}`}>{fmt(card.rent)} €/мес</div>
+              <div className="text-xs text-gray-500 mt-0.5">{fmt(card.rent * 12)} €/год</div>
             </div>
           )
         })}
@@ -136,7 +136,7 @@ export default function List({ API }) {
           <table className="min-w-full divide-y divide-gray-200 text-sm">
             <thead className="bg-gray-50">
               <tr>
-                {['#', 'Адрес', 'Район', 'Тип', 'Статус', 'Наемател', 'Наем (лв.)', 'Площ м²', 'Наем/м²'].map(h => (
+                {['#', 'Адрес', 'Район', 'Тип', 'Статус', 'Наемател', 'Наем (EUR €)', 'Площ м²', 'Наем/м²'].map(h => (
                   <th key={h} className="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">
                     {h}
                   </th>
@@ -160,7 +160,7 @@ export default function List({ API }) {
                     <td className="px-3 py-2 text-gray-700 max-w-[140px] truncate">{p['наемател']}</td>
                     <td className="px-3 py-2 text-right font-semibold text-gray-800">{p['наем'] ? fmt(p['наем']) : '—'}</td>
                     <td className="px-3 py-2 text-right text-gray-600">{p['площ']}</td>
-                    <td className="px-3 py-2 text-right text-gray-500 text-xs">{rentPerSqm !== '—' ? `${rentPerSqm} лв.` : '—'}</td>
+                    <td className="px-3 py-2 text-right text-gray-500 text-xs">{rentPerSqm !== '—' ? `${rentPerSqm} €` : '—'}</td>
                   </tr>
                 )
               })}
@@ -173,11 +173,11 @@ export default function List({ API }) {
       <div className="bg-white rounded-xl shadow p-5 border border-gray-100">
         <h3 className="text-base font-bold text-gray-800 mb-3">Калкулатор на доходност</h3>
         <p className="text-sm text-gray-500 mb-3">
-          Базиран на средния наем/м² за избрания тип: <strong>{avgRent.toFixed(2)} лв./м²</strong>
+          Базиран на средния наем/м² за избрания тип: <strong>{avgRent.toFixed(2)} €/м²</strong>
         </p>
         <div className="flex gap-3 items-end flex-wrap">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Покупна цена (лв.)</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Покупна цена (EUR €)</label>
             <input
               type="number"
               value={calcPrice}

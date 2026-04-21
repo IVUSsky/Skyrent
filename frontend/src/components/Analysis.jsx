@@ -36,7 +36,7 @@ function GaugeMeter({ value, label, low, high, invert = false, unit = '' }) {
 const INSIGHTS = [
   {
     icon: '🔶',
-    text: '8 гаража в комплекс Фонтани са WIP (статус 🔶) — при наемане ще добавят ~650 лв./мес. към портфолиото.',
+    text: '8 гаража в комплекс Фонтани са WIP (статус 🔶) — при наемане ще добавят ~650 €/мес. към портфолиото.',
     color: 'bg-yellow-50 border-yellow-200 text-yellow-800',
   },
   {
@@ -46,7 +46,7 @@ const INSIGHTS = [
   },
   {
     icon: '🏗️',
-    text: '2 апартамента и 2 паркоместа в Симеоново (❌ строи се) очакват завършване — потенциал за ~1270 лв./мес.',
+    text: '2 апартамента и 2 паркоместа в Симеоново (❌ строи се) очакват завършване — потенциал за ~1270 €/мес.',
     color: 'bg-red-50 border-red-200 text-red-800',
   },
   {
@@ -56,7 +56,7 @@ const INSIGHTS = [
   },
   {
     icon: '💰',
-    text: 'Пазарджик имотите (ап.А, ап.Б, Гараж, Илион) генерират ~1423 лв./мес. при по-ниска покупна цена — висока доходност.',
+    text: 'Пазарджик имотите (ап.А, ап.Б, Гараж, Илион) генерират ~1423 €/мес. при по-ниска покупна цена — висока доходност.',
     color: 'bg-purple-50 border-purple-200 text-purple-800',
   },
 ]
@@ -165,7 +165,7 @@ export default function Analysis({ API }) {
               {sortedTenants.slice(0, 3).map(([tenant, rent]) => (
                 <div key={tenant} className="flex justify-between text-xs text-gray-600">
                   <span className="truncate max-w-[140px]">{tenant}</span>
-                  <span className="font-medium">{fmt(rent)} лв. ({totalActiveRent > 0 ? ((rent / totalActiveRent) * 100).toFixed(1) : 0}%)</span>
+                  <span className="font-medium">{fmt(rent)} € ({totalActiveRent > 0 ? ((rent / totalActiveRent) * 100).toFixed(1) : 0}%)</span>
                 </div>
               ))}
             </div>
@@ -180,13 +180,13 @@ export default function Analysis({ API }) {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="bg-white border border-gray-200 rounded-xl p-4">
               <div className="text-sm font-semibold text-gray-500 mb-1">Годишен наем</div>
-              <div className="text-2xl font-bold text-blue-700">{fmt(metrics.наем_год)} лв.</div>
+              <div className="text-2xl font-bold text-blue-700">{fmt(metrics.наем_год)} €</div>
               <div className="text-xs text-gray-400 mt-0.5">само активни имоти × 12</div>
             </div>
             <div className="bg-white border border-gray-200 rounded-xl p-4">
               <div className="text-sm font-semibold text-gray-500 mb-1">Реални разходи (платени)</div>
               <div className="text-2xl font-bold text-red-600">
-                {fmt(expenseSummary.by_category?.reduce((s, c) => s + (c.paid_amount || 0), 0) || 0)} лв.
+                {fmt(expenseSummary.by_category?.reduce((s, c) => s + (c.paid_amount || 0), 0) || 0)} €
               </div>
               <div className="text-xs text-gray-400 mt-0.5">от expense_invoices (paid=1)</div>
             </div>
@@ -199,9 +199,9 @@ export default function Analysis({ API }) {
                 const diff = realNOI - approxNOI
                 return (
                   <>
-                    <div className="text-2xl font-bold text-blue-700">{fmt(realNOI)} лв.</div>
+                    <div className="text-2xl font-bold text-blue-700">{fmt(realNOI)} €</div>
                     <div className={`text-xs mt-0.5 ${diff >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                      {diff >= 0 ? '+' : ''}{fmt(diff)} спрямо 90% апрокс. ({fmt(approxNOI)} лв.)
+                      {diff >= 0 ? '+' : ''}{fmt(diff)} спрямо 90% апрокс. ({fmt(approxNOI)} €)
                     </div>
                   </>
                 )
@@ -219,7 +219,7 @@ export default function Analysis({ API }) {
                     <div key={cat.category || 'Друго'}>
                       <div className="flex justify-between text-sm mb-0.5">
                         <span className="text-gray-700">{cat.category || 'Друго'}</span>
-                        <span className="font-medium text-gray-800">{fmt(cat.paid_amount || 0)} лв. <span className="text-gray-400 text-xs">({cat.paid_count || 0} платени / {cat.count} общо)</span></span>
+                        <span className="font-medium text-gray-800">{fmt(cat.paid_amount || 0)} € <span className="text-gray-400 text-xs">({cat.paid_count || 0} платени / {cat.count} общо)</span></span>
                       </div>
                       <div className="w-full bg-gray-100 rounded-full h-1.5">
                         <div className="h-1.5 rounded-full bg-blue-500" style={{ width: `${pct}%` }} />
@@ -254,9 +254,9 @@ export default function Analysis({ API }) {
                     <td className="px-3 py-2 text-gray-400 text-xs font-mono">{idx + 1}</td>
                     <td className="px-3 py-2 font-medium text-gray-900 whitespace-nowrap">{p['адрес']}</td>
                     <td className="px-3 py-2 text-gray-500 text-xs whitespace-nowrap">{p['тип']}</td>
-                    <td className="px-3 py-2 text-right font-medium text-gray-800">{p['наем'] ? `${fmt(p['наем'])} лв.` : '—'}</td>
-                    <td className="px-3 py-2 text-right text-gray-600">{fmt(p.cost)} лв.</td>
-                    <td className="px-3 py-2 text-right text-gray-600">{p.annualRent ? `${fmt(p.annualRent)} лв.` : '—'}</td>
+                    <td className="px-3 py-2 text-right font-medium text-gray-800">{p['наем'] ? `${fmt(p['наем'])} €` : '—'}</td>
+                    <td className="px-3 py-2 text-right text-gray-600">{fmt(p.cost)} €</td>
+                    <td className="px-3 py-2 text-right text-gray-600">{p.annualRent ? `${fmt(p.annualRent)} €` : '—'}</td>
                     <td className="px-3 py-2 text-right">
                       {p.yield_ != null ? (
                         <span className={`font-bold text-base ${getYieldColor(p.yield_)}`}>

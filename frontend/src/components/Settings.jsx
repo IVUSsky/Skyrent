@@ -2,13 +2,16 @@ import React, { useState, useEffect } from 'react'
 
 export default function Settings({ API }) {
   const [settings, setSettings] = useState(null)
-  const [tenantMap, setTenantMap] = useState([]) // [{keyword, property_id}]
+  const [tenantMap, setTenantMap] = useState([])
   const [expenseCats, setExpenseCats] = useState([])
   const [newCat, setNewCat] = useState('')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [toast, setToast] = useState(null)
   const [error, setError] = useState(null)
+  const [smtp, setSmtp] = useState({ host: '', port: '587', user: '', pass: '', from_name: 'Sky Capital' })
+  const [testingSmtp, setTestingSmtp] = useState(false)
+  const [issuer, setIssuer] = useState({ name: '', address: '', eik: '', mol: '', vat_number: '', iban: '', vat_rate: '0' })
 
   const showToast = (msg, type = 'success') => {
     setToast({ msg, type })
@@ -23,6 +26,8 @@ export default function Settings({ API }) {
         const tm = data.tenant_map || {}
         setTenantMap(Object.entries(tm).map(([keyword, property_id]) => ({ keyword, property_id: String(property_id) })))
         setExpenseCats(data.expense_cats || [])
+        if (data.smtp) setSmtp(data.smtp)
+        if (data.issuer) setIssuer(data.issuer)
         setLoading(false)
       })
       .catch(e => { setError(e.message); setLoading(false) })
@@ -65,7 +70,7 @@ export default function Settings({ API }) {
     fetch(`${API}/api/settings`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tenant_map, expense_cats: expenseCats }),
+      body: JSON.stringify({ tenant_map, expense_cats: expenseCats, smtp, issuer }),
     })
       .then(r => r.json())
       .then(data => {
@@ -194,6 +199,100 @@ export default function Settings({ API }) {
             className="px-4 py-2 text-sm font-medium text-white bg-gray-600 hover:bg-gray-700 rounded-lg transition-colors"
           >
             Добави
+          </button>
+        </div>
+      </div>
+
+      {/* Issuer Details */}
+      <div className="bg-white rounded-xl shadow border border-gray-100 p-5 mb-6">
+        <h3 className="text-base font-bold text-gray-800 mb-1">🧾 Данни на издателя (за фактури)</h3>
+        <p className="text-sm text-gray-500 mb-4">Тези данни се отпечатват на всяка фактура като "Доставчик".</p>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {[
+            { key: 'name',       label: 'Фирма / Име',           placeholder: 'Sky Capital OOD' },
+            { key: 'eik',        label: 'ЕИК / ЕГН',             placeholder: '123456789' },
+            { key: 'mol',        label: 'МОЛ',                    placeholder: 'Иво Лазаров' },
+            { key: 'address',    label: 'Адрес',                  placeholder: 'София, ул. ...' },
+            { key: 'vat_number', label: 'ДДС номер (ако има)',    placeholder: 'BG123456789' },
+            { key: 'iban',       label: 'IBAN',                   placeholder: 'BG80BNBG96611020345678' },
+          ].map(({ key, label, placeholder }) => (
+            <div key={key}>
+              <label className="block text-xs font-medium text-gray-600 mb-1">{label}</label>
+              <input type="text" value={issuer[key] || ''}
+                onChange={e => setIssuer(s => ({ ...s, [key]: e.target.value }))}
+                placeholder={placeholder}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+          ))}
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">ДДС ставка % (0 = не сте регистрирани)</label>
+            <select value={issuer.vat_rate || '0'}
+              onChange={e => setIssuer(s => ({ ...s, vat_rate: e.target.value }))}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+              <option value="0">0% — не сте регистрирани по ДДС</option>
+              <option value="20">20% — регистрирани по ДДС</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      {/* SMTP Email Settings */}
+      <div className="bg-white rounded-xl shadow border border-gray-100 p-5 mb-6">
+        <h3 className="text-base font-bold text-gray-800 mb-1">📧 Имейл настройки (SMTP)</h3>
+        <p className="text-sm text-gray-500 mb-4">
+          За изпращане на напомняния за наем директно от приложението.
+          Gmail: host = <code className="bg-gray-100 px-1 rounded">smtp.gmail.com</code>, порт = 587.
+          Трябва <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noreferrer" className="text-blue-600 underline">App Password</a> (не обичайната парола).
+        </p>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">SMTP Host</label>
+            <input type="text" value={smtp.host}
+              onChange={e => setSmtp(s => ({ ...s, host: e.target.value }))}
+              placeholder="smtp.gmail.com"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Порт</label>
+            <input type="number" value={smtp.port}
+              onChange={e => setSmtp(s => ({ ...s, port: e.target.value }))}
+              placeholder="587"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Имейл (потребител)</label>
+            <input type="email" value={smtp.user}
+              onChange={e => setSmtp(s => ({ ...s, user: e.target.value }))}
+              placeholder="your@gmail.com"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Парола / App Password</label>
+            <input type="password" value={smtp.pass}
+              onChange={e => setSmtp(s => ({ ...s, pass: e.target.value }))}
+              placeholder="xxxx xxxx xxxx xxxx"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          </div>
+          <div className="md:col-span-2">
+            <label className="block text-xs font-medium text-gray-600 mb-1">Изпращач (показвано име)</label>
+            <input type="text" value={smtp.from_name}
+              onChange={e => setSmtp(s => ({ ...s, from_name: e.target.value }))}
+              placeholder="Sky Capital"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          </div>
+        </div>
+        <div className="mt-3">
+          <button
+            disabled={testingSmtp || !smtp.host || !smtp.user || !smtp.pass}
+            onClick={() => {
+              setTestingSmtp(true)
+              fetch(`${API}/api/email/test`, { method: 'POST' })
+                .then(r => r.json())
+                .then(d => { setTestingSmtp(false); d.ok ? showToast('Връзката е успешна!') : showToast('Грешка: ' + d.error, 'error') })
+                .catch(e => { setTestingSmtp(false); showToast('Грешка: ' + e.message, 'error') })
+            }}
+            className="px-4 py-2 text-sm font-medium bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg disabled:opacity-40">
+            {testingSmtp ? 'Проверява...' : '🔌 Тест на връзката'}
           </button>
         </div>
       </div>

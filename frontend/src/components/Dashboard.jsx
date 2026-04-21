@@ -12,21 +12,21 @@ const fmtPct = (n) => n != null && !isNaN(n) ? `${(n * 100).toFixed(1)}%` : '—
 
 function KpiCard({ label, value, sub, color, icon }) {
   const colorMap = {
-    blue: 'border-blue-200 bg-blue-50',
-    green: 'border-green-200 bg-green-50',
-    red: 'border-red-200 bg-red-50',
-    yellow: 'border-yellow-200 bg-yellow-50',
-    purple: 'border-purple-200 bg-purple-50',
-    gray: 'border-gray-200 bg-gray-50',
+    blue:   'border-[#b2dce8] bg-[#e3f4f9]',
+    green:  'border-green-200 bg-green-50',
+    red:    'border-red-200 bg-red-50',
+    yellow: 'border-amber-200 bg-amber-50',
+    purple: 'border-[#b2dce8] bg-[#d6eef5]',
+    gray:   'border-gray-200 bg-gray-50',
     orange: 'border-orange-200 bg-orange-50',
   }
   const textMap = {
-    blue: 'text-blue-700',
-    green: 'text-green-700',
-    red: 'text-red-700',
-    yellow: 'text-yellow-700',
-    purple: 'text-purple-700',
-    gray: 'text-gray-700',
+    blue:   'text-[#0e3d52]',
+    green:  'text-green-700',
+    red:    'text-red-700',
+    yellow: 'text-amber-700',
+    purple: 'text-[#1a5f7a]',
+    gray:   'text-gray-700',
     orange: 'text-orange-700',
   }
   return (
@@ -43,7 +43,7 @@ function KpiCard({ label, value, sub, color, icon }) {
   )
 }
 
-const CHART_COLORS = ['#3b82f6','#10b981','#f59e0b','#8b5cf6','#ef4444','#06b6d4','#f97316','#84cc16','#ec4899','#6366f1']
+const CHART_COLORS = ['#4AABCC','#1a1a2e','#2d8aab','#7ec8de','#1a5f7a','#a3dae8','#0e3d52','#5bbdd4','#c2ebf4','#2c7a97']
 
 export default function Dashboard({ API }) {
   const [metrics, setMetrics] = useState(null)
@@ -93,7 +93,7 @@ export default function Dashboard({ API }) {
 
   return (
     <div>
-      <h2 className="text-2xl font-bold text-gray-800 mb-6">Dashboard</h2>
+      <h2 className="text-2xl font-bold mb-6" style={{ color: '#1a1a2e' }}>Dashboard</h2>
 
       {/* KPI Grid */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-8">
