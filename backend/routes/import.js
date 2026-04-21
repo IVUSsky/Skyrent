@@ -227,6 +227,33 @@ module.exports = function(db) {
     }
   });
 
+  // GET /unmatched — наемни транзакции без property_id
+  router.get('/unmatched', (req, res) => {
+    try {
+      const rows = db.prepare(`
+        SELECT id, дата, контрагент, основание, сума, месец
+        FROM transactions
+        WHERE категория = 'наем' AND (property_id IS NULL OR property_id = 0)
+        ORDER BY месец DESC, дата DESC
+      `).all();
+      res.json(rows);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // PATCH /transactions/:id — присвои property_id
+  router.patch('/transactions/:id', (req, res) => {
+    try {
+      const { property_id } = req.body;
+      if (!property_id) return res.status(400).json({ error: 'property_id е задължителен' });
+      db.prepare('UPDATE transactions SET property_id = ? WHERE id = ?').run(Number(property_id), req.params.id);
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // GET /monthly
   router.get('/monthly', (req, res) => {
     try {

@@ -63,6 +63,7 @@ const INSIGHTS = [
 
 export default function Analysis({ API }) {
   const [properties, setProperties] = useState([])
+  const [loans, setLoans] = useState([])
   const [metrics, setMetrics] = useState(null)
   const [expenseSummary, setExpenseSummary] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -72,19 +73,65 @@ export default function Analysis({ API }) {
     Promise.all([
       fetch(`${API}/api/properties`).then(r => r.json()),
       fetch(`${API}/api/metrics`).then(r => r.json()),
+      fetch(`${API}/api/loans`).then(r => r.json()).catch(() => []),
       fetch(`${API}/api/expenses/summary`).then(r => r.json()).catch(() => null),
     ])
-      .then(([p, m, es]) => {
+      .then(([p, m, l, es]) => {
         setProperties(p)
         setMetrics(m)
+        setLoans(l)
         setExpenseSummary(es)
         setLoading(false)
       })
       .catch(e => { setError(e.message); setLoading(false) })
-  }, [])
+  }, [API])
 
   if (loading) return <div className="flex justify-center py-16 text-gray-500 text-lg">Зарежда...</div>
   if (error) return <div className="bg-red-50 text-red-700 p-4 rounded-lg">Грешка: {error}</div>
+
+  // Build property → loan share map (вноска и остатък разпределени пропорционално)
+  const propLoanMap = {}
+  loans.forEach(loan => {
+    let imoti = []
+    try { imoti = JSON.parse(loan['имоти'] || '[]') } catch {}
+    if (!imoti.length) return
+    const share = 1 / imoti.length
+    imoti.forEach(pid => {
+      if (!propLoanMap[pid]) propLoanMap[pid] = { вноска: 0, остатък: 0 }
+      propLoanMap[pid].вноска += (loan['вноска'] || 0) * share
+      propLoanMap[pid].остатък += (loan['остатък_calc'] || loan['остатък'] || 0) * share
+    })
+  })
+
+  // Cash on Cash Return per property
+  const cocTable = properties
+    .filter(p => (p['покупна'] || 0) > 0 && (p['наем'] || 0) > 0)
+    .map(p => {
+      const totalCost = (p['покупна'] || 0) + (p['ремонт'] || 0)
+      const loanShare = propLoanMap[p.id] || { вноска: 0, остатък: 0 }
+      const cashInvested = Math.max(1, totalCost - loanShare.остатък)
+      const annualRent = (p['наем'] || 0) * 12
+      const annualMortgage = loanShare.вноска * 12
+      const annualExpenses = annualRent * 0.10
+      const annualCashFlow = annualRent - annualMortgage - annualExpenses
+      const coc = annualCashFlow / cashInvested
+      return { ...p, totalCost, cashInvested, annualRent, annualMortgage, annualCashFlow, coc }
+    })
+    .sort((a, b) => b.coc - a.coc)
+
+  // Portfolio CoC
+  const totalCashInvested = cocTable.filter(p => p['статус'] === '✅').reduce((s, p) => s + p.cashInvested, 0)
+  const totalAnnualCashFlow = cocTable.filter(p => p['статус'] === '✅').reduce((s, p) => s + p.annualCashFlow, 0)
+  const portfolioCoc = totalCashInvested > 0 ? totalAnnualCashFlow / totalCashInvested : null
+
+  const getCocColor = (coc) => {
+    if (coc >= 0.10) return 'text-green-700'
+    if (coc >= 0.07) return 'text-green-600'
+    if (coc >= 0.05) return 'text-yellow-600'
+    if (coc >= 0.03) return 'text-orange-500'
+    if (coc >= 0) return 'text-red-500'
+    return 'text-red-700'
+  }
 
   // League table: gross yield
   const leagueTable = properties
@@ -273,6 +320,85 @@ export default function Analysis({ API }) {
           </div>
         </div>
       </div>
+
+      {/* Cash on Cash Return */}
+      {cocTable.length > 0 && (
+        <div className="mb-8">
+          <h3 className="text-lg font-bold text-gray-700 mb-1">Cash on Cash Return</h3>
+          <p className="text-xs text-gray-400 mb-4">
+            (Наем×12 − Вноска×12 − 10% разходи) / Вложен капитал (покупна + ремонт − текущ остатък по кредит)
+          </p>
+
+          {/* Portfolio summary */}
+          {portfolioCoc != null && (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+              <div className="bg-white border border-gray-200 rounded-xl p-4">
+                <div className="text-xs font-semibold text-gray-500 uppercase mb-1">Портфолио CoC</div>
+                <div className={`text-3xl font-bold ${getCocColor(portfolioCoc)}`}>
+                  {(portfolioCoc * 100).toFixed(2)}%
+                </div>
+                <div className="text-xs text-gray-400 mt-1">само активни имоти (✅)</div>
+              </div>
+              <div className="bg-white border border-gray-200 rounded-xl p-4">
+                <div className="text-xs font-semibold text-gray-500 uppercase mb-1">Вложен капитал</div>
+                <div className="text-2xl font-bold text-gray-800">{fmt(totalCashInvested)} €</div>
+                <div className="text-xs text-gray-400 mt-1">покупна + ремонт − остатък кредити</div>
+              </div>
+              <div className="bg-white border border-gray-200 rounded-xl p-4">
+                <div className="text-xs font-semibold text-gray-500 uppercase mb-1">Годишен Cash Flow</div>
+                <div className={`text-2xl font-bold ${totalAnnualCashFlow >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+                  {totalAnnualCashFlow >= 0 ? '+' : ''}{fmt(totalAnnualCashFlow)} €
+                </div>
+                <div className="text-xs text-gray-400 mt-1">след кредити и ~10% разходи</div>
+              </div>
+            </div>
+          )}
+
+          {/* Per property table */}
+          <div className="bg-white rounded-xl shadow overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200 text-sm">
+                <thead className="bg-gray-50">
+                  <tr>
+                    {['#', 'Адрес', 'Наем/мес', 'Вноска/мес', 'Год. Cash Flow', 'Вложен капитал', 'CoC %'].map(h => (
+                      <th key={h} className="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {cocTable.map((p, idx) => (
+                    <tr key={p.id} className={`${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'} hover:bg-blue-50 ${p['статус'] !== '✅' ? 'opacity-50' : ''}`}>
+                      <td className="px-3 py-2 text-gray-400 text-xs font-mono">{idx + 1}</td>
+                      <td className="px-3 py-2 font-medium text-gray-900 whitespace-nowrap">
+                        {p['адрес']}
+                        {p['статус'] !== '✅' && <span className="ml-1 text-xs text-gray-400">({p['статус']})</span>}
+                      </td>
+                      <td className="px-3 py-2 text-right text-gray-700">{fmt(p['наем'])} €</td>
+                      <td className="px-3 py-2 text-right text-orange-600">
+                        {p.annualMortgage > 0 ? `${fmt(p.annualMortgage / 12)} €` : '—'}
+                      </td>
+                      <td className={`px-3 py-2 text-right font-medium ${p.annualCashFlow >= 0 ? 'text-green-700' : 'text-red-600'}`}>
+                        {p.annualCashFlow >= 0 ? '+' : ''}{fmt(p.annualCashFlow)} €
+                      </td>
+                      <td className="px-3 py-2 text-right text-gray-600">{fmt(p.cashInvested)} €</td>
+                      <td className="px-3 py-2 text-right">
+                        <span className={`font-bold text-base ${getCocColor(p.coc)}`}>
+                          {(p.coc * 100).toFixed(2)}%
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <p className="text-xs text-gray-400 mt-2">
+            * Имоти без покупна цена или наем са изключени. Разходите са апроксимирани на 10% от наема — за точен резултат въведи реалните разходи.
+          </p>
+        </div>
+      )}
 
       {/* Recommendations */}
       <div>
