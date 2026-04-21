@@ -63,7 +63,10 @@ module.exports = function(db) {
     if (!smtp) return res.status(400).json({ error: 'SMTP не е конфигуриран' });
     try {
       const transporter = createTransport(smtp);
-      await transporter.verify();
+      const timeout = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Timeout — провери host/port или дали портът е блокиран')), 10000)
+      );
+      await Promise.race([transporter.verify(), timeout]);
       res.json({ ok: true });
     } catch (err) {
       res.status(400).json({ error: err.message });
