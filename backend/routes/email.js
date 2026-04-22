@@ -1,21 +1,23 @@
 const express = require('express');
-const { Resend } = require('resend');
-const fs = require('fs');
+const nodemailer = require('nodemailer');
 const path = require('path');
-
-const LOGO_PATH = path.join(__dirname, '../data/logos/sky_capital_logo.png');
 
 module.exports = function(db) {
   const router = express.Router();
 
-  function getResend() {
-    const apiKey = process.env.RESEND_API_KEY;
-    if (!apiKey) return null;
-    return new Resend(apiKey);
+  function getSmtpConfig() {
+    const row = db.prepare("SELECT value FROM settings WHERE key='smtp'").get();
+    if (!row) return null;
+    try { return JSON.parse(row.value); } catch { return null; }
   }
 
-  function getFromEmail() {
-    return process.env.RESEND_FROM_EMAIL || 'onboarding@resend.dev';
+  function createTransporter(smtp) {
+    return nodemailer.createTransport({
+      host: smtp.host,
+      port: Number(smtp.port) || 587,
+      secure: Number(smtp.port) === 465,
+      auth: { user: smtp.user, pass: smtp.pass },
+    });
   }
 
   function buildHtml(bodyHtml, senderName) {
@@ -39,13 +41,15 @@ module.exports = function(db) {
 </body></html>`;
   }
 
-  // Test connection
+  // Test SMTP connection
   router.post('/test', async (req, res) => {
-    const resend = getResend();
-    if (!resend) return res.status(400).json({ error: 'RESEND_API_KEY не е зададен в сървъра' });
+    const smtp = getSmtpConfig();
+    if (!smtp || !smtp.host || !smtp.user || !smtp.pass) {
+      return res.status(400).json({ error: 'SMTP настройките не са попълнени в Настройки' });
+    }
     try {
-      const result = await resend.domains.list();
-      if (result.error) return res.status(400).json({ error: result.error.message });
+      const transporter = createTransporter(smtp);
+      await transporter.verify();
       res.json({ ok: true });
     } catch (err) {
       res.status(400).json({ error: err.message });
@@ -57,10 +61,11 @@ module.exports = function(db) {
     const { to, tenant_name, property_address, amount, month_label, from_name } = req.body;
     if (!to) return res.status(400).json({ error: 'Липсва email адрес' });
 
-    const resend = getResend();
-    if (!resend) return res.status(400).json({ error: 'RESEND_API_KEY не е зададен' });
+    const smtp = getSmtpConfig();
+    if (!smtp || !smtp.host || !smtp.user || !smtp.pass) {
+      return res.status(400).json({ error: 'SMTP настройките не са попълнени' });
+    }
 
-    const subject = `Напомняне за наем — ${month_label}`;
     const bodyHtml = `
       <p>Уважаеми/а <strong>${tenant_name}</strong>,</p>
       <p>Напомняме Ви, че наемът за <strong>${month_label}</strong> за имот
@@ -68,16 +73,16 @@ module.exports = function(db) {
       все още не е постъпил по нашата сметка.</p>
       <p>Моля, наредете плащането възможно най-скоро.</p>
       <p>При въпроси не се колебайте да се свържете с нас.</p>
-      <p style="margin-top:24px;">С уважение,<br><strong>${from_name || 'Sky Capital'}</strong></p>`;
+      <p style="margin-top:24px;">С уважение,<br><strong>${from_name || smtp.from_name || 'Sky Capital'}</strong></p>`;
 
     try {
-      const { error } = await resend.emails.send({
-        from: `${from_name || 'Sky Capital'} <${getFromEmail()}>`,
+      const transporter = createTransporter(smtp);
+      await transporter.sendMail({
+        from: `"${from_name || smtp.from_name || 'Sky Capital'}" <${smtp.user}>`,
         to,
-        subject,
-        html: buildHtml(bodyHtml, from_name),
+        subject: `Напомняне за наем — ${month_label}`,
+        html: buildHtml(bodyHtml, from_name || smtp.from_name),
       });
-      if (error) return res.status(500).json({ error: error.message });
       res.json({ ok: true });
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -89,10 +94,15 @@ module.exports = function(db) {
     const { tenants, month_label, from_name } = req.body;
     if (!tenants || !tenants.length) return res.status(400).json({ error: 'Няма наематели' });
 
-    const resend = getResend();
-    if (!resend) return res.status(400).json({ error: 'RESEND_API_KEY не е зададен' });
+    const smtp = getSmtpConfig();
+    if (!smtp || !smtp.host || !smtp.user || !smtp.pass) {
+      return res.status(400).json({ error: 'SMTP настройките не са попълнени' });
+    }
 
+    const transporter = createTransporter(smtp);
+    const senderName = from_name || smtp.from_name || 'Sky Capital';
     const results = [];
+
     for (const t of tenants) {
       if (!t.email) { results.push({ name: t.name, ok: false, error: 'Няма email' }); continue; }
       const bodyHtml = `
@@ -101,15 +111,15 @@ module.exports = function(db) {
         <strong>${t.address}</strong> в размер на <strong>${t.amount} €</strong>
         все още не е постъпил по нашата сметка.</p>
         <p>Моля, наредете плащането възможно най-скоро.</p>
-        <p style="margin-top:24px;">С уважение,<br><strong>${from_name || 'Sky Capital'}</strong></p>`;
+        <p style="margin-top:24px;">С уважение,<br><strong>${senderName}</strong></p>`;
       try {
-        const { error } = await resend.emails.send({
-          from: `${from_name || 'Sky Capital'} <${getFromEmail()}>`,
+        await transporter.sendMail({
+          from: `"${senderName}" <${smtp.user}>`,
           to: t.email,
           subject: `Напомняне за наем — ${month_label}`,
-          html: buildHtml(bodyHtml, from_name),
+          html: buildHtml(bodyHtml, senderName),
         });
-        results.push({ name: t.name, ok: !error, error: error?.message });
+        results.push({ name: t.name, ok: true });
       } catch (err) {
         results.push({ name: t.name, ok: false, error: err.message });
       }
