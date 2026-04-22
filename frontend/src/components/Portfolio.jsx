@@ -20,6 +20,10 @@ export default function Portfolio({ API }) {
   const [saving, setSaving] = useState(false)
   const [addingNew, setAddingNew] = useState(false)
   const [newForm, setNewForm] = useState(EMPTY_FORM)
+  const [photosProp, setPhotosProp] = useState(null)
+  const [photos, setPhotos] = useState([])
+  const [uploading, setUploading] = useState(false)
+  const photoInputRef = React.useRef()
 
   const load = () => {
     setLoading(true)
@@ -105,6 +109,35 @@ export default function Portfolio({ API }) {
       .catch(e => { setSaving(false); alert('Грешка: ' + e.message) })
   }
 
+  const openPhotos = (prop) => {
+    setPhotosProp(prop)
+    apiFetch(`${API}/api/properties/${prop.id}/photos`)
+      .then(r => r.json()).then(setPhotos)
+  }
+
+  const uploadPhotos = (files) => {
+    if (!files.length) return
+    setUploading(true)
+    const fd = new FormData()
+    Array.from(files).forEach(f => fd.append('photos', f))
+    apiFetch(`${API}/api/properties/${photosProp.id}/photos`, { method: 'POST', body: fd })
+      .then(r => r.json())
+      .then(() => apiFetch(`${API}/api/properties/${photosProp.id}/photos`).then(r => r.json()).then(setPhotos))
+      .finally(() => setUploading(false))
+  }
+
+  const updateCaption = (photoId, caption) => {
+    apiFetch(`${API}/api/properties/${photosProp.id}/photos/${photoId}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ caption }),
+    })
+  }
+
+  const deletePhoto = (photoId) => {
+    apiFetch(`${API}/api/properties/${photosProp.id}/photos/${photoId}`, { method: 'DELETE' })
+      .then(() => setPhotos(ph => ph.filter(p => p.id !== photoId)))
+  }
+
   const totalRent = properties.filter(p => p['статус'] === '✅').reduce((s, p) => s + (p['наем'] || 0), 0)
 
   if (loading) return <div className="flex justify-center py-16 text-gray-500 text-lg">Зарежда...</div>
@@ -160,13 +193,18 @@ export default function Portfolio({ API }) {
                     <td className="px-3 py-2 text-right text-gray-600">{cost > 0 ? fmt(cost) : '—'}</td>
                     <td className="px-3 py-2 text-right text-gray-600">{p.market_val ? fmt(p.market_val) : '—'}</td>
                     <td className="px-3 py-2">
-                      <button
-                        onClick={() => openEdit(p)}
-                        className="text-blue-500 hover:text-blue-700 hover:bg-blue-50 p-1 rounded transition-colors"
-                        title="Редактирай"
-                      >
-                        ✏️
-                      </button>
+                      <div className="flex gap-1">
+                        <button
+                          onClick={() => openEdit(p)}
+                          className="text-blue-500 hover:text-blue-700 hover:bg-blue-50 p-1 rounded transition-colors"
+                          title="Редактирай"
+                        >✏️</button>
+                        <button
+                          onClick={() => openPhotos(p)}
+                          className="text-green-500 hover:text-green-700 hover:bg-green-50 p-1 rounded transition-colors"
+                          title="Снимки"
+                        >📷</button>
+                      </div>
                     </td>
                   </tr>
                 )
@@ -241,6 +279,80 @@ export default function Portfolio({ API }) {
               <button onClick={saveNew} disabled={saving}
                 className="px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 disabled:opacity-50 rounded-lg">
                 {saving ? 'Запазва...' : 'Добави'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Photos Modal */}
+      {photosProp && (
+        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl flex flex-col" style={{ maxHeight: '90vh' }}>
+            <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between flex-shrink-0">
+              <div>
+                <h3 className="text-lg font-bold text-gray-900">📷 Снимки на имота</h3>
+                <p className="text-sm text-gray-500 mt-0.5">{photosProp['адрес']} — {photos.length} снимки</p>
+              </div>
+              <button onClick={() => setPhotosProp(null)} className="text-gray-400 hover:text-gray-600 text-2xl leading-none">×</button>
+            </div>
+            <div className="px-6 py-4 overflow-y-auto flex-1">
+              {/* Upload zone */}
+              <div
+                className="border-2 border-dashed border-blue-300 rounded-xl p-6 text-center mb-5 cursor-pointer hover:border-blue-500 hover:bg-blue-50 transition-colors"
+                onClick={() => photoInputRef.current?.click()}
+                onDragOver={e => e.preventDefault()}
+                onDrop={e => { e.preventDefault(); uploadPhotos(e.dataTransfer.files) }}
+              >
+                {uploading
+                  ? <div className="text-blue-600 font-medium">Качва...</div>
+                  : <>
+                      <div className="text-3xl mb-2">📸</div>
+                      <div className="text-sm font-medium text-blue-700">Натиснете или плъзнете снимки тук</div>
+                      <div className="text-xs text-gray-400 mt-1">JPG, PNG, WEBP — до 10 MB на файл</div>
+                    </>
+                }
+              </div>
+              <input ref={photoInputRef} type="file" accept="image/*" multiple className="hidden"
+                onChange={e => uploadPhotos(e.target.files)} />
+
+              {/* Photo grid */}
+              {photos.length === 0
+                ? <div className="text-center text-gray-400 py-8">Няма качени снимки</div>
+                : <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                    {photos.map(ph => (
+                      <div key={ph.id} className="group relative">
+                        <img
+                          src={`${API}/api/properties/${photosProp.id}/photos/${ph.id}/file`}
+                          alt={ph.caption || ''}
+                          className="w-full h-36 object-cover rounded-lg border border-gray-200"
+                          onError={e => { e.target.src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg"/>'; }}
+                        />
+                        <button
+                          onClick={() => deletePhoto(ph.id)}
+                          className="absolute top-1 right-1 bg-red-600 text-white rounded-full w-6 h-6 text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                          title="Изтрий"
+                        >×</button>
+                        <input
+                          type="text"
+                          defaultValue={ph.caption || ''}
+                          onBlur={e => updateCaption(ph.id, e.target.value)}
+                          placeholder="Добави описание..."
+                          className="w-full mt-1 text-xs border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                        />
+                      </div>
+                    ))}
+                  </div>
+              }
+
+              <div className="mt-4 p-3 bg-blue-50 rounded-lg border border-blue-200 text-xs text-blue-700">
+                💡 Снимките автоматично се включват в протокола за приемо-предаване при генериране на нов договор.
+              </div>
+            </div>
+            <div className="flex-shrink-0 px-6 py-3 border-t border-gray-200 flex justify-end">
+              <button onClick={() => setPhotosProp(null)}
+                className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg">
+                Затвори
               </button>
             </div>
           </div>

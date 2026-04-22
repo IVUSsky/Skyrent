@@ -139,7 +139,7 @@ function amountToWords(n) {
 }
 
 // Generate PDF from template text
-function generateContractPDF(contract, template, issuer) {
+function generateContractPDF(contract, template, issuer, photos = []) {
   return new Promise((resolve, reject) => {
     const filename = `contract_${contract.contract_number.replace(/[^a-zA-Z0-9]/g,'-')}.pdf`;
     const filepath = path.join(PDF_DIR, filename);
@@ -314,10 +314,141 @@ function generateContractPDF(contract, template, issuer) {
     doc.font('R').fontSize(8).fillColor('#6b7280')
        .text(contract.tenant_name || '', ML + PW / 2, lineY + 5, { width: col, align: 'center', lineBreak: false });
 
+    // ── Appendix: Приемо-предавателен протокол ──────────────────
+    appendHandoverProtocol(doc, contract, issuer, photos, ML, MR, PW, HEADER_H);
+
     doc.end();
     ws.on('finish', () => resolve({ filepath, filename }));
     ws.on('error', reject);
   });
+}
+
+const PHOTOS_DIR = path.join(__dirname, '../data/property_photos');
+
+function appendHandoverProtocol(doc, contract, issuer, photos, ML, MR, PW, HEADER_H) {
+  doc.addPage();
+  // drawPageHeader is called automatically via doc.on('pageAdded') event
+
+  let y = HEADER_H + 10;
+
+  // Title
+  doc.font('B').fontSize(13).fillColor('#111827')
+     .text('ПРИЕМО-ПРЕДАВАТЕЛЕН ПРОТОКОЛ', ML, y, { width: PW, align: 'center' });
+  y += 18;
+  doc.font('R').fontSize(9).fillColor('#4b5563')
+     .text('HANDOVER PROTOCOL', ML, y, { width: PW, align: 'center' });
+  y += 20;
+
+  // Divider
+  doc.moveTo(ML, y).lineTo(ML + PW, y).lineWidth(0.5).strokeColor('#d1d5db').stroke();
+  y += 12;
+
+  // Contract reference
+  doc.font('B').fontSize(9).fillColor('#111827')
+     .text(`Неразделна част от Договор за наем № ${contract.contract_number}`, ML, y, { width: PW });
+  y += 14;
+  doc.font('R').fontSize(8.5).fillColor('#374151')
+     .text(`Integral part of Lease Agreement No. ${contract.contract_number}`, ML, y, { width: PW });
+  y += 18;
+
+  // Details table
+  const details = [
+    ['Имот / Property:', contract.property_address || ''],
+    ['Дата на предаване / Handover date:', contract.delivery_date ? fmtDate(contract.delivery_date) : fmtDate(contract.start_date)],
+    ['Наемодател / Landlord:', contract.landlord_name || issuer.name || ''],
+    ['Наемател / Tenant:', contract.tenant_name || ''],
+  ];
+
+  if (contract.абонат_ток || contract.абонат_вода || contract.абонат_тец || contract.абонат_вход) {
+    details.push(['─── Абонатни номера / Subscriber numbers ───', '']);
+    if (contract.абонат_ток)  details.push(['  ⚡ Ток / Electricity:', contract.абонат_ток]);
+    if (contract.абонат_вода) details.push(['  💧 Вода / Water:', contract.абонат_вода]);
+    if (contract.абонат_тец)  details.push(['  🔥 ТЕЦ / District heating:', contract.абонат_тец]);
+    if (contract.абонат_вход) details.push(['  🏢 Входна такса / Building fee:', contract.абонат_вход]);
+  }
+
+  details.forEach(([label, value]) => {
+    if (y > doc.page.height - 120) { doc.addPage(); y = HEADER_H + 10; }
+    if (!value) {
+      doc.font('B').fontSize(8).fillColor('#6b7280').text(label, ML, y, { width: PW });
+      y += 13;
+      return;
+    }
+    doc.font('B').fontSize(8.5).fillColor('#374151').text(label, ML, y, { width: 180, lineBreak: false });
+    doc.font('R').fontSize(8.5).fillColor('#111827').text(value, ML + 185, y, { width: PW - 185 });
+    y = doc.y + 3;
+  });
+
+  y += 8;
+  doc.moveTo(ML, y).lineTo(ML + PW, y).lineWidth(0.3).strokeColor('#e5e7eb').stroke();
+  y += 14;
+
+  // Photos section
+  if (photos && photos.length > 0) {
+    doc.font('B').fontSize(10).fillColor('#111827').text('Снимки на имота / Property photos', ML, y, { width: PW });
+    y += 16;
+
+    const IMG_W = (PW - 10) / 2;
+    const IMG_H = IMG_W * 0.67;
+    let col = 0;
+
+    for (const photo of photos) {
+      const fp = path.join(PHOTOS_DIR, photo.filename);
+      if (!fs.existsSync(fp)) continue;
+
+      if (y + IMG_H + 30 > doc.page.height - 60) {
+        doc.addPage();
+        y = HEADER_H + 10;
+        col = 0;
+      }
+
+      const x = col === 0 ? ML : ML + IMG_W + 10;
+      try {
+        doc.image(fp, x, y, { width: IMG_W, height: IMG_H, fit: [IMG_W, IMG_H] });
+        doc.rect(x, y, IMG_W, IMG_H).lineWidth(0.3).strokeColor('#d1d5db').stroke();
+        if (photo.caption) {
+          doc.font('R').fontSize(7).fillColor('#6b7280')
+             .text(photo.caption, x, y + IMG_H + 2, { width: IMG_W, align: 'center' });
+        }
+      } catch(_) {}
+
+      col++;
+      if (col === 2) { col = 0; y += IMG_H + (photo.caption ? 18 : 10); }
+    }
+    if (col === 1) y += IMG_H + 10;
+    y += 20;
+  } else {
+    doc.font('R').fontSize(8.5).fillColor('#9ca3af')
+       .text('(Снимките се прилагат като отделно приложение / Photos attached separately)', ML, y, { width: PW, align: 'center' });
+    y += 30;
+  }
+
+  // Signature block
+  if (y + 80 > doc.page.height - 60) { doc.addPage(); y = HEADER_H + 10; }
+  y += 10;
+  doc.moveTo(ML, y).lineTo(ML + PW, y).lineWidth(0.3).strokeColor('#e5e7eb').stroke();
+  y += 15;
+
+  doc.font('R').fontSize(8.5).fillColor('#374151')
+     .text('Имотът е предаден в описаното по-горе състояние. Страните нямат взаимни претенции.', ML, y, { width: PW });
+  y += 10;
+  doc.font('R').fontSize(8).fillColor('#6b7280')
+     .text('The property has been handed over in the condition described above. The parties have no mutual claims.', ML, y, { width: PW });
+  y += 22;
+
+  const sigY = y;
+  const col2 = PW / 2 - 15;
+  doc.font('B').fontSize(8.5).fillColor('#111827')
+     .text('НАЕМОДАТЕЛ / LANDLORD:', ML, sigY, { width: col2, lineBreak: false });
+  doc.font('B').fontSize(8.5).fillColor('#111827')
+     .text('НАЕМАТЕЛ / TENANT:', ML + PW / 2, sigY, { width: col2, lineBreak: false });
+  const lineY2 = sigY + 40;
+  doc.moveTo(ML,           lineY2).lineTo(ML + col2,       lineY2).lineWidth(0.7).strokeColor('#374151').stroke();
+  doc.moveTo(ML + PW / 2, lineY2).lineTo(ML + PW,          lineY2).lineWidth(0.7).strokeColor('#374151').stroke();
+  doc.font('R').fontSize(7.5).fillColor('#6b7280')
+     .text(contract.landlord_name || issuer.name || '', ML, lineY2 + 4, { width: col2, align: 'center', lineBreak: false });
+  doc.font('R').fontSize(7.5).fillColor('#6b7280')
+     .text(contract.tenant_name || '', ML + PW / 2, lineY2 + 4, { width: col2, align: 'center', lineBreak: false });
 }
 
 // ─── Router ────────────────────────────────────────────────────────────────
@@ -439,7 +570,10 @@ module.exports = function(db) {
         абонат_вход:  fields.абонат_вход  || prop?.['абонат_вход'] || '',
       };
 
-      const { filepath, filename } = await generateContractPDF(contract, template, issuer);
+      const photos = property_id
+        ? db.prepare('SELECT * FROM property_photos WHERE property_id=? ORDER BY created_at').all(property_id)
+        : [];
+      const { filepath, filename } = await generateContractPDF(contract, template, issuer, photos);
       contract.pdf_path = filename;
 
       const r = db.prepare(`
@@ -480,7 +614,10 @@ module.exports = function(db) {
       const template = db.prepare('SELECT * FROM contract_templates WHERE id=?').get(contract.template_id);
       if (!template) return res.status(404).json({ error: 'Шаблонът не е намерен' });
       const issuer = getIssuer(db);
-      const { filename } = await generateContractPDF(contract, template, issuer);
+      const photos = contract.property_id
+        ? db.prepare('SELECT * FROM property_photos WHERE property_id=? ORDER BY created_at').all(contract.property_id)
+        : [];
+      const { filename } = await generateContractPDF(contract, template, issuer, photos);
       db.prepare('UPDATE contracts SET pdf_path=? WHERE id=?').run(filename, contract.id);
       res.json({ ok: true, filename });
     } catch (err) { res.status(500).json({ error: err.message }); }

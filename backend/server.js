@@ -156,6 +156,16 @@ async function main() {
   )`);
   console.log('tenant_history table ready');
 
+  // Property photos
+  db.exec(`CREATE TABLE IF NOT EXISTS property_photos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    property_id INTEGER NOT NULL REFERENCES properties(id),
+    filename TEXT NOT NULL,
+    caption TEXT DEFAULT '',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+  console.log('property_photos table ready');
+
   // Auth (public)
   app.use('/api/auth', require('./routes/auth')());
 

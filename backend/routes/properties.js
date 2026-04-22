@@ -1,4 +1,20 @@
 const express = require('express');
+const multer  = require('multer');
+const path    = require('path');
+const fs      = require('fs');
+
+const PHOTOS_DIR = path.join(__dirname, '../data/property_photos');
+if (!fs.existsSync(PHOTOS_DIR)) fs.mkdirSync(PHOTOS_DIR, { recursive: true });
+
+const photoStorage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, PHOTOS_DIR),
+  filename:    (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    cb(null, `prop_${req.params.id}_${Date.now()}${ext}`);
+  },
+});
+const uploadPhoto = multer({ storage: photoStorage, limits: { fileSize: 10 * 1024 * 1024 } });
+
 module.exports = function(db) {
   const router = express.Router();
 
@@ -209,6 +225,44 @@ module.exports = function(db) {
 
     const result = Object.values(monthMap).sort((a, b) => a.месец.localeCompare(b.месец));
     res.json(result);
+  });
+
+  // ── Property photos ───────────────────────────────────────────
+  router.get('/:id/photos', (req, res) => {
+    const rows = db.prepare('SELECT * FROM property_photos WHERE property_id=? ORDER BY created_at').all(req.params.id);
+    res.json(rows);
+  });
+
+  router.post('/:id/photos', uploadPhoto.array('photos', 20), (req, res) => {
+    if (!req.files || req.files.length === 0) return res.status(400).json({ error: 'Няма файлове' });
+    const inserted = req.files.map(f => {
+      const caption = req.body.caption || '';
+      const r = db.prepare('INSERT INTO property_photos (property_id, filename, caption) VALUES (?,?,?)').run(req.params.id, f.filename, caption);
+      return { id: r.lastInsertRowid, filename: f.filename, caption };
+    });
+    res.status(201).json(inserted);
+  });
+
+  router.patch('/:id/photos/:photoId', (req, res) => {
+    db.prepare('UPDATE property_photos SET caption=? WHERE id=? AND property_id=?').run(req.body.caption || '', req.params.photoId, req.params.id);
+    res.json({ ok: true });
+  });
+
+  router.delete('/:id/photos/:photoId', (req, res) => {
+    const row = db.prepare('SELECT filename FROM property_photos WHERE id=? AND property_id=?').get(req.params.photoId, req.params.id);
+    if (row) {
+      const fp = path.join(PHOTOS_DIR, row.filename);
+      if (fs.existsSync(fp)) fs.unlinkSync(fp);
+      db.prepare('DELETE FROM property_photos WHERE id=?').run(req.params.photoId);
+    }
+    res.json({ ok: true });
+  });
+
+  // Serve photo file
+  router.get('/:id/photos/:photoId/file', (req, res) => {
+    const row = db.prepare('SELECT filename FROM property_photos WHERE id=? AND property_id=?').get(req.params.photoId, req.params.id);
+    if (!row) return res.status(404).end();
+    res.sendFile(path.join(PHOTOS_DIR, row.filename));
   });
 
   return router;
