@@ -17,6 +17,7 @@ module.exports = function(db) {
       port: Number(smtp.port) || 587,
       secure: Number(smtp.port) === 465,
       auth: { user: smtp.user, pass: smtp.pass },
+      family: 4, // force IPv4 — Railway blocks IPv6 outbound
     });
   }
 
