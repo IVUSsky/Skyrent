@@ -117,8 +117,8 @@ function patchMarketVal(db) {
 
 function seedContractTemplate(db) {
   try {
-    const count = db.prepare('SELECT COUNT(*) as c FROM contract_templates').get();
-    if (count && count.c > 0) return;
+    const exists = db.prepare("SELECT id FROM contract_templates WHERE name = 'Стандартен договор за наем — Sky Capital'").get();
+    if (exists) return;
   } catch { return; }
 
   const template = `# ДОГОВОР ЗА НАЕМ НА НЕДВИЖИМ ИМОТ
