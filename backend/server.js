@@ -29,7 +29,6 @@ async function main() {
   // Seed (idempotent)
   seed(db);
   patchMarketVal(db);
-  seedContractTemplate(db);
 
   // Ensure columns exist (idempotent migrations)
   try { db.exec("ALTER TABLE properties ADD COLUMN тип TEXT");           console.log('Migration: added column тип'); }    catch(_) {}
@@ -90,6 +89,7 @@ async function main() {
    'tenant_mol TEXT'
   ].forEach(col => { try { db.exec(`ALTER TABLE contracts ADD COLUMN ${col}`); } catch(_) {} });
   console.log('contracts tables ready');
+  seedContractTemplate(db);
 
   // Rent invoices
   db.exec(`CREATE TABLE IF NOT EXISTS rent_invoices (
