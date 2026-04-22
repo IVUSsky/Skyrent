@@ -123,13 +123,19 @@ module.exports = function(db) {
       const телефон            = body.телефон            !== undefined ? body.телефон            : current.телефон;
       const invoice_enabled    = body.invoice_enabled    !== undefined ? body.invoice_enabled    : current.invoice_enabled;
       const invoice_recipient  = body.invoice_recipient  !== undefined ? body.invoice_recipient  : current.invoice_recipient;
+      const абонат_ток  = body.абонат_ток  !== undefined ? body.абонат_ток  : current.абонат_ток;
+      const абонат_вода = body.абонат_вода !== undefined ? body.абонат_вода : current.абонат_вода;
+      const абонат_тец  = body.абонат_тец  !== undefined ? body.абонат_тец  : current.абонат_тец;
+      const абонат_вход = body.абонат_вход !== undefined ? body.абонат_вход : current.абонат_вход;
 
       db.prepare(`
         UPDATE properties
         SET адрес=?, район=?, наем=?, наемател=?, статус=?, market_val=?, тип=?, площ=?, покупна=?, ремонт=?,
-            email=?, телефон=?, invoice_enabled=?, invoice_recipient=?, updated_at=CURRENT_TIMESTAMP
+            email=?, телефон=?, invoice_enabled=?, invoice_recipient=?,
+            абонат_ток=?, абонат_вода=?, абонат_тец=?, абонат_вход=?,
+            updated_at=CURRENT_TIMESTAMP
         WHERE id=?
-      `).run(адрес, район, наем, наемател, статус, market_val, тип, площ, покупна, ремонт, email, телефон, invoice_enabled, invoice_recipient, id);
+      `).run(адрес, район, наем, наемател, статус, market_val, тип, площ, покупна, ремонт, email, телефон, invoice_enabled, invoice_recipient, абонат_ток, абонат_вода, абонат_тец, абонат_вход, id);
 
       const updated = db.prepare('SELECT * FROM properties WHERE id = ?').get(id);
       console.log('Saved тип:', updated.тип, '| покупна:', updated.покупна, '| ремонт:', updated.ремонт);

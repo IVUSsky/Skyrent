@@ -44,6 +44,10 @@ export default function Portfolio({ API }) {
       площ: prop['площ'] || '',
       покупна: prop['покупна'] || 0,
       ремонт: prop['ремонт'] || 0,
+      абонат_ток:  prop['абонат_ток']  || '',
+      абонат_вода: prop['абонат_вода'] || '',
+      абонат_тец:  prop['абонат_тец']  || '',
+      абонат_вход: prop['абонат_вход'] || '',
     })
   }
 
@@ -90,6 +94,10 @@ export default function Portfolio({ API }) {
         площ: editForm.площ !== '' ? Number(editForm.площ) : null,
         покупна: editForm.покупна !== '' ? Number(editForm.покупна) : null,
         ремонт: editForm.ремонт !== '' ? Number(editForm.ремонт) : null,
+        абонат_ток:  editForm.абонат_ток  || null,
+        абонат_вода: editForm.абонат_вода || null,
+        абонат_тец:  editForm.абонат_тец  || null,
+        абонат_вход: editForm.абонат_вход || null,
       }),
     })
       .then(r => r.json())
@@ -361,6 +369,30 @@ export default function Portfolio({ API }) {
                   min="0"
                   step="1"
                 />
+              </div>
+            </div>
+
+            {/* Utility account numbers */}
+            <div className="mt-4 border-t pt-4">
+              <div className="text-sm font-semibold text-gray-700 mb-3">Абонатни номера</div>
+              <div className="grid grid-cols-2 gap-3">
+                {[
+                  { label: '⚡ Ток', key: 'абонат_ток' },
+                  { label: '💧 Вода', key: 'абонат_вода' },
+                  { label: '🔥 ТЕЦ', key: 'абонат_тец' },
+                  { label: '🏢 Входна такса', key: 'абонат_вход' },
+                ].map(({ label, key }) => (
+                  <div key={key}>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">{label}</label>
+                    <input
+                      type="text"
+                      value={editForm[key] || ''}
+                      onChange={e => setEditForm(f => ({ ...f, [key]: e.target.value }))}
+                      placeholder="—"
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                ))}
               </div>
             </div>
 

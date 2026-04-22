@@ -325,6 +325,10 @@ export default function Contracts({ API }) {
         tenant_phone:     prop['телефон']  || f.tenant_phone,
         tenant_email:     prop['email']    || f.tenant_email,
         monthly_rent:     prop['наем']     || f.monthly_rent,
+        абонат_ток:       prop['абонат_ток']  || f.абонат_ток  || '',
+        абонат_вода:      prop['абонат_вода'] || f.абонат_вода || '',
+        абонат_тец:       prop['абонат_тец']  || f.абонат_тец  || '',
+        абонат_вход:      prop['абонат_вход'] || f.абонат_вход || '',
       }))
     } else {
       setNewForm(f => ({ ...f, property_id: propId }))
@@ -685,10 +689,24 @@ export default function Contracts({ API }) {
                   <textarea value={newForm.conditions} onChange={e=>setNewForm(f=>({...f,conditions:e.target.value}))}
                     rows={2} placeholder="Допълнителни клаузи..."
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                  <label className="block text-xs font-medium text-gray-600 mb-1 mt-2">Бележки / Абонатни номера <span className="text-gray-400 font-normal">(→ {`{{АБОНАТ_ТОК}}`})</span></label>
-                  <input type="text" value={newForm.notes} onChange={e=>setNewForm(f=>({...f,notes:e.target.value}))}
-                    placeholder="Ток: 3102846561113"
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  <div className="mt-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
+                    <div className="text-xs font-semibold text-gray-700 mb-2">⚡💧🔥🏢 Абонатни номера <span className="text-gray-400 font-normal">(попълват се автоматично от имота)</span></div>
+                    <div className="grid grid-cols-2 gap-2">
+                      {[
+                        ['абонат_ток',  '⚡ Ток',          '3102846561113'],
+                        ['абонат_вода', '💧 Вода',         '123456789'],
+                        ['абонат_тец',  '🔥 ТЕЦ',          '987654321'],
+                        ['абонат_вход', '🏢 Входна такса', '456789123'],
+                      ].map(([k, l, ph]) => (
+                        <div key={k}>
+                          <label className="block text-xs font-medium text-gray-600 mb-1">{l}</label>
+                          <input type="text" value={newForm[k] || ''} onChange={e => setNewForm(f => ({ ...f, [k]: e.target.value }))}
+                            placeholder={ph}
+                            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               </div>
 
