@@ -433,6 +433,10 @@ module.exports = function(db) {
         delivery_date: fields.delivery_date || null,
         conditions:    fields.conditions   || '',
         notes:         fields.notes        || '',
+        абонат_ток:   fields.абонат_ток   || prop?.['абонат_ток']  || '',
+        абонат_вода:  fields.абонат_вода  || prop?.['абонат_вода'] || '',
+        абонат_тец:   fields.абонат_тец   || prop?.['абонат_тец']  || '',
+        абонат_вход:  fields.абонат_вход  || prop?.['абонат_вход'] || '',
       };
 
       const { filepath, filename } = await generateContractPDF(contract, template, issuer);
@@ -445,8 +449,10 @@ module.exports = function(db) {
           tenant_doc, tenant_doc_date, tenant_doc_country, tenant_dob,
           property_address, property_description, property_area,
           monthly_rent, currency, deposit, payment_day,
-          start_date, end_date, delivery_date, conditions, notes, pdf_path)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+          start_date, end_date, delivery_date, conditions, notes,
+          абонат_ток, абонат_вода, абонат_тец, абонат_вход,
+          pdf_path)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       `).run(
         contract.template_id, contract.property_id, contract.contract_number, contract.status,
         contract.landlord_type, contract.landlord_name, contract.landlord_address, contract.landlord_egn,
@@ -456,6 +462,7 @@ module.exports = function(db) {
         contract.property_address, contract.property_description, contract.property_area,
         contract.monthly_rent, contract.currency, contract.deposit, contract.payment_day,
         contract.start_date, contract.end_date, contract.delivery_date, contract.conditions, contract.notes,
+        contract.абонат_ток, contract.абонат_вода, contract.абонат_тец, contract.абонат_вход,
         filename
       );
 

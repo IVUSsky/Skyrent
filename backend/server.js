@@ -86,7 +86,8 @@ async function main() {
   // Migrate new contract fields
   ['landlord_type TEXT DEFAULT \'физическо\'','landlord_lk TEXT','landlord_lk_date TEXT',
    'tenant_doc TEXT','tenant_doc_date TEXT','tenant_doc_country TEXT','tenant_dob TEXT','delivery_date DATE',
-   'tenant_mol TEXT'
+   'tenant_mol TEXT',
+   'абонат_ток TEXT','абонат_вода TEXT','абонат_тец TEXT','абонат_вход TEXT'
   ].forEach(col => { try { db.exec(`ALTER TABLE contracts ADD COLUMN ${col}`); } catch(_) {} });
   console.log('contracts tables ready');
   seedContractTemplate(db);
