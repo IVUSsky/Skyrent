@@ -343,8 +343,7 @@ export default function Contracts({ API }) {
 
     const url    = editingTemplate ? `${API}/api/contracts/templates/${editingTemplate.id}` : `${API}/api/contracts/templates`
     const method = editingTemplate ? 'PUT' : 'POST'
-    const token = localStorage.getItem('skyrent_token')
-    const r = await fetch(url, { method, body: fd, headers: token ? { Authorization: `Bearer ${token}` } : {} })
+    const r = await apiFetch(url, { method, body: fd })
     const d = await r.json()
     if (d.id || d.ok) { showToast('Шаблонът е запазен'); load(); setEditingTemplate(null); setTemplateForm({ name: '', content: DEFAULT_TEMPLATE }); setLogoFile(null) }
     else showToast('Грешка: ' + d.error, 'error')
