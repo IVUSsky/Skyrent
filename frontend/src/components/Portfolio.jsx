@@ -370,29 +370,29 @@ export default function Portfolio({ API }) {
                   step="1"
                 />
               </div>
-            </div>
 
-            {/* Utility account numbers */}
-            <div className="mt-4 border-t pt-4">
-              <div className="text-sm font-semibold text-gray-700 mb-3">Абонатни номера</div>
-              <div className="grid grid-cols-2 gap-3">
-                {[
-                  { label: '⚡ Ток', key: 'абонат_ток' },
-                  { label: '💧 Вода', key: 'абонат_вода' },
-                  { label: '🔥 ТЕЦ', key: 'абонат_тец' },
-                  { label: '🏢 Входна такса', key: 'абонат_вход' },
-                ].map(({ label, key }) => (
-                  <div key={key}>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">{label}</label>
-                    <input
-                      type="text"
-                      value={editForm[key] || ''}
-                      onChange={e => setEditForm(f => ({ ...f, [key]: e.target.value }))}
-                      placeholder="—"
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                  </div>
-                ))}
+              {/* Utility account numbers */}
+              <div className="border-t pt-4">
+                <div className="text-sm font-semibold text-gray-700 mb-3">Абонатни номера</div>
+                <div className="grid grid-cols-2 gap-3">
+                  {[
+                    { label: '⚡ Ток', key: 'абонат_ток' },
+                    { label: '💧 Вода', key: 'абонат_вода' },
+                    { label: '🔥 ТЕЦ', key: 'абонат_тец' },
+                    { label: '🏢 Входна такса', key: 'абонат_вход' },
+                  ].map(({ label, key }) => (
+                    <div key={key}>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">{label}</label>
+                      <input
+                        type="text"
+                        value={editForm[key] || ''}
+                        onChange={e => setEditForm(f => ({ ...f, [key]: e.target.value }))}
+                        placeholder="—"
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
 
