@@ -5,8 +5,8 @@ const fs = require('fs');
 const multer = require('multer');
 const nodemailer = require('nodemailer');
 
-const FONT_REGULAR = 'C:/Windows/Fonts/arial.ttf';
-const FONT_BOLD    = 'C:/Windows/Fonts/arialbd.ttf';
+const FONT_REGULAR = path.join(__dirname, '../fonts/arial.ttf');
+const FONT_BOLD    = path.join(__dirname, '../fonts/arialbd.ttf');
 const PDF_DIR      = path.join(__dirname, '../data/contracts');
 const LOGO_DIR     = path.join(__dirname, '../data/logos');
 const DEFAULT_LOGO = path.join(LOGO_DIR, 'sky_capital_logo.png');
