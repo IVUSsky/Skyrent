@@ -4,7 +4,7 @@ const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
 const { initDb } = require('./db/db');
-const { seed, patchMarketVal } = require('./db/seed');
+const { seed, patchMarketVal, seedContractTemplate } = require('./db/seed');
 
 const app = express();
 const PORT = process.env.PORT || 3002;
@@ -28,8 +28,8 @@ async function main() {
 
   // Seed (idempotent)
   seed(db);
-  // Patch market_val for properties with покупна=0 (runs every startup, skips manual edits)
   patchMarketVal(db);
+  seedContractTemplate(db);
 
   // Ensure columns exist (idempotent migrations)
   try { db.exec("ALTER TABLE properties ADD COLUMN тип TEXT");           console.log('Migration: added column тип'); }    catch(_) {}
