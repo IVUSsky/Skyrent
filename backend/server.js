@@ -166,6 +166,21 @@ async function main() {
   )`);
   console.log('property_photos table ready');
 
+  // Contract annexes
+  db.exec(`CREATE TABLE IF NOT EXISTS contract_annexes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    contract_id INTEGER NOT NULL REFERENCES contracts(id),
+    annex_number TEXT NOT NULL,
+    annex_date DATE NOT NULL,
+    new_end_date DATE NOT NULL,
+    new_monthly_rent REAL NOT NULL,
+    new_currency TEXT DEFAULT 'EUR',
+    notes TEXT DEFAULT '',
+    pdf_path TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+  console.log('contract_annexes table ready');
+
   // Auth (public)
   app.use('/api/auth', require('./routes/auth')());
 

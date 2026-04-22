@@ -287,6 +287,10 @@ export default function Contracts({ API }) {
   const [sending, setSending] = useState(null)
   const [termModal, setTermModal] = useState(null)
   const [termDate, setTermDate] = useState(new Date().toISOString().slice(0,10))
+  const [annexModal, setAnnexModal] = useState(null)
+  const [annexForm, setAnnexForm] = useState({ annex_date: '', new_end_date: '', new_monthly_rent: '', new_currency: 'EUR', notes: '' })
+  const [annexes, setAnnexes] = useState([])
+  const [creatingAnnex, setCreatingAnnex] = useState(false)
 
   const showToast = (msg, type = 'success') => {
     setToast({ msg, type })
@@ -399,6 +403,47 @@ export default function Contracts({ API }) {
   const deleteContract = (c) => {
     if (!window.confirm(`Изтриване на договор ${c.contract_number}?`)) return
     apiFetch(`${API}/api/contracts/${c.id}`, { method: 'DELETE' }).then(() => { load(); showToast('Изтрито') })
+  }
+
+  const openAnnex = (c) => {
+    setAnnexModal(c)
+    // Default: extend 1 year from current end_date or today
+    const base = c.end_date || new Date().toISOString().slice(0,10)
+    const d = new Date(base)
+    d.setFullYear(d.getFullYear() + 1)
+    const newEnd = d.toISOString().slice(0,10)
+    setAnnexForm({
+      annex_date: new Date().toISOString().slice(0,10),
+      new_end_date: newEnd,
+      new_monthly_rent: c.monthly_rent || '',
+      new_currency: c.currency || 'EUR',
+      notes: '',
+    })
+    apiFetch(`${API}/api/contracts/${c.id}/annexes`).then(r => r.json()).then(setAnnexes)
+  }
+
+  const createAnnex = () => {
+    setCreatingAnnex(true)
+    apiFetch(`${API}/api/contracts/${annexModal.id}/annexes`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(annexForm),
+    })
+      .then(r => r.json())
+      .then(d => {
+        setCreatingAnnex(false)
+        if (d.ok) {
+          showToast(`Анекс ${d.annex_number} създаден`)
+          apiFetch(`${API}/api/contracts/${annexModal.id}/annexes`).then(r => r.json()).then(setAnnexes)
+          load()
+        } else showToast('Грешка: ' + d.error, 'error')
+      })
+      .catch(e => { setCreatingAnnex(false); showToast(e.message, 'error') })
+  }
+
+  const deleteAnnex = (a) => {
+    if (!window.confirm(`Изтриване на анекс ${a.annex_number}?`)) return
+    apiFetch(`${API}/api/contracts/${annexModal.id}/annexes/${a.id}`, { method: 'DELETE' })
+      .then(() => setAnnexes(ax => ax.filter(x => x.id !== a.id)))
   }
 
   return (
@@ -514,6 +559,8 @@ export default function Contracts({ API }) {
                                 ⛔
                               </button>
                             )}
+                            <button onClick={() => openAnnex(c)}
+                              className="px-2 py-1 text-xs bg-purple-50 border border-purple-200 text-purple-700 hover:bg-purple-100 rounded" title="Анекс">📎</button>
                             <button onClick={() => deleteContract(c)}
                               className="px-2 py-1 text-xs bg-red-50 border border-red-200 text-red-600 hover:bg-red-100 rounded">🗑️</button>
                           </div>
@@ -819,6 +866,99 @@ export default function Contracts({ API }) {
                 className="ml-auto px-5 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-40 rounded-lg">
                 💾 Запази шаблона
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Annex modal */}
+      {annexModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg flex flex-col" style={{ maxHeight: '90vh' }}>
+            <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between flex-shrink-0">
+              <div>
+                <h3 className="font-bold text-gray-900">📎 Анекс към договор</h3>
+                <p className="text-xs text-gray-500 mt-0.5">Договор № {annexModal.contract_number} — {annexModal.tenant_name}</p>
+              </div>
+              <button onClick={() => setAnnexModal(null)} className="text-gray-400 hover:text-gray-600 text-2xl leading-none">×</button>
+            </div>
+            <div className="px-6 py-4 overflow-y-auto flex-1 space-y-4">
+              {/* New annex form */}
+              <div className="bg-purple-50 border border-purple-200 rounded-xl p-4 space-y-3">
+                <div className="text-sm font-semibold text-purple-800">Нов анекс</div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Дата на анекса</label>
+                    <input type="date" value={annexForm.annex_date}
+                      onChange={e => setAnnexForm(f => ({ ...f, annex_date: e.target.value }))}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Нова крайна дата</label>
+                    <input type="date" value={annexForm.new_end_date}
+                      onChange={e => setAnnexForm(f => ({ ...f, new_end_date: e.target.value }))}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Нова наемна цена</label>
+                    <input type="number" value={annexForm.new_monthly_rent} min="0" step="1"
+                      onChange={e => setAnnexForm(f => ({ ...f, new_monthly_rent: e.target.value }))}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Валута</label>
+                    <select value={annexForm.new_currency}
+                      onChange={e => setAnnexForm(f => ({ ...f, new_currency: e.target.value }))}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500">
+                      <option value="EUR">EUR €</option>
+                      <option value="BGN">BGN лв.</option>
+                    </select>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Допълнителни бележки (по избор)</label>
+                  <textarea value={annexForm.notes} rows={2}
+                    onChange={e => setAnnexForm(f => ({ ...f, notes: e.target.value }))}
+                    placeholder="напр. наемателят поема разходите за..."
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500" />
+                </div>
+                {annexForm.new_monthly_rent && Number(annexForm.new_monthly_rent) !== Number(annexModal.monthly_rent) && (
+                  <div className={`text-xs font-medium px-3 py-2 rounded-lg ${Number(annexForm.new_monthly_rent) > Number(annexModal.monthly_rent) ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
+                    {Number(annexForm.new_monthly_rent) > Number(annexModal.monthly_rent) ? '▲' : '▼'} Промяна от {Number(annexModal.monthly_rent).toLocaleString('bg-BG')} → {Number(annexForm.new_monthly_rent).toLocaleString('bg-BG')} {annexForm.new_currency}
+                  </div>
+                )}
+                <button onClick={createAnnex} disabled={creatingAnnex || !annexForm.annex_date || !annexForm.new_end_date || !annexForm.new_monthly_rent}
+                  className="w-full py-2 text-sm font-semibold text-white bg-purple-600 hover:bg-purple-700 disabled:opacity-50 rounded-lg">
+                  {creatingAnnex ? 'Генерира...' : '📎 Създай анекс и PDF'}
+                </button>
+              </div>
+
+              {/* Existing annexes */}
+              {annexes.length > 0 && (
+                <div>
+                  <div className="text-sm font-semibold text-gray-700 mb-2">Съществуващи анекси</div>
+                  <div className="space-y-2">
+                    {annexes.map(a => (
+                      <div key={a.id} className="flex items-center justify-between bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
+                        <div>
+                          <div className="text-xs font-bold text-purple-700">{a.annex_number}</div>
+                          <div className="text-xs text-gray-500">{fmtDate(a.annex_date)} · до {fmtDate(a.new_end_date)} · {Number(a.new_monthly_rent).toLocaleString('bg-BG')} {a.new_currency}</div>
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => apiFetch(`${API}/api/contracts/${annexModal.id}/annexes/${a.id}/pdf`).then(r => r.blob()).then(b => window.open(URL.createObjectURL(b), '_blank'))}
+                            className="px-2 py-1 text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 rounded">📄</button>
+                          <button onClick={() => deleteAnnex(a)}
+                            className="px-2 py-1 text-xs bg-red-50 border border-red-200 text-red-600 hover:bg-red-100 rounded">🗑️</button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="flex-shrink-0 px-6 py-3 border-t border-gray-200 flex justify-end">
+              <button onClick={() => setAnnexModal(null)} className="px-4 py-2 text-sm text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg">Затвори</button>
             </div>
           </div>
         </div>

@@ -451,6 +451,179 @@ function appendHandoverProtocol(doc, contract, issuer, photos, ML, MR, PW, HEADE
      .text(contract.tenant_name || '', ML + PW / 2, lineY2 + 4, { width: col2, align: 'center', lineBreak: false });
 }
 
+// Generate Annex PDF
+function generateAnnexPDF(annex, contract, issuer) {
+  return new Promise((resolve, reject) => {
+    const filename = `annex_${annex.annex_number.replace(/[^a-zA-Z0-9]/g, '-')}.pdf`;
+    const filepath = path.join(PDF_DIR, filename);
+
+    const ML = 50, MR = 50;
+    const HEADER_H = 100, FOOTER_H = 45;
+
+    const doc = new PDFDocument({
+      size: 'A4',
+      margins: { top: HEADER_H, bottom: FOOTER_H + 10, left: ML, right: MR },
+      autoFirstPage: true,
+    });
+    const ws = fs.createWriteStream(filepath);
+    doc.pipe(ws);
+    doc.registerFont('R', FONT_REGULAR);
+    doc.registerFont('B', FONT_BOLD);
+
+    const PW = doc.page.width - ML - MR;
+    const PH = doc.page.height;
+
+    // Resolve logo
+    const resolvedLogo = (() => {
+      if (fs.existsSync(DEFAULT_LOGO)) return DEFAULT_LOGO;
+      return null;
+    })();
+
+    let pageNum = 0;
+    let inHeader = false;
+    function drawHeader() {
+      if (inHeader) return;
+      inHeader = true;
+      pageNum++;
+      const W = doc.page.width;
+      if (resolvedLogo) { try { doc.image(resolvedLogo, ML, 8, { height: 68, fit: [175, 68] }); } catch(_) {} }
+      const infoX = W - MR - 210;
+      [
+        { text: issuer.name || 'Sky Capital OOD', bold: true,  y: 12 },
+        issuer.eik     ? { text: `ЕИК: ${issuer.eik}`,  bold: false, y: 24 } : null,
+        issuer.address ? { text: issuer.address,         bold: false, y: 35 } : null,
+        issuer.iban    ? { text: `IBAN: ${issuer.iban}`, bold: false, y: 57 } : null,
+      ].filter(Boolean).forEach(({ text, bold, y }) => {
+        doc.save();
+        doc.font(bold ? 'B' : 'R').fontSize(bold ? 8 : 7).fillColor(bold ? '#111827' : '#4b5563');
+        doc.rect(infoX, y, 210, 12).clip();
+        doc.text(text, infoX, y, { width: 210, align: 'right', lineBreak: false });
+        doc.restore();
+      });
+      doc.moveTo(ML, 82).lineTo(W - MR, 82).lineWidth(2).strokeColor('#4AABCC').stroke();
+      const fy = PH - 32;
+      const saved = doc.page.margins.bottom;
+      doc.page.margins.bottom = 0;
+      doc.moveTo(ML, fy).lineTo(W - MR, fy).lineWidth(0.4).strokeColor('#d1d5db').stroke();
+      doc.font('R').fontSize(7).fillColor('#9ca3af');
+      doc.text(issuer.name || 'Sky Capital OOD', ML, fy + 6, { width: PW / 2, lineBreak: false });
+      doc.text(`${pageNum}`, ML, fy + 6, { width: PW, align: 'right', lineBreak: false });
+      doc.page.margins.bottom = saved;
+      doc.y = HEADER_H; doc.x = ML;
+      inHeader = false;
+    }
+    doc.on('pageAdded', () => drawHeader());
+    drawHeader();
+
+    let y = HEADER_H + 10;
+
+    // Title
+    doc.font('B').fontSize(14).fillColor('#0e3d52')
+       .text('АНЕКС КЪМ ДОГОВОР ЗА НАЕМ', ML, y, { width: PW, align: 'center' });
+    y += 20;
+    doc.font('B').fontSize(11).fillColor('#374151')
+       .text(`№ ${annex.annex_number}`, ML, y, { width: PW, align: 'center' });
+    y += 8;
+    doc.font('R').fontSize(9).fillColor('#6b7280')
+       .text(`ANNEX TO LEASE AGREEMENT No. ${contract.contract_number}`, ML, y, { width: PW, align: 'center' });
+    y += 18;
+    doc.moveTo(ML, y).lineTo(ML + PW, y).lineWidth(0.5).strokeColor('#d1d5db').stroke();
+    y += 14;
+
+    // Preamble
+    doc.font('R').fontSize(9.5).fillColor('#111827')
+       .text(`Днес, ${fmtDate(annex.annex_date)}, в гр. София, между долуподписаните страни:`, ML, y, { width: PW });
+    y = doc.y + 12;
+
+    // Parties block
+    const isCompany = contract.landlord_type === 'дружество';
+    const landlordLabel = isCompany
+      ? `Скай Кепитъл ООД, ЕИК ${contract.landlord_egn || issuer.eik || ''}, МОЛ: Иво Лазаров Лазаров`
+      : `${contract.landlord_name || issuer.name || ''}, ЕГН ${contract.landlord_egn || issuer.eik || ''}`;
+
+    [
+      ['НАЕМОДАТЕЛ / LANDLORD:', landlordLabel],
+      ['НАЕМАТЕЛ / TENANT:', `${contract.tenant_name}${contract.tenant_egn ? ', ЕГН ' + contract.tenant_egn : ''}`],
+    ].forEach(([lbl, val]) => {
+      doc.font('B').fontSize(9).fillColor('#374151').text(lbl + '  ', ML, y, { continued: true });
+      doc.font('R').fontSize(9).fillColor('#111827').text(val, { width: PW - 140 });
+      y = doc.y + 6;
+    });
+
+    y += 10;
+    doc.font('R').fontSize(9.5).fillColor('#111827')
+       .text('се споразумяха за следното / agreed as follows:', ML, y, { width: PW });
+    y = doc.y + 14;
+    doc.moveTo(ML, y).lineTo(ML + PW, y).lineWidth(0.3).strokeColor('#e5e7eb').stroke();
+    y += 14;
+
+    // Articles
+    const oldRent = Number(contract.monthly_rent || 0);
+    const newRent = Number(annex.new_monthly_rent);
+    const rentDiff = newRent - oldRent;
+    const rentWords = amountToWords(Math.round(newRent));
+
+    const articles = [
+      {
+        bg: `Чл. 1. Срокът на Договор за наем № ${contract.contract_number} се удължава и страните се съгласяват имотът да бъде наеман до ${fmtDate(annex.new_end_date)}.`,
+        en: `Art. 1. The term of Lease Agreement No. ${contract.contract_number} is hereby extended and the parties agree that the property shall be leased until ${fmtDate(annex.new_end_date)}.`,
+      },
+      {
+        bg: `Чл. 2. Считано от ${fmtDate(annex.annex_date)}, месечната наемна цена се определя на ${newRent.toLocaleString('bg-BG')} ${annex.new_currency} (${rentWords} ${annex.new_currency === 'EUR' ? 'евро' : 'лева'})${rentDiff !== 0 ? `, което представлява ${rentDiff > 0 ? 'увеличение' : 'намаление'} от ${Math.abs(rentDiff).toLocaleString('bg-BG')} ${annex.new_currency} спрямо предходния наем` : ''}.`,
+        en: `Art. 2. As of ${fmtDate(annex.annex_date)}, the monthly rent is set at ${newRent.toLocaleString('bg-BG')} ${annex.new_currency} (${rentWords} ${annex.new_currency === 'EUR' ? 'euros' : 'leva'})${rentDiff !== 0 ? `, representing a ${rentDiff > 0 ? 'increase' : 'decrease'} of ${Math.abs(rentDiff).toLocaleString('bg-BG')} ${annex.new_currency} compared to the previous rent` : ''}.`,
+      },
+      {
+        bg: 'Чл. 3. Всички останали условия по Договора за наем остават в сила и непроменени.',
+        en: 'Art. 3. All other terms and conditions of the Lease Agreement remain in force and unchanged.',
+      },
+    ];
+
+    if (annex.notes) {
+      articles.push({
+        bg: `Чл. 4. Допълнително уговорено: ${annex.notes}`,
+        en: `Art. 4. Additionally agreed: ${annex.notes}`,
+      });
+    }
+
+    articles.forEach(({ bg, en }) => {
+      doc.font('R').fontSize(9.5).fillColor('#111827').text(bg, ML, y, { width: PW });
+      y = doc.y + 4;
+      doc.font('R').fontSize(8.5).fillColor('#6b7280').text(en, ML, y, { width: PW });
+      y = doc.y + 14;
+    });
+
+    y += 10;
+    doc.moveTo(ML, y).lineTo(ML + PW, y).lineWidth(0.3).strokeColor('#e5e7eb').stroke();
+    y += 16;
+
+    doc.font('R').fontSize(9).fillColor('#374151')
+       .text('Анексът се подписа в два еднакви екземпляра — по един за всяка от страните.', ML, y, { width: PW });
+    y = doc.y + 4;
+    doc.font('R').fontSize(8).fillColor('#6b7280')
+       .text('This Annex is signed in two identical copies — one for each party.', ML, y, { width: PW });
+    y = doc.y + 24;
+
+    // Signatures
+    const sigY = y;
+    const col  = PW / 2 - 15;
+    doc.font('B').fontSize(9).fillColor('#111827')
+       .text('НАЕМОДАТЕЛ / LANDLORD:', ML, sigY, { width: col, lineBreak: false });
+    doc.font('B').fontSize(9).fillColor('#111827')
+       .text('НАЕМАТЕЛ / TENANT:', ML + PW / 2, sigY, { width: col, lineBreak: false });
+    const lineY = sigY + 45;
+    doc.moveTo(ML,           lineY).lineTo(ML + col,  lineY).lineWidth(0.7).strokeColor('#374151').stroke();
+    doc.moveTo(ML + PW / 2, lineY).lineTo(ML + PW,   lineY).lineWidth(0.7).strokeColor('#374151').stroke();
+    doc.font('R').fontSize(8).fillColor('#6b7280')
+       .text(contract.landlord_name || issuer.name || '', ML, lineY + 5, { width: col, align: 'center', lineBreak: false });
+    doc.font('R').fontSize(8).fillColor('#6b7280')
+       .text(contract.tenant_name || '', ML + PW / 2, lineY + 5, { width: col, align: 'center', lineBreak: false });
+
+    doc.end();
+    ws.on('finish', () => resolve(filename));
+    ws.on('error', reject);
+  });
+}
+
 // ─── Router ────────────────────────────────────────────────────────────────
 module.exports = function(db) {
   const router = express.Router();
@@ -738,6 +911,72 @@ module.exports = function(db) {
     if (!fs.existsSync(filepath)) return res.status(404).json({ error: 'PDF не е намерен' });
     res.setHeader('Content-Type', 'application/pdf');
     fs.createReadStream(filepath).pipe(res);
+  });
+
+  // ── Annexes ────────────────────────────────────────────────────────────────
+
+  // List annexes for a contract
+  router.get('/:id/annexes', (req, res) => {
+    res.json(db.prepare('SELECT * FROM contract_annexes WHERE contract_id=? ORDER BY created_at').all(req.params.id));
+  });
+
+  // Download annex PDF
+  router.get('/:id/annexes/:annexId/pdf', (req, res) => {
+    const annex = db.prepare('SELECT * FROM contract_annexes WHERE id=? AND contract_id=?').get(req.params.annexId, req.params.id);
+    if (!annex || !annex.pdf_path) return res.status(404).json({ error: 'Not found' });
+    const fp = path.join(PDF_DIR, annex.pdf_path);
+    if (!fs.existsSync(fp)) return res.status(404).json({ error: 'PDF не е намерен' });
+    res.setHeader('Content-Type', 'application/pdf');
+    fs.createReadStream(fp).pipe(res);
+  });
+
+  // Create annex
+  router.post('/:id/annexes', async (req, res) => {
+    try {
+      const contract = db.prepare('SELECT * FROM contracts WHERE id=?').get(req.params.id);
+      if (!contract) return res.status(404).json({ error: 'Not found' });
+
+      const { annex_date, new_end_date, new_monthly_rent, new_currency, notes } = req.body;
+      if (!annex_date || !new_end_date || !new_monthly_rent) {
+        return res.status(400).json({ error: 'annex_date, new_end_date и new_monthly_rent са задължителни' });
+      }
+
+      // Annex number within this contract
+      const count = db.prepare('SELECT COUNT(*) as c FROM contract_annexes WHERE contract_id=?').get(contract.id).c;
+      const annex_number = `${contract.contract_number}/А-${count + 1}`;
+
+      const issuer = getIssuer(db);
+      const annex = { contract_id: contract.id, annex_number, annex_date, new_end_date, new_monthly_rent: Number(new_monthly_rent), new_currency: new_currency || contract.currency || 'EUR', notes: notes || '' };
+
+      const filename = await generateAnnexPDF(annex, contract, issuer);
+
+      const r = db.prepare(`
+        INSERT INTO contract_annexes (contract_id, annex_number, annex_date, new_end_date, new_monthly_rent, new_currency, notes, pdf_path)
+        VALUES (?,?,?,?,?,?,?,?)
+      `).run(annex.contract_id, annex.annex_number, annex.annex_date, annex.new_end_date, annex.new_monthly_rent, annex.new_currency, annex.notes, filename);
+
+      // Update contract end_date and rent
+      db.prepare('UPDATE contracts SET end_date=?, monthly_rent=?, currency=? WHERE id=?')
+        .run(new_end_date, Number(new_monthly_rent), annex.new_currency, contract.id);
+
+      // Update property rent if active contract
+      if (contract.status === 'active' && contract.property_id) {
+        db.prepare('UPDATE properties SET наем=? WHERE id=?').run(Number(new_monthly_rent), contract.property_id);
+      }
+
+      res.status(201).json({ ok: true, id: r.lastInsertRowid, annex_number, filename });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  // Delete annex
+  router.delete('/:id/annexes/:annexId', (req, res) => {
+    const annex = db.prepare('SELECT * FROM contract_annexes WHERE id=? AND contract_id=?').get(req.params.annexId, req.params.id);
+    if (annex?.pdf_path) {
+      const fp = path.join(PDF_DIR, annex.pdf_path);
+      if (fs.existsSync(fp)) fs.unlinkSync(fp);
+    }
+    db.prepare('DELETE FROM contract_annexes WHERE id=?').run(req.params.annexId);
+    res.json({ ok: true });
   });
 
   // Delete contract
