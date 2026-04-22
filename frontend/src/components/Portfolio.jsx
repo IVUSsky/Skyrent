@@ -177,7 +177,7 @@ export default function Portfolio({ API }) {
               {properties.map((p, i) => {
                 const cost = (p['покупна'] || 0) + (p['ремонт'] || 0)
                 return (
-                  <tr key={p.id} className={i % 2 === 0 ? 'bg-white hover:bg-blue-50' : 'bg-gray-50 hover:bg-blue-50'}>
+                  <tr key={p.id} onClick={() => openPhotos(p)} className={`cursor-pointer ${i % 2 === 0 ? 'bg-white hover:bg-blue-50' : 'bg-gray-50 hover:bg-blue-50'}`}>
                     <td className="px-3 py-2 text-gray-400 font-mono text-xs">{p.id}</td>
                     <td className="px-3 py-2 font-medium text-gray-900 whitespace-nowrap">{p['адрес']}</td>
                     <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{p['район']}</td>
@@ -192,7 +192,7 @@ export default function Portfolio({ API }) {
                     <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{p['тип']}</td>
                     <td className="px-3 py-2 text-right text-gray-600">{cost > 0 ? fmt(cost) : '—'}</td>
                     <td className="px-3 py-2 text-right text-gray-600">{p.market_val ? fmt(p.market_val) : '—'}</td>
-                    <td className="px-3 py-2">
+                    <td className="px-3 py-2" onClick={e => e.stopPropagation()}>
                       <div className="flex gap-1">
                         <button
                           onClick={() => openEdit(p)}
