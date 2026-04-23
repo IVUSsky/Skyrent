@@ -850,54 +850,51 @@ module.exports = function(db) {
       const toEmail = req.body.email || contract.tenant_email;
       if (!toEmail) return res.status(400).json({ error: 'Няма email адрес' });
 
-      const smtp = getSmtp(db);
-      if (!smtp) return res.status(400).json({ error: 'SMTP не е конфигуриран' });
+      const resendKey = process.env.RESEND_API_KEY;
+      if (!resendKey) return res.status(400).json({ error: 'RESEND_API_KEY не е конфигуриран' });
 
       const filepath = path.join(PDF_DIR, contract.pdf_path);
       if (!fs.existsSync(filepath)) return res.status(404).json({ error: 'PDF не е намерен — регенерирайте' });
 
       const issuer = getIssuer(db);
-      const transporter = nodemailer.createTransport({
-        host: smtp.host, port: Number(smtp.port) || 587,
-        secure: smtp.port == 465,
-        auth: { user: smtp.user, pass: smtp.pass },
-        tls: { rejectUnauthorized: false },
-      });
+      const fromEmail = process.env.RESEND_FROM_EMAIL || `info@${(issuer.email || 'skycapital.pro').split('@').slice(-1)[0]}`;
+      const fromName  = issuer.name || 'Sky Capital';
 
-      const hasLogo = fs.existsSync(DEFAULT_LOGO);
-      const logoTag = hasLogo
-        ? `<img src="cid:skylogo" alt="Sky Capital" style="height:44px;display:block;">`
-        : `<span style="color:#e8eaf2;font-size:16px;font-weight:bold;letter-spacing:2px;">SKY CAPITAL</span>`;
       const emailHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"></head>
 <body style="margin:0;padding:0;background:#f0f2f8;font-family:Arial,sans-serif;">
   <table width="100%" cellpadding="0" cellspacing="0" style="background:#f0f2f8;padding:30px 0;">
     <tr><td align="center">
       <table width="600" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:10px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.10);">
-        <tr><td style="background:#1a1a2e;padding:18px 32px;">${logoTag}</td></tr>
+        <tr><td style="background:#1a1a2e;padding:18px 32px;font-size:18px;font-weight:bold;color:#fff;letter-spacing:2px;">${fromName}</td></tr>
         <tr><td style="padding:32px 32px 24px;color:#1a1a2e;font-size:14px;line-height:1.7;">
           <p>Уважаеми/а <strong>${contract.tenant_name}</strong>,</p>
           <p>Прилагаме <strong>Договор за наем № ${contract.contract_number}</strong> за имот <strong>${contract.property_address}</strong>.</p>
           <p>Моля прегледайте, подпишете и върнете сканиран екземпляр.</p>
-          <p style="margin-top:24px;">С уважение,<br><strong>${issuer.name || 'Sky Capital'}</strong></p>
+          <p style="margin-top:24px;">С уважение,<br><strong>${fromName}</strong></p>
         </td></tr>
         <tr><td style="background:#e8eaf2;padding:14px 32px;text-align:center;font-size:11px;color:#6b7280;border-top:1px solid #d1d5db;">
-          <strong>${issuer.name || 'Sky Capital OOD'}</strong> &nbsp;|&nbsp; info@skycapital.pro &nbsp;|&nbsp; +359 888 64 64 20
+          <strong>${fromName}</strong>
         </td></tr>
       </table>
     </td></tr>
   </table>
 </body></html>`;
-      await transporter.sendMail({
-        from: `"${issuer.name || 'Sky Capital'}" <${smtp.user}>`,
-        to: toEmail,
-        subject: `Договор за наем № ${contract.contract_number}`,
-        text: `Уважаеми/а ${contract.tenant_name},\n\nПрилагаме договор за наем № ${contract.contract_number} за имот ${contract.property_address}.\n\nМоля прегледайте, подпишете и върнете сканиран екземпляр.\n\nС уважение,\n${issuer.name || 'Sky Capital'}`,
-        html: emailHtml,
-        attachments: [
-          ...(hasLogo ? [{ filename: 'logo.png', path: DEFAULT_LOGO, cid: 'skylogo' }] : []),
-          { filename: `Договор_${contract.contract_number}.pdf`, path: filepath },
-        ],
+
+      const pdfBase64 = fs.readFileSync(filepath).toString('base64');
+
+      const response = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          from: `${fromName} <${fromEmail}>`,
+          to: [toEmail],
+          subject: `Договор за наем № ${contract.contract_number}`,
+          html: emailHtml,
+          attachments: [{ filename: `Договор_${contract.contract_number}.pdf`, content: pdfBase64 }],
+        }),
       });
+      const result = await response.json();
+      if (!response.ok) return res.status(500).json({ error: result.message || 'Resend грешка' });
 
       db.prepare("UPDATE contracts SET sent_at=datetime('now') WHERE id=?").run(contract.id);
       res.json({ ok: true });
