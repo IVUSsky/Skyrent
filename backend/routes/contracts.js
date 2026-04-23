@@ -7,8 +7,9 @@ const nodemailer = require('nodemailer');
 
 const FONT_REGULAR = path.join(__dirname, '../fonts/arial.ttf');
 const FONT_BOLD    = path.join(__dirname, '../fonts/arialbd.ttf');
-const PDF_DIR      = path.join(__dirname, '../data/contracts');
-const LOGO_DIR     = path.join(__dirname, '../data/logos');
+const DATA_DIR     = process.env.DATA_DIR || path.join(__dirname, '../data');
+const PDF_DIR      = path.join(DATA_DIR, 'contracts');
+const LOGO_DIR     = path.join(DATA_DIR, 'logos');
 const DEFAULT_LOGO = path.join(LOGO_DIR, 'sky_capital_logo.png');
 [PDF_DIR, LOGO_DIR].forEach(d => { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); });
 
@@ -323,7 +324,7 @@ function generateContractPDF(contract, template, issuer, photos = []) {
   });
 }
 
-const PHOTOS_DIR = path.join(__dirname, '../data/property_photos');
+const PHOTOS_DIR = path.join(DATA_DIR, 'property_photos');
 
 function appendHandoverProtocol(doc, contract, issuer, photos, ML, MR, PW, HEADER_H) {
   doc.addPage();

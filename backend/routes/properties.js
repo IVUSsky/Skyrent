@@ -3,7 +3,8 @@ const multer  = require('multer');
 const path    = require('path');
 const fs      = require('fs');
 
-const PHOTOS_DIR = path.join(__dirname, '../data/property_photos');
+const DATA_DIR   = process.env.DATA_DIR || path.join(__dirname, '../data');
+const PHOTOS_DIR = path.join(DATA_DIR, 'property_photos');
 if (!fs.existsSync(PHOTOS_DIR)) fs.mkdirSync(PHOTOS_DIR, { recursive: true });
 
 const photoStorage = multer.diskStorage({
