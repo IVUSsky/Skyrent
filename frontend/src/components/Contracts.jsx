@@ -383,9 +383,13 @@ export default function Contracts({ API }) {
   }
 
   const sendContract = (c) => {
-    if (!c.tenant_email) { showToast('Няма email адрес на наемателя', 'error'); return }
+    const email = c.tenant_email || window.prompt('Въведете email адрес на наемателя:')
+    if (!email) return
     setSending(c.id)
-    apiFetch(`${API}/api/contracts/${c.id}/send`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+    apiFetch(`${API}/api/contracts/${c.id}/send`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+    })
       .then(r => r.json())
       .then(d => { setSending(null); d.ok ? (showToast('Договорът е изпратен'), load()) : showToast('Грешка: ' + d.error, 'error') })
       .catch(e => { setSending(null); showToast(e.message, 'error') })
@@ -541,12 +545,10 @@ export default function Contracts({ API }) {
                           <div className="flex gap-1 flex-wrap">
                             <button onClick={() => apiFetch(`${API}/api/contracts/${c.id}/pdf`).then(r => r.blob()).then(b => window.open(URL.createObjectURL(b), '_blank'))}
                               className="px-2 py-1 text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 rounded" title="PDF">📄</button>
-                            {c.tenant_email && (
-                              <button onClick={() => sendContract(c)} disabled={sending===c.id}
-                                className="px-2 py-1 text-xs bg-orange-50 border border-orange-200 text-orange-700 hover:bg-orange-100 rounded disabled:opacity-50" title="Изпрати">
-                                {sending===c.id ? '...' : '📧'}
-                              </button>
-                            )}
+                            <button onClick={() => sendContract(c)} disabled={sending===c.id}
+                              className="px-2 py-1 text-xs bg-orange-50 border border-orange-200 text-orange-700 hover:bg-orange-100 rounded disabled:opacity-50" title="Изпрати по мейл">
+                              {sending===c.id ? '...' : '📧'}
+                            </button>
                             {c.status === 'draft' && (
                               <button onClick={() => activateContract(c)}
                                 className="px-2 py-1 text-xs bg-green-50 border border-green-300 text-green-700 hover:bg-green-100 rounded" title="Активирай">
