@@ -288,5 +288,67 @@ module.exports = function(db) {
     }
   });
 
+  // GET /transactions — all with filters
+  router.get('/transactions', (req, res) => {
+    try {
+      const { месец, категория, search, limit = 200, offset = 0 } = req.query;
+      const where = [];
+      const params = [];
+      if (месец) { where.push('месец = ?'); params.push(месец); }
+      if (категория && категория !== 'all') { where.push('категория = ?'); params.push(категория); }
+      if (search) { where.push('(контрагент LIKE ? OR основание LIKE ?)'); params.push(`%${search}%`, `%${search}%`); }
+      const whereStr = where.length ? 'WHERE ' + where.join(' AND ') : '';
+      const rows = db.prepare(`SELECT * FROM transactions ${whereStr} ORDER BY дата DESC, id DESC LIMIT ? OFFSET ?`).all(...params, Number(limit), Number(offset));
+      const total = db.prepare(`SELECT COUNT(*) as cnt FROM transactions ${whereStr}`).get(...params).cnt;
+      res.json({ rows, total });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // PATCH /transactions/:id/category — update category
+  router.patch('/transactions/:id/category', (req, res) => {
+    try {
+      const { категория } = req.body;
+      if (!категория) return res.status(400).json({ error: 'категория е задължителна' });
+      db.prepare('UPDATE transactions SET категория = ? WHERE id = ?').run(категория, req.params.id);
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // GET /stats — KPI aggregates
+  router.get('/stats', (req, res) => {
+    try {
+      const now = new Date();
+      const pad = n => String(n).padStart(2, '0');
+      const currentMonth = `${now.getFullYear()}-${pad(now.getMonth() + 1)}`;
+      const d3 = new Date(now.getFullYear(), now.getMonth() - 2, 1);
+      const month3ago = `${d3.getFullYear()}-${pad(d3.getMonth() + 1)}`;
+      const yearStart = `${now.getFullYear()}-01`;
+      const lastYearStr = String(now.getFullYear() - 1);
+
+      const agg = (whereClause, params) => db.prepare(`
+        SELECT
+          COALESCE(SUM(CASE WHEN категория='наем' THEN сума ELSE 0 END), 0) as наем,
+          COALESCE(SUM(CASE WHEN категория='вноска' THEN сума ELSE 0 END), 0) as вноска,
+          COALESCE(SUM(CASE WHEN категория IN ('разход','разход_друг') THEN сума ELSE 0 END), 0) as разход,
+          COALESCE(SUM(CASE WHEN категория='нап_ддс' THEN сума ELSE 0 END), 0) as нап_ддс,
+          COUNT(*) as cnt
+        FROM transactions ${whereClause}
+      `).get(...params);
+
+      res.json({
+        currentMonth: { label: currentMonth, ...agg('WHERE месец = ?', [currentMonth]) },
+        last3months:  { label: `${month3ago} → ${currentMonth}`, ...agg('WHERE месец >= ?', [month3ago]) },
+        ytd:          { label: `${now.getFullYear()} ГТД`, ...agg('WHERE месец >= ?', [yearStart]) },
+        lastYear:     { label: lastYearStr, ...agg('WHERE месец LIKE ?', [`${lastYearStr}-%`]) },
+      });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   return router;
 };
