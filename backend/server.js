@@ -16,8 +16,8 @@ const allowedOrigins = process.env.FRONTEND_URL
 app.use(cors({
   origin: (origin, cb) => cb(null, true) // permissive; tighten via FRONTEND_URL in prod
 }));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 async function main() {
   const db = await initDb();
