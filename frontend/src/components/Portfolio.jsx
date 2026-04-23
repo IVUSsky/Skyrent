@@ -162,12 +162,12 @@ export default function Portfolio({ API }) {
       </div>
 
       <div className="bg-white rounded-xl shadow overflow-hidden">
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto overflow-y-auto" style={{ maxHeight: 'calc(100vh - 220px)' }}>
           <table className="min-w-full divide-y divide-gray-200 text-sm">
-            <thead className="bg-gray-50">
+            <thead className="bg-gray-50 sticky top-0 z-10">
               <tr>
                 {['#', 'Адрес', 'Район', 'Статус', 'Наемател', 'Наем (EUR €)', 'Площ м²', 'Тип', 'Покупна+Ремонт (EUR €)', 'Пазарна стойност (EUR €)', ''].map(h => (
-                  <th key={h} className="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">
+                  <th key={h} className="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap bg-gray-50">
                     {h}
                   </th>
                 ))}
