@@ -1,5 +1,5 @@
 import { apiFetch } from '../api'
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 
 const STATUS_COLORS = {
   '✅': 'bg-green-100 text-green-800',
@@ -20,6 +20,10 @@ export default function Portfolio({ API }) {
   const [saving, setSaving] = useState(false)
   const [addingNew, setAddingNew] = useState(false)
   const [newForm, setNewForm] = useState(EMPTY_FORM)
+  const tableScrollRef = useRef()
+  const topScrollRef   = useRef()
+  const [tableWidth, setTableWidth] = useState(0)
+
   const [photosProp, setPhotosProp] = useState(null)
   const [photos, setPhotos] = useState([])
   const [uploading, setUploading] = useState(false)
@@ -34,6 +38,15 @@ export default function Portfolio({ API }) {
   }
 
   useEffect(() => { load() }, [])
+
+  useEffect(() => {
+    const el = tableScrollRef.current
+    if (!el) return
+    const ro = new ResizeObserver(() => setTableWidth(el.scrollWidth))
+    ro.observe(el)
+    setTableWidth(el.scrollWidth)
+    return () => ro.disconnect()
+  }, [properties])
 
   const openEdit = (prop) => {
     setEditingProp(prop)
@@ -162,7 +175,17 @@ export default function Portfolio({ API }) {
       </div>
 
       <div className="bg-white rounded-xl shadow overflow-hidden">
-        <div className="overflow-x-auto overflow-y-auto" style={{ maxHeight: 'calc(100vh - 220px)' }}>
+        {/* Top scrollbar */}
+        <div ref={topScrollRef}
+          className="overflow-x-auto overflow-y-hidden"
+          style={{ height: '12px' }}
+          onScroll={() => { if (tableScrollRef.current) tableScrollRef.current.scrollLeft = topScrollRef.current.scrollLeft }}>
+          <div style={{ width: tableWidth, height: '1px' }} />
+        </div>
+        <div ref={tableScrollRef}
+          className="overflow-x-auto overflow-y-auto"
+          style={{ maxHeight: 'calc(100vh - 232px)' }}
+          onScroll={() => { if (topScrollRef.current) topScrollRef.current.scrollLeft = tableScrollRef.current.scrollLeft }}>
           <table className="min-w-full divide-y divide-gray-200 text-sm">
             <thead className="bg-gray-50 sticky top-0 z-10">
               <tr>
