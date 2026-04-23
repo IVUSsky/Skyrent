@@ -479,6 +479,71 @@ module.exports = function(db) {
     }
   });
 
+  // Update invoice (regenerates PDF)
+  router.put('/:id', async (req, res) => {
+    try {
+      const inv = db.prepare('SELECT * FROM rent_invoices WHERE id=?').get(req.params.id);
+      if (!inv) return res.status(404).json({ error: 'Not found' });
+      const { amount, vat_rate, notes, payment_type, tax_event_date, due_date, recipient_name, recipient_address, recipient_eik, recipient_mol } = req.body;
+      const newAmount   = amount  !== undefined ? Number(amount)   : inv.amount;
+      const newVatRate  = vat_rate !== undefined ? Number(vat_rate) : (inv.vat_rate || 0);
+      const newVatAmt   = Math.round(newAmount * newVatRate) / 100;
+      const newTotal    = newAmount + newVatAmt;
+      db.prepare(`UPDATE rent_invoices SET
+        amount=?, vat_rate=?, vat_amount=?, total=?,
+        notes=?, payment_type=?, tax_event_date=?, due_date=?,
+        recipient_name=?, recipient_address=?, recipient_eik=?, recipient_mol=?
+        WHERE id=?`).run(
+        newAmount, newVatRate, newVatAmt, newTotal,
+        notes ?? inv.notes, payment_type ?? inv.payment_type,
+        tax_event_date ?? inv.tax_event_date, due_date ?? inv.due_date,
+        recipient_name ?? inv.recipient_name, recipient_address ?? inv.recipient_address,
+        recipient_eik ?? inv.recipient_eik, recipient_mol ?? inv.recipient_mol,
+        inv.id
+      );
+      // Regenerate PDF
+      const updated = db.prepare('SELECT * FROM rent_invoices WHERE id=?').get(inv.id);
+      const issuer  = getIssuer(db);
+      const { filename } = await generatePDF(updated, issuer);
+      db.prepare('UPDATE rent_invoices SET pdf_path=? WHERE id=?').run(filename, inv.id);
+      res.json({ ok: true });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  // Send to Kontrolisi (accounting email)
+  router.post('/:id/send-kontrolisi', async (req, res) => {
+    try {
+      const inv = db.prepare('SELECT * FROM rent_invoices WHERE id=?').get(req.params.id);
+      if (!inv) return res.status(404).json({ error: 'Not found' });
+      const settingsRow = db.prepare("SELECT value FROM settings WHERE key='kontrolisi_email'").get();
+      const toEmail = settingsRow?.value;
+      if (!toEmail) return res.status(400).json({ error: 'Kontrolisi email не е зададен в Настройки' });
+      const resendKey = process.env.RESEND_API_KEY;
+      if (!resendKey) return res.status(400).json({ error: 'RESEND_API_KEY не е конфигуриран' });
+      const filepath = path.join(PDF_DIR, inv.pdf_path);
+      if (!fs.existsSync(filepath)) return res.status(404).json({ error: 'PDF не е намерен' });
+      const issuer    = getIssuer(db);
+      const fromEmail = process.env.RESEND_FROM_EMAIL || `info@skycapital.pro`;
+      const isCN      = inv.type === 'credit_note';
+      const docLabel  = isCN ? `Кредитно известие № ${inv.invoice_number}` : `Фактура № ${inv.invoice_number}`;
+      const pdfBase64 = fs.readFileSync(filepath).toString('base64');
+      const response  = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          from: `${issuer.name || 'Sky Capital'} <${fromEmail}>`,
+          to: [toEmail],
+          subject: `${docLabel} — ${inv.recipient_name || inv.tenant_name || ''}`,
+          html: `<p>${docLabel} от ${issuer.name || 'Sky Capital'} е приложена.</p>`,
+          attachments: [{ filename: `${docLabel.replace(/\s/g,'_')}.pdf`, content: pdfBase64 }],
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok) return res.status(500).json({ error: result.message || 'Грешка при изпращане' });
+      res.json({ ok: true });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
   // Delete invoice
   router.delete('/:id', (req, res) => {
     const inv = db.prepare('SELECT * FROM rent_invoices WHERE id = ?').get(req.params.id);

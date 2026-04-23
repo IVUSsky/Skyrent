@@ -15,7 +15,7 @@ function fmtDate(d) {
   return new Date(d).toLocaleDateString('bg-BG')
 }
 
-export default function Invoices({ API }) {
+export default function Invoices({ API, role }) {
   const defaultMonth = new Date().toISOString().slice(0, 7)
 
   // Filters & search
@@ -37,12 +37,16 @@ export default function Invoices({ API }) {
   // Actions
   const [generating, setGenerating]   = useState(null)
   const [sending, setSending]         = useState(null)
+  const [sendingKontrolisi, setSendingKontrolisi] = useState(null)
+  const [kontrolisiEmail, setKontrolisiEmail] = useState('')
 
   // Modals
   const [recipientModal, setRecipientModal] = useState(null)
   const [recipientForm, setRecipientForm]   = useState({ name: '', address: '', eik: '', mol: '' })
-  const [cnModal, setCnModal]               = useState(null) // invoice for credit note
+  const [cnModal, setCnModal]               = useState(null)
   const [cnForm, setCnForm]                 = useState({ reason: '', notes: '' })
+  const [editModal, setEditModal]           = useState(null)
+  const [editForm, setEditForm]             = useState({})
 
   const showToast = (msg, type = 'success') => {
     setToast({ msg, type })
@@ -74,6 +78,12 @@ export default function Invoices({ API }) {
   }, [API, buildQuery])
 
   useEffect(() => { load() }, [load])
+
+  useEffect(() => {
+    apiFetch(`${API}/api/settings`).then(r => r.json()).then(d => {
+      if (d.kontrolisi_email) setKontrolisiEmail(d.kontrolisi_email)
+    }).catch(() => {})
+  }, [API])
 
   const toggleSort = (col) => {
     if (sort === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
@@ -151,6 +161,29 @@ export default function Invoices({ API }) {
     if (!window.confirm(`Изтриване на ${inv.type === 'credit_note' ? 'кредитно известие' : 'фактура'} ${inv.invoice_number}?`)) return
     apiFetch(`${API}/api/invoices/${inv.id}`, { method: 'DELETE' })
       .then(() => { load(); showToast('Изтрито') })
+  }
+
+  const openEdit = (inv) => {
+    setEditModal(inv)
+    setEditForm({ amount: inv.amount, vat_rate: inv.vat_rate || 0, notes: inv.notes || '', payment_type: inv.payment_type || '', recipient_name: inv.recipient_name || '', recipient_address: inv.recipient_address || '', recipient_eik: inv.recipient_eik || '', recipient_mol: inv.recipient_mol || '' })
+  }
+
+  const saveEdit = () => {
+    apiFetch(`${API}/api/invoices/${editModal.id}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(editForm),
+    }).then(r => r.json()).then(d => {
+      if (d.ok) { setEditModal(null); showToast('Фактурата е обновена'); load() }
+      else showToast('Грешка: ' + d.error, 'error')
+    })
+  }
+
+  const sendKontrolisi = (inv) => {
+    setSendingKontrolisi(inv.id)
+    apiFetch(`${API}/api/invoices/${inv.id}/send-kontrolisi`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+      .then(r => r.json())
+      .then(d => { setSendingKontrolisi(null); d.ok ? showToast('Изпратено към Kontrolisi') : showToast('Грешка: ' + d.error, 'error') })
+      .catch(e => { setSendingKontrolisi(null); showToast(e.message, 'error') })
   }
 
   const exportCSV = () => {
@@ -406,16 +439,28 @@ export default function Invoices({ API }) {
                               {sending === inv.id ? '...' : '📧'}
                             </button>
                           )}
+                          <button onClick={() => openEdit(inv)}
+                            className="px-2 py-1 text-xs bg-blue-50 border border-blue-200 text-blue-700 hover:bg-blue-100 rounded" title="Редактирай">
+                            ✏️
+                          </button>
+                          {kontrolisiEmail && (
+                            <button onClick={() => sendKontrolisi(inv)} disabled={sendingKontrolisi === inv.id}
+                              className="px-2 py-1 text-xs bg-green-50 border border-green-200 text-green-700 hover:bg-green-100 rounded disabled:opacity-50" title="Изпрати към Kontrolisi">
+                              {sendingKontrolisi === inv.id ? '...' : '📊'}
+                            </button>
+                          )}
                           {!isCN && (
                             <button onClick={() => { setCnModal(inv); setCnForm({ reason: '', notes: '' }) }}
                               className="px-2 py-1 text-xs bg-purple-50 border border-purple-200 text-purple-700 hover:bg-purple-100 rounded" title="Издай кредитно известие">
                               КИ
                             </button>
                           )}
-                          <button onClick={() => deleteInvoice(inv)}
-                            className="px-2 py-1 text-xs bg-red-50 border border-red-200 text-red-600 hover:bg-red-100 rounded" title="Изтрий">
-                            🗑️
-                          </button>
+                          {role !== 'broker' && (
+                            <button onClick={() => deleteInvoice(inv)}
+                              className="px-2 py-1 text-xs bg-red-50 border border-red-200 text-red-600 hover:bg-red-100 rounded" title="Изтрий">
+                              🗑️
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -490,6 +535,50 @@ export default function Invoices({ API }) {
               <button onClick={createCreditNote} disabled={!cnForm.reason.trim()}
                 className="px-4 py-2 text-sm font-medium text-white bg-purple-600 hover:bg-purple-700 disabled:opacity-40 rounded-lg">
                 Издай КИ
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Edit Invoice Modal */}
+      {editModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md">
+            <div className="px-6 py-4 border-b border-gray-200">
+              <h3 className="font-bold text-gray-900">✏️ Редактирай фактура {editModal.invoice_number}</h3>
+            </div>
+            <div className="px-6 py-4 space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Сума (без ДДС)</label>
+                  <input type="number" value={editForm.amount} min="0" step="0.01"
+                    onChange={e => setEditForm(f => ({ ...f, amount: e.target.value }))}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">ДДС %</label>
+                  <select value={editForm.vat_rate} onChange={e => setEditForm(f => ({ ...f, vat_rate: e.target.value }))}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="0">0%</option>
+                    <option value="20">20%</option>
+                  </select>
+                </div>
+              </div>
+              {[['recipient_name','Получател (фирма/лице)'],['recipient_address','Адрес на получателя'],['recipient_eik','ЕИК/ЕГН'],['recipient_mol','МОЛ'],['payment_type','Начин на плащане'],['notes','Бележки']].map(([k,l]) => (
+                <div key={k}>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">{l}</label>
+                  <input type="text" value={editForm[k]} onChange={e => setEditForm(f => ({ ...f, [k]: e.target.value }))}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+              ))}
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-700">
+                Новата сума: <strong>{fmtMoney(Number(editForm.amount) * (1 + Number(editForm.vat_rate) / 100))} €</strong> (с ДДС)
+              </div>
+            </div>
+            <div className="px-6 py-4 border-t flex justify-end gap-2">
+              <button onClick={() => setEditModal(null)} className="px-4 py-2 text-sm text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg">Отказ</button>
+              <button onClick={saveEdit} className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg">
+                💾 Запази и регенерирай PDF
               </button>
             </div>
           </div>

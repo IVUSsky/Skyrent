@@ -13,6 +13,10 @@ export default function Settings({ API }) {
   const [smtp, setSmtp] = useState({ host: '', port: '587', user: '', pass: '', from_name: 'Sky Capital' })
   const [testingSmtp, setTestingSmtp] = useState(false)
   const [issuer, setIssuer] = useState({ name: '', address: '', eik: '', mol: '', vat_number: '', iban: '', vat_rate: '0' })
+  const [kontrolisiEmail, setKontrolisiEmail] = useState('')
+  const [users, setUsers] = useState([])
+  const [newUser, setNewUser] = useState({ username: '', password: '', role: 'broker', name: '', email: '' })
+  const [savingUser, setSavingUser] = useState(false)
 
   const showToast = (msg, type = 'success') => {
     setToast({ msg, type })
@@ -20,6 +24,7 @@ export default function Settings({ API }) {
   }
 
   useEffect(() => {
+    apiFetch(`${API}/api/users`).then(r => r.json()).then(d => { if (Array.isArray(d)) setUsers(d) }).catch(() => {})
     apiFetch(`${API}/api/settings`)
       .then(r => r.json())
       .then(data => {
@@ -29,6 +34,7 @@ export default function Settings({ API }) {
         setExpenseCats(data.expense_cats || [])
         if (data.smtp) setSmtp(data.smtp)
         if (data.issuer) setIssuer(data.issuer)
+        if (data.kontrolisi_email) setKontrolisiEmail(data.kontrolisi_email)
         setLoading(false)
       })
       .catch(e => { setError(e.message); setLoading(false) })
@@ -71,7 +77,7 @@ export default function Settings({ API }) {
     apiFetch(`${API}/api/settings`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tenant_map, expense_cats: expenseCats, smtp, issuer }),
+      body: JSON.stringify({ tenant_map, expense_cats: expenseCats, smtp, issuer, kontrolisi_email: kontrolisiEmail }),
     })
       .then(r => r.json())
       .then(data => {
@@ -97,6 +103,75 @@ export default function Settings({ API }) {
           {toast.msg}
         </div>
       )}
+
+      {/* Users */}
+      <div className="bg-white rounded-xl shadow border border-gray-100 p-5 mb-6">
+        <h3 className="text-base font-bold text-gray-800 mb-3">👥 Потребители и достъп</h3>
+        <div className="space-y-2 mb-4">
+          {users.map(u => (
+            <div key={u.id} className="flex items-center gap-3 bg-gray-50 rounded-lg px-3 py-2">
+              <div className="flex-1">
+                <span className="font-medium text-sm text-gray-800">{u.name || u.username}</span>
+                <span className="text-xs text-gray-500 ml-2">@{u.username}</span>
+              </div>
+              <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${u.role === 'admin' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>
+                {u.role === 'admin' ? 'Администратор' : 'Брокер'}
+              </span>
+              {u.role !== 'admin' && (
+                <button onClick={() => {
+                  if (!window.confirm(`Изтриване на ${u.username}?`)) return
+                  apiFetch(`${API}/api/users/${u.id}`, { method: 'DELETE' })
+                    .then(r => r.json()).then(() => setUsers(us => us.filter(x => x.id !== u.id)))
+                }} className="text-red-400 hover:text-red-600 text-xs">🗑️</button>
+              )}
+            </div>
+          ))}
+        </div>
+        <div className="border-t pt-4">
+          <div className="text-sm font-semibold text-gray-700 mb-2">Добави потребител</div>
+          <div className="grid grid-cols-2 gap-2 mb-2">
+            {[['username','Потребителско име'],['password','Парола'],['name','Имена'],['email','Имейл']].map(([k,l]) => (
+              <div key={k}>
+                <label className="block text-xs font-medium text-gray-600 mb-1">{l}</label>
+                <input type={k==='password'?'password':'text'} value={newUser[k]}
+                  onChange={e => setNewUser(u => ({...u,[k]:e.target.value}))}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+            ))}
+          </div>
+          <div className="flex items-center gap-3">
+            <select value={newUser.role} onChange={e => setNewUser(u => ({...u,role:e.target.value}))}
+              className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+              <option value="broker">Брокер</option>
+              <option value="admin">Администратор</option>
+            </select>
+            <button disabled={savingUser || !newUser.username || !newUser.password}
+              onClick={() => {
+                setSavingUser(true)
+                apiFetch(`${API}/api/users`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(newUser) })
+                  .then(r => r.json()).then(d => {
+                    setSavingUser(false)
+                    if (d.id) { showToast('Потребителят е създаден'); setNewUser({username:'',password:'',role:'broker',name:'',email:''}); apiFetch(`${API}/api/users`).then(r=>r.json()).then(setUsers) }
+                    else showToast(d.error||'Грешка','error')
+                  }).catch(() => { setSavingUser(false); showToast('Грешка','error') })
+              }}
+              className="px-4 py-1.5 text-sm font-medium text-white bg-green-600 hover:bg-green-700 disabled:opacity-50 rounded-lg">
+              {savingUser ? 'Запазва...' : '+ Добави'}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Kontrolisi */}
+      <div className="bg-white rounded-xl shadow border border-gray-100 p-5 mb-6">
+        <h3 className="text-base font-bold text-gray-800 mb-1">📊 Kontrolisi — счетоводна програма</h3>
+        <p className="text-sm text-gray-500 mb-3">Имейл за изпращане на фактури към Kontrolisi. Всяка фактура може да се изпрати с един бутон.</p>
+        <label className="block text-xs font-medium text-gray-600 mb-1">Имейл адрес на Kontrolisi</label>
+        <input type="email" value={kontrolisiEmail} onChange={e => setKontrolisiEmail(e.target.value)}
+          placeholder="import@kontrolisi.bg"
+          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 mb-2" />
+        <p className="text-xs text-gray-400">Запишете и след това бутонът 📊 ще се появи до всяка фактура.</p>
+      </div>
 
       {/* Backup */}
       <div className="bg-white rounded-xl shadow border border-gray-100 p-5 mb-6">

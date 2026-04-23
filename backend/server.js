@@ -181,8 +181,29 @@ async function main() {
   )`);
   console.log('contract_annexes table ready');
 
+  // Users table
+  db.exec(`CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
+    role TEXT DEFAULT 'broker',
+    name TEXT DEFAULT '',
+    email TEXT DEFAULT '',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+  // Seed first admin from env vars if no users exist
+  const userCount = db.prepare('SELECT COUNT(*) as c FROM users').get().c;
+  if (userCount === 0) {
+    const bcrypt = require('bcryptjs');
+    const hash = bcrypt.hashSync(process.env.APP_PASSWORD || 'skyrent2024', 10);
+    db.prepare("INSERT INTO users (username, password_hash, role, name) VALUES (?,?,?,?)")
+      .run(process.env.APP_USERNAME || 'admin', hash, 'admin', 'Администратор');
+    console.log('Seeded admin user from env vars');
+  }
+  console.log('users table ready');
+
   // Auth (public)
-  app.use('/api/auth', require('./routes/auth')());
+  app.use('/api/auth', require('./routes/auth')(db));
 
   // Protected routes
   const authMiddleware = require('./middleware/auth');
@@ -214,6 +235,7 @@ async function main() {
   app.use('/api/email',      require('./routes/email')(db));
   app.use('/api/invoices',   require('./routes/invoices')(db));
   app.use('/api/contracts',  require('./routes/contracts')(db));
+  app.use('/api/users',      require('./routes/users')(db));
 
   const { expRouter, cpRouter } = require('./routes/expenses')(db);
   app.use('/api/expenses',       expRouter);

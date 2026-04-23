@@ -20,7 +20,7 @@ export default function Login({ API, onLogin }) {
         setLoading(false)
         if (data.token) {
           localStorage.setItem('skyrent_token', data.token)
-          onLogin()
+          onLogin({ role: data.role, name: data.name })
         } else {
           setError(data.error || 'Грешка при вход')
         }
