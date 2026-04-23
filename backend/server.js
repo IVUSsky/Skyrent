@@ -188,6 +188,23 @@ async function main() {
   const authMiddleware = require('./middleware/auth');
   app.use('/api', authMiddleware);
 
+  // Backup — download the SQLite database file
+  const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'db', 'portfolio.db');
+  app.get('/api/backup', (req, res) => {
+    try {
+      // Force a fresh save before download
+      const data = db._sqlDb.export();
+      const buf  = Buffer.from(data);
+      const date = new Date().toISOString().slice(0, 10);
+      res.setHeader('Content-Type', 'application/octet-stream');
+      res.setHeader('Content-Disposition', `attachment; filename="skyrent_backup_${date}.db"`);
+      res.setHeader('Content-Length', buf.length);
+      res.send(buf);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // Routes
   app.use('/api/properties', require('./routes/properties')(db));
   app.use('/api/loans',      require('./routes/loans')(db));

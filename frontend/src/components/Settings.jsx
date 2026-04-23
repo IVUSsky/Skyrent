@@ -98,6 +98,24 @@ export default function Settings({ API }) {
         </div>
       )}
 
+      {/* Backup */}
+      <div className="bg-white rounded-xl shadow border border-gray-100 p-5 mb-6">
+        <h3 className="text-base font-bold text-gray-800 mb-1">💾 Бекап на данните</h3>
+        <p className="text-sm text-gray-500 mb-3">Изтегли копие на базата данни. Препоръчително веднъж седмично.</p>
+        <button
+          onClick={() => apiFetch(`${API}/api/backup`).then(r => r.blob()).then(b => {
+            const date = new Date().toISOString().slice(0,10)
+            const a = document.createElement('a')
+            a.href = URL.createObjectURL(b)
+            a.download = `skyrent_backup_${date}.db`
+            a.click()
+          })}
+          className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg"
+        >
+          ⬇️ Изтегли бекап
+        </button>
+      </div>
+
       {/* Tenant Map */}
       <div className="bg-white rounded-xl shadow border border-gray-100 p-5 mb-6">
         <div className="flex items-center justify-between mb-4">
