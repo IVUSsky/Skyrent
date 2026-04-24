@@ -221,44 +221,77 @@ export default function Analysis({ API }) {
         </div>
       </div>
 
-      {/* Real NOI from expense invoices */}
+      {/* Cash flow breakdown */}
       {expenseSummary && (
         <div className="mb-8">
-          <h3 className="text-lg font-bold text-gray-700 mb-3">Реален NOI (от фактури)</h3>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="bg-white border border-gray-200 rounded-xl p-4">
-              <div className="text-sm font-semibold text-gray-500 mb-1">Годишен наем</div>
-              <div className="text-2xl font-bold text-blue-700">{fmt(metrics.наем_год)} €</div>
-              <div className="text-xs text-gray-400 mt-0.5">само активни имоти × 12</div>
-            </div>
-            <div className="bg-white border border-gray-200 rounded-xl p-4">
-              <div className="text-sm font-semibold text-gray-500 mb-1">Реални разходи (платени)</div>
-              <div className="text-2xl font-bold text-red-600">
-                {fmt(expenseSummary.by_category?.reduce((s, c) => s + (c.paid_amount || 0), 0) || 0)} €
-              </div>
-              <div className="text-xs text-gray-400 mt-0.5">от expense_invoices (paid=1)</div>
-            </div>
-            <div className="bg-white border border-blue-200 rounded-xl p-4 bg-blue-50">
-              <div className="text-sm font-semibold text-gray-500 mb-1">Реален NOI</div>
-              {(() => {
-                const realExpenses = expenseSummary.by_category?.reduce((s, c) => s + (c.paid_amount || 0), 0) || 0
-                const realNOI = (metrics.наем_год || 0) - realExpenses
-                const approxNOI = metrics.NOI || 0
-                const diff = realNOI - approxNOI
-                return (
-                  <>
-                    <div className="text-2xl font-bold text-blue-700">{fmt(realNOI)} €</div>
-                    <div className={`text-xs mt-0.5 ${diff >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                      {diff >= 0 ? '+' : ''}{fmt(diff)} спрямо 90% апрокс. ({fmt(approxNOI)} €)
+          <h3 className="text-lg font-bold text-gray-700 mb-3">Паричен поток (реален)</h3>
+          {(() => {
+            const annualRent     = metrics.наем_год || 0
+            const realExpenses   = expenseSummary.by_category?.reduce((s, c) => s + (c.paid_amount || 0), 0) || 0
+            const annualLoans    = (metrics.total_вноска || 0) * 12
+            const monthlyLoans   = metrics.total_вноска || 0
+            const netCashFlow    = annualRent - realExpenses - annualLoans
+            const netMonthly     = (annualRent / 12) - (realExpenses / 12) - monthlyLoans
+            return (
+              <>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+                  <div className="bg-white border border-gray-200 rounded-xl p-4">
+                    <div className="text-xs font-bold text-gray-500 uppercase mb-1">Годишен наем</div>
+                    <div className="text-xl font-bold text-green-700">+{fmt(annualRent)} €</div>
+                    <div className="text-xs text-gray-400 mt-0.5">{fmt(annualRent/12)} €/мес</div>
+                  </div>
+                  <div className="bg-white border border-gray-200 rounded-xl p-4">
+                    <div className="text-xs font-bold text-gray-500 uppercase mb-1">Разходи (фактури)</div>
+                    <div className="text-xl font-bold text-red-600">-{fmt(realExpenses)} €</div>
+                    <div className="text-xs text-gray-400 mt-0.5">-{fmt(realExpenses/12)} €/мес</div>
+                  </div>
+                  <div className="bg-white border border-orange-200 rounded-xl p-4">
+                    <div className="text-xs font-bold text-gray-500 uppercase mb-1">Кредитни вноски</div>
+                    <div className="text-xl font-bold text-orange-700">-{fmt(annualLoans)} €</div>
+                    <div className="text-xs text-gray-400 mt-0.5">-{fmt(monthlyLoans)} €/мес · {loans.length} кредита</div>
+                  </div>
+                  <div className={`border rounded-xl p-4 ${netCashFlow >= 0 ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
+                    <div className="text-xs font-bold text-gray-500 uppercase mb-1">Нетен паричен поток</div>
+                    <div className={`text-xl font-bold ${netCashFlow >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+                      {netCashFlow >= 0 ? '+' : ''}{fmt(netCashFlow)} €
                     </div>
-                  </>
-                )
-              })()}
-            </div>
-          </div>
+                    <div className={`text-xs mt-0.5 ${netMonthly >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      {netMonthly >= 0 ? '+' : ''}{fmt(netMonthly)} €/мес
+                    </div>
+                  </div>
+                </div>
+                {/* Flow bar */}
+                {annualRent > 0 && (
+                  <div className="bg-white border border-gray-200 rounded-xl p-4 mb-4">
+                    <div className="text-xs font-semibold text-gray-500 uppercase mb-2">Структура на разходите (% от приход)</div>
+                    <div className="flex h-6 rounded-full overflow-hidden text-xs font-bold">
+                      <div className="bg-red-400 flex items-center justify-center text-white transition-all"
+                        style={{ width: `${Math.min(100, (realExpenses/annualRent)*100).toFixed(1)}%` }}
+                        title={`Разходи ${((realExpenses/annualRent)*100).toFixed(1)}%`}>
+                        {(realExpenses/annualRent*100) > 5 ? `${((realExpenses/annualRent)*100).toFixed(0)}%` : ''}
+                      </div>
+                      <div className="bg-orange-400 flex items-center justify-center text-white transition-all"
+                        style={{ width: `${Math.min(100, (annualLoans/annualRent)*100).toFixed(1)}%` }}
+                        title={`Вноски ${((annualLoans/annualRent)*100).toFixed(1)}%`}>
+                        {(annualLoans/annualRent*100) > 5 ? `${((annualLoans/annualRent)*100).toFixed(0)}%` : ''}
+                      </div>
+                      <div className={`flex-1 flex items-center justify-center text-white transition-all ${netCashFlow >= 0 ? 'bg-green-500' : 'bg-red-600'}`}>
+                        {netCashFlow >= 0 ? `Нет ${((netCashFlow/annualRent)*100).toFixed(0)}%` : 'Дефицит'}
+                      </div>
+                    </div>
+                    <div className="flex gap-4 mt-2 text-xs text-gray-500">
+                      <span><span className="inline-block w-3 h-3 rounded bg-red-400 mr-1"></span>Разходи</span>
+                      <span><span className="inline-block w-3 h-3 rounded bg-orange-400 mr-1"></span>Вноски</span>
+                      <span><span className="inline-block w-3 h-3 rounded bg-green-500 mr-1"></span>Нет</span>
+                    </div>
+                  </div>
+                )}
+              </>
+            )
+          })()}
           {expenseSummary.by_category?.length > 0 && (
-            <div className="bg-white border border-gray-200 rounded-xl p-4 mt-4">
-              <div className="text-sm font-semibold text-gray-700 mb-3">Разбивка по категория</div>
+            <div className="bg-white border border-gray-200 rounded-xl p-4">
+              <div className="text-sm font-semibold text-gray-700 mb-3">Разбивка на разходи по категория (фактури)</div>
               <div className="space-y-2">
                 {expenseSummary.by_category.sort((a, b) => (b.paid_amount || 0) - (a.paid_amount || 0)).map(cat => {
                   const total = expenseSummary.by_category.reduce((s, c) => s + (c.paid_amount || 0), 0)
