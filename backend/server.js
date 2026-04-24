@@ -57,6 +57,10 @@ async function main() {
   // Set balance_date to today for loans that don't have one
   db.exec("UPDATE loans SET balance_date = date('now') WHERE balance_date IS NULL");
 
+  // Transactions: add validated + rule_id for smart categorization
+  try { db.exec("ALTER TABLE transactions ADD COLUMN validated INTEGER DEFAULT 1"); console.log('Migration: added validated'); } catch(_) {}
+  try { db.exec("ALTER TABLE transactions ADD COLUMN rule_id INTEGER");             console.log('Migration: added rule_id');   } catch(_) {}
+
   // Contract templates & contracts
   db.exec(`CREATE TABLE IF NOT EXISTS contract_templates (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
