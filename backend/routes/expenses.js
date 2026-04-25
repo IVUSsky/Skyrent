@@ -351,7 +351,7 @@ IBAN EXTRACTION RULES - very important:
     const { supplier_name, supplier_iban, supplier_bic, amount, currency, reason, property_id, expense_category, месец } = req.body;
     db.prepare(`UPDATE expense_invoices SET
       supplier_name=?, supplier_iban=?, supplier_bic=?, amount=?, currency=?,
-      reason=?, property_id=?, expense_category=?, месец=? WHERE id=?`
+      reason=?, property_id=?, expense_category=?, месец=?, status='done' WHERE id=?`
     ).run(supplier_name, supplier_iban, supplier_bic, amount, currency, reason, property_id||null, expense_category, месец, req.params.id);
     res.json({ ok: true });
   });
@@ -396,10 +396,11 @@ IBAN EXTRACTION RULES - very important:
   expRouter.get('/summary', (req, res) => {
     try {
       const { month } = req.query;
-      const w  = month ? 'WHERE месец = ?' : '';
-      const pw = month ? 'WHERE ei.месец = ? AND ei.property_id IS NOT NULL' : 'WHERE ei.property_id IS NOT NULL';
       const p  = month ? [month] : [];
+      const mf = month ? 'AND месец = ?' : '';      // month filter for simple queries
+      const mfe = month ? 'AND ei.месец = ?' : '';  // month filter for joined queries
 
+      // Operational totals (excluding инвестиция)
       const totals = db.prepare(`
         SELECT
           SUM(CASE WHEN currency='BGN' THEN amount ELSE 0 END) as total_bgn,
@@ -408,29 +409,56 @@ IBAN EXTRACTION RULES - very important:
           SUM(paid) as paid_count,
           SUM(CASE WHEN paid=1 THEN amount ELSE 0 END) as paid_amount,
           SUM(CASE WHEN paid=0 THEN amount ELSE 0 END) as unpaid_amount
-        FROM expense_invoices ${w}`).get(...p);
+        FROM expense_invoices
+        WHERE (expense_category IS NULL OR expense_category != 'инвестиция') ${mf}`).get(...p);
 
-      const byCategory = db.prepare(`
+      // Investment totals
+      const investTotals = db.prepare(`
         SELECT
-          expense_category as category,
-          SUM(amount) as total_amount,
-          COUNT(*) as count,
-          SUM(CASE WHEN paid=1 THEN amount ELSE 0 END) as paid_amount,
-          SUM(CASE WHEN paid=1 THEN 1 ELSE 0 END) as paid_count
-        FROM expense_invoices ${w}
-        GROUP BY expense_category`).all(...p);
+          SUM(CASE WHEN currency='BGN' THEN amount ELSE 0 END) as total_bgn,
+          SUM(CASE WHEN currency='EUR' THEN amount ELSE 0 END) as total_eur,
+          COUNT(*) as count
+        FROM expense_invoices
+        WHERE expense_category = 'инвестиция' ${mf}`).get(...p);
 
-      const byProperty = db.prepare(`
-        SELECT ei.property_id, p.адрес, SUM(ei.amount) as total, COUNT(*) as count
+      // Investment items list
+      const investItems = db.prepare(`
+        SELECT ei.id, ei.reason, ei.supplier_name, ei.amount, ei.currency,
+               ei.месец, ei.property_id, ei.paid, ei.paid_date, p.адрес
         FROM expense_invoices ei
         LEFT JOIN properties p ON p.id = ei.property_id
-        ${pw}
-        GROUP BY ei.property_id`).all(...p);
+        WHERE ei.expense_category = 'инвестиция' ${mfe}
+        ORDER BY ei.месец DESC`).all(...p);
 
-      res.json({ ...totals, by_category: byCategory, by_property: byProperty });
+      // Operational by category (expense_category + currency + total)
+      const byCategory = db.prepare(`
+        SELECT
+          expense_category,
+          currency,
+          SUM(amount) as total,
+          COUNT(*) as count
+        FROM expense_invoices
+        WHERE (expense_category IS NULL OR expense_category != 'инвестиция') ${mf}
+        GROUP BY expense_category, currency`).all(...p);
+
+      // By property (operational only, with currency)
+      const byProperty = db.prepare(`
+        SELECT ei.property_id, p.адрес, ei.currency, SUM(ei.amount) as total, COUNT(*) as count
+        FROM expense_invoices ei
+        LEFT JOIN properties p ON p.id = ei.property_id
+        WHERE ei.property_id IS NOT NULL
+          AND (ei.expense_category IS NULL OR ei.expense_category != 'инвестиция') ${mfe}
+        GROUP BY ei.property_id, ei.currency`).all(...p);
+
+      res.json({
+        ...totals,
+        invest: { ...investTotals, items: investItems },
+        by_category: byCategory,
+        by_property: byProperty
+      });
     } catch (err) {
       console.error('GET /summary error:', err.message);
-      res.json({ total_bgn: 0, total_eur: 0, count: 0, paid_count: 0, paid_amount: 0, unpaid_amount: 0, by_category: [], by_property: [] });
+      res.json({ total_bgn: 0, total_eur: 0, count: 0, paid_count: 0, paid_amount: 0, unpaid_amount: 0, invest: { total_bgn:0, total_eur:0, count:0, items:[] }, by_category: [], by_property: [] });
     }
   });
 

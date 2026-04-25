@@ -1,7 +1,7 @@
 import { apiFetch } from '../api'
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 
-const CATEGORIES = ['ток','вода','ремонт','застраховка','такса','счетоводство','друго']
+const CATEGORIES = ['ток','вода','ремонт','застраховка','такса','счетоводство','друго','инвестиция']
 const CURRENCIES  = ['BGN','EUR','USD']
 const PAYER_IBAN  = 'BG75PRCB92301053911901'
 
@@ -495,6 +495,7 @@ function AnalysisTab({ API }) {
   const [summary, setSummary] = useState(null)
   const [month, setMonth]     = useState('')
   const [loading, setLoading] = useState(false)
+  const [showInvestList, setShowInvestList] = useState(false)
 
   const load = useCallback(() => {
     setLoading(true)
@@ -509,13 +510,28 @@ function AnalysisTab({ API }) {
 
   if (loading || !summary) return <div className="py-12 text-center text-gray-400">Зарежда...</div>
 
+  // Operational by category
   const cats = (summary.by_category||[]).reduce((acc, r) => {
-    if (!acc[r.expense_category]) acc[r.expense_category] = {}
-    acc[r.expense_category][r.currency] = r.total
+    const cat = r.expense_category || '—'
+    if (!acc[cat]) acc[cat] = {}
+    acc[cat][r.currency] = (acc[cat][r.currency]||0) + (r.total||0)
     return acc
   }, {})
-  const allCatsSorted = Object.entries(cats).sort((a,b) => (b[1].BGN||0)+(b[1].EUR||0) - (a[1].BGN||0)-(a[1].EUR||0))
+  const allCatsSorted = Object.entries(cats).sort((a,b) =>
+    ((b[1].BGN||0)+(b[1].EUR||0)) - ((a[1].BGN||0)+(a[1].EUR||0))
+  )
   const maxVal = Math.max(...allCatsSorted.map(([,v]) => (v.BGN||0)+(v.EUR||0)), 1)
+
+  // By property
+  const propMap = (summary.by_property||[]).reduce((acc, r) => {
+    const key = r.property_id
+    if (!acc[key]) acc[key] = { адрес: r['адрес'], BGN:0, EUR:0, count:0 }
+    acc[key][r.currency] = (acc[key][r.currency]||0) + (r.total||0)
+    acc[key].count += r.count
+    return acc
+  }, {})
+
+  const invest = summary.invest || { total_bgn:0, total_eur:0, count:0, items:[] }
 
   return (
     <div className="space-y-6">
@@ -527,82 +543,146 @@ function AnalysisTab({ API }) {
         {month && <button onClick={() => setMonth('')} className="text-xs text-gray-400 hover:text-gray-600">× всички</button>}
       </div>
 
-      {/* KPI cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {[
-          { label:'Общо разходи BGN', value: fmt(summary.total_bgn), color:'text-red-700', bg:'bg-red-50 border-red-200' },
-          { label:'Общо разходи EUR', value: fmt(summary.total_eur), color:'text-orange-700', bg:'bg-orange-50 border-orange-200' },
-          { label:'Брой фактури',     value: summary.count||0,        color:'text-blue-700',  bg:'bg-blue-50 border-blue-200' },
-          { label:'Платени',          value: `${summary.paid_count||0} / ${summary.count||0}`, color:'text-green-700', bg:'bg-green-50 border-green-200' },
-        ].map(c => (
-          <div key={c.label} className={`border rounded-xl p-4 ${c.bg}`}>
-            <div className="text-xs font-semibold text-gray-500 uppercase">{c.label}</div>
-            <div className={`text-2xl font-bold mt-1 ${c.color}`}>{c.value}</div>
+      {/* ── Оперативни разходи ── */}
+      <div>
+        <h3 className="text-base font-bold text-gray-700 mb-3 flex items-center gap-2">
+          <span className="text-lg">📋</span> Оперативни разходи {month ? `(${month})` : '(всички)'}
+          <span className="text-xs font-normal text-gray-400">— без инвестиции</span>
+        </h3>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+          {[
+            { label:'Общо BGN',  value: fmt(summary.total_bgn),  color:'text-red-700',   bg:'bg-red-50 border-red-200' },
+            { label:'Общо EUR',  value: fmt(summary.total_eur),  color:'text-orange-700',bg:'bg-orange-50 border-orange-200' },
+            { label:'Фактури',   value: summary.count||0,         color:'text-blue-700',  bg:'bg-blue-50 border-blue-200' },
+            { label:'Платени',   value: `${summary.paid_count||0} / ${summary.count||0}`, color:'text-green-700', bg:'bg-green-50 border-green-200' },
+          ].map(c => (
+            <div key={c.label} className={`border rounded-xl p-4 ${c.bg}`}>
+              <div className="text-xs font-semibold text-gray-500 uppercase">{c.label}</div>
+              <div className={`text-2xl font-bold mt-1 ${c.color}`}>{c.value}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Bar chart by category */}
+        {allCatsSorted.length > 0 && (
+          <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm mb-4">
+            <h4 className="font-semibold text-gray-700 mb-3 text-sm">По категория</h4>
+            <div className="space-y-3">
+              {allCatsSorted.map(([cat, vals]) => {
+                const total = (vals.BGN||0) + (vals.EUR||0)
+                const pct   = Math.round(total / maxVal * 100)
+                return (
+                  <div key={cat} className="flex items-center gap-3">
+                    <div className="w-28 text-sm text-gray-600 capitalize text-right flex-shrink-0">{cat}</div>
+                    <div className="flex-1 bg-gray-100 rounded-full h-5 overflow-hidden">
+                      <div className="h-5 rounded-full bg-red-400 transition-all" style={{ width: `${pct}%` }}/>
+                    </div>
+                    <div className="w-36 text-xs text-gray-700 flex-shrink-0">
+                      {vals.BGN ? <span className="mr-2">{fmt(vals.BGN)} BGN</span> : null}
+                      {vals.EUR ? <span>{fmt(vals.EUR)} EUR</span> : null}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
           </div>
-        ))}
+        )}
+
+        {/* By property */}
+        {Object.keys(propMap).length > 0 && (
+          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
+            <div className="px-5 py-3 border-b">
+              <h4 className="font-semibold text-gray-700 text-sm">По имот</h4>
+            </div>
+            <table className="min-w-full divide-y divide-gray-100 text-sm">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-4 py-2 text-left text-xs font-semibold text-gray-500 uppercase">Имот</th>
+                  <th className="px-4 py-2 text-right text-xs font-semibold text-gray-500 uppercase">BGN</th>
+                  <th className="px-4 py-2 text-right text-xs font-semibold text-gray-500 uppercase">EUR</th>
+                  <th className="px-4 py-2 text-right text-xs font-semibold text-gray-500 uppercase">Бр.</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {Object.entries(propMap).map(([pid, d]) => (
+                  <tr key={pid} className="hover:bg-gray-50">
+                    <td className="px-4 py-2 font-medium text-gray-800">{d['адрес'] || `Имот #${pid}`}</td>
+                    <td className="px-4 py-2 text-right text-red-700">{d.BGN ? fmt(d.BGN) : '—'}</td>
+                    <td className="px-4 py-2 text-right text-orange-700">{d.EUR ? fmt(d.EUR) : '—'}</td>
+                    <td className="px-4 py-2 text-right text-gray-500">{d.count}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
-      {/* Bar chart by category */}
-      {allCatsSorted.length > 0 && (
-        <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
-          <h3 className="font-bold text-gray-800 mb-4">Разходи по категория</h3>
-          <div className="space-y-3">
-            {allCatsSorted.map(([cat, vals]) => {
-              const total = (vals.BGN||0) + (vals.EUR||0)
-              const pct   = Math.round(total / maxVal * 100)
-              return (
-                <div key={cat} className="flex items-center gap-3">
-                  <div className="w-24 text-sm text-gray-600 capitalize text-right flex-shrink-0">{cat||'—'}</div>
-                  <div className="flex-1 bg-gray-100 rounded-full h-5 overflow-hidden">
-                    <div className="h-5 rounded-full bg-red-400 transition-all" style={{ width: `${pct}%` }}/>
-                  </div>
-                  <div className="w-28 text-xs text-gray-700 flex-shrink-0">
-                    {vals.BGN ? <span className="mr-1">{fmt(vals.BGN)} BGN</span> : null}
-                    {vals.EUR ? <span>{fmt(vals.EUR)} EUR</span> : null}
-                  </div>
-                </div>
-              )
-            })}
+      {/* ── Инвестиционни разходи ── */}
+      <div>
+        <h3 className="text-base font-bold text-gray-700 mb-3 flex items-center gap-2">
+          <span className="text-lg">📈</span> Инвестиционни разходи
+          <span className="text-xs font-normal text-gray-400">— еднократни, не влизат в месечните</span>
+        </h3>
+        <div className="grid grid-cols-3 gap-4 mb-3">
+          <div className="border rounded-xl p-4 bg-indigo-50 border-indigo-200">
+            <div className="text-xs font-semibold text-gray-500 uppercase">Общо BGN</div>
+            <div className="text-2xl font-bold text-indigo-700">{fmt(invest.total_bgn)}</div>
+          </div>
+          <div className="border rounded-xl p-4 bg-indigo-50 border-indigo-200">
+            <div className="text-xs font-semibold text-gray-500 uppercase">Общо EUR</div>
+            <div className="text-2xl font-bold text-indigo-700">{fmt(invest.total_eur)}</div>
+          </div>
+          <div className="border rounded-xl p-4 bg-indigo-50 border-indigo-200">
+            <div className="text-xs font-semibold text-gray-500 uppercase">Записи</div>
+            <div className="text-2xl font-bold text-indigo-700">{invest.count||0}</div>
           </div>
         </div>
-      )}
 
-      {/* By property */}
-      {summary.by_property?.length > 0 && (
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
-          <div className="px-5 py-3 border-b">
-            <h3 className="font-bold text-gray-800">Разходи по имот</h3>
+        {invest.items?.length > 0 && (
+          <div className="bg-white rounded-xl border border-indigo-200 overflow-hidden shadow-sm">
+            <button
+              onClick={() => setShowInvestList(v => !v)}
+              className="w-full px-5 py-3 flex items-center justify-between hover:bg-indigo-50 transition-colors"
+            >
+              <span className="font-semibold text-gray-700 text-sm">Списък на инвестициите ({invest.items.length})</span>
+              <span className="text-gray-400 text-sm">{showInvestList ? '▲' : '▼'}</span>
+            </button>
+            {showInvestList && (
+              <table className="min-w-full divide-y divide-gray-100 text-sm">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-4 py-2 text-left text-xs font-semibold text-gray-500 uppercase">Описание</th>
+                    <th className="px-4 py-2 text-left text-xs font-semibold text-gray-500 uppercase">Доставчик</th>
+                    <th className="px-4 py-2 text-left text-xs font-semibold text-gray-500 uppercase">Имот</th>
+                    <th className="px-4 py-2 text-left text-xs font-semibold text-gray-500 uppercase">Месец</th>
+                    <th className="px-4 py-2 text-right text-xs font-semibold text-gray-500 uppercase">Сума</th>
+                    <th className="px-4 py-2 text-center text-xs font-semibold text-gray-500 uppercase">Платено</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {invest.items.map(item => (
+                    <tr key={item.id} className="hover:bg-indigo-50">
+                      <td className="px-4 py-2 font-medium text-gray-800">{item.reason || '—'}</td>
+                      <td className="px-4 py-2 text-gray-600">{item.supplier_name || '—'}</td>
+                      <td className="px-4 py-2 text-gray-500">{item['адрес'] || (item.property_id ? `#${item.property_id}` : '—')}</td>
+                      <td className="px-4 py-2 text-gray-500">{item.месец || '—'}</td>
+                      <td className="px-4 py-2 text-right font-semibold text-indigo-700">{fmt(item.amount)} {item.currency}</td>
+                      <td className="px-4 py-2 text-center">{item.paid ? '✅' : '⏳'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </div>
-          <table className="min-w-full divide-y divide-gray-100 text-sm">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-4 py-2 text-left text-xs font-semibold text-gray-500 uppercase">Имот</th>
-                <th className="px-4 py-2 text-right text-xs font-semibold text-gray-500 uppercase">Сума BGN</th>
-                <th className="px-4 py-2 text-right text-xs font-semibold text-gray-500 uppercase">Сума EUR</th>
-                <th className="px-4 py-2 text-right text-xs font-semibold text-gray-500 uppercase">Бр.</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {Object.entries(
-                summary.by_property.reduce((acc, r) => {
-                  const key = r.property_id
-                  if (!acc[key]) acc[key] = { адрес: r['адрес'], BGN:0, EUR:0, count:0 }
-                  acc[key][r.currency] = (acc[key][r.currency]||0) + r.total
-                  acc[key].count += r.count
-                  return acc
-                }, {})
-              ).map(([pid, d]) => (
-                <tr key={pid} className="hover:bg-gray-50">
-                  <td className="px-4 py-2 font-medium text-gray-800">#{pid} {d['адрес']||'—'}</td>
-                  <td className="px-4 py-2 text-right text-red-700">{d.BGN ? fmt(d.BGN) : '—'}</td>
-                  <td className="px-4 py-2 text-right text-orange-700">{d.EUR ? fmt(d.EUR) : '—'}</td>
-                  <td className="px-4 py-2 text-right text-gray-500">{d.count}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+        )}
+
+        {invest.items?.length === 0 && (
+          <div className="text-sm text-gray-400 italic px-1">
+            Няма записани инвестиции. Задай категория "инвестиция" на фактура, за да се появи тук.
+          </div>
+        )}
+      </div>
     </div>
   )
 }
