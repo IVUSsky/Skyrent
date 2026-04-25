@@ -379,7 +379,7 @@ module.exports = function(db) {
         разход_total:  r.разход_total  || 0,
         нап_ддс_total: r.нап_ддс_total || 0,
         equity_total:  r.equity_total  || 0,
-        net: (r.наем_total || 0) - (r.вноска_total || 0) - (r.разход_total || 0) - (r.нап_ддс_total || 0),
+        net: (r.наем_total || 0) + (r.нап_ддс_total || 0) - (r.вноска_total || 0) - (r.разход_total || 0),
       })));
     } catch (err) {
       res.status(500).json({ error: err.message });

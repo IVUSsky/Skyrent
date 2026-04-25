@@ -453,7 +453,7 @@ function AnalysisTab({ API }) {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {kpiCards.map(({ key, label, icon }) => {
           const d   = stats[key] || {}
-          const net = (d.наем||0) - (d.вноска||0) - (d.разход||0) - (d.нап_ддс||0)
+          const net = (d.наем||0) + (d.нап_ддс||0) - (d.вноска||0) - (d.разход||0)
           return (
             <div key={key} className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
               <div className="flex items-center gap-2 mb-3">
@@ -478,8 +478,8 @@ function AnalysisTab({ API }) {
                 </div>
                 {(d.нап_ддс||0) > 0 && (
                   <div className="flex justify-between text-sm">
-                    <span className="text-gray-500">НАП / ДДС</span>
-                    <span className="font-semibold text-purple-700">-{fmt0(d.нап_ддс)}</span>
+                    <span className="text-gray-500">Постъпл. НАП/ДДС</span>
+                    <span className="font-semibold text-purple-600">+{fmt0(d.нап_ддс)}</span>
                   </div>
                 )}
                 <div className="border-t border-gray-100 pt-1.5 flex justify-between text-sm font-bold">
@@ -530,7 +530,7 @@ function AnalysisTab({ API }) {
             </thead>
             <tbody className="divide-y divide-gray-50">
               {[...monthly].reverse().map(r => {
-                const net = (r.наем_total||0)-(r.вноска_total||0)-(r.разход_total||0)-(r.нап_ддс_total||0)
+                const net = (r.наем_total||0)+(r.нап_ддс_total||0)-(r.вноска_total||0)-(r.разход_total||0)
                 return (
                   <tr key={r.месец} className="hover:bg-gray-50">
                     <td className="px-4 py-2 font-medium text-gray-700">{fmtMonth(r.месец)}</td>

@@ -228,8 +228,8 @@ export default function Analysis({ API }) {
           {(() => {
             const annualRent     = metrics.наем_год || 0
             const realExpenses   = expenseSummary.by_category?.reduce((s, c) => s + (c.paid_amount || 0), 0) || 0
-            const annualLoans    = (metrics.total_вноска || 0) * 12
-            const monthlyLoans   = metrics.total_вноска || 0
+            const monthlyLoans   = loans.reduce((s, l) => s + (l['вноска'] || 0), 0)
+            const annualLoans    = monthlyLoans * 12
             const netCashFlow    = annualRent - realExpenses - annualLoans
             const netMonthly     = (annualRent / 12) - (realExpenses / 12) - monthlyLoans
             return (
@@ -247,8 +247,8 @@ export default function Analysis({ API }) {
                   </div>
                   <div className="bg-white border border-orange-200 rounded-xl p-4">
                     <div className="text-xs font-bold text-gray-500 uppercase mb-1">Кредитни вноски</div>
-                    <div className="text-xl font-bold text-orange-700">-{fmt(annualLoans)} €</div>
-                    <div className="text-xs text-gray-400 mt-0.5">-{fmt(monthlyLoans)} €/мес · {loans.length} кредита</div>
+                    <div className="text-xl font-bold text-orange-700">-{fmt(annualLoans)}</div>
+                    <div className="text-xs text-gray-400 mt-0.5">-{fmt(monthlyLoans)}/мес · {loans.length} кредита</div>
                   </div>
                   <div className={`border rounded-xl p-4 ${netCashFlow >= 0 ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
                     <div className="text-xs font-bold text-gray-500 uppercase mb-1">Нетен паричен поток</div>
