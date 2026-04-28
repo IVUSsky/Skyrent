@@ -705,6 +705,9 @@ export default function Expenses({ API }) {
   const [dragging, setDragging]     = useState(false)
   const [uploading, setUploading]   = useState(false)
   const [extracting, setExtracting] = useState(false)
+  const [searchText, setSearchText] = useState('')
+  const [searchAmount, setSearchAmount] = useState('')
+  const [expandedId, setExpandedId] = useState(null)
   const fileRef = useRef()
 
   const loadInvoices = useCallback(() => {
@@ -785,6 +788,21 @@ export default function Expenses({ API }) {
       .catch(e => { setManualSaving(false); alert('Грешка: ' + e.message) })
   }
 
+  // Client-side filtering
+  const filteredInvoices = invoices.filter(inv => {
+    if (searchText) {
+      const q = searchText.toLowerCase()
+      if (!(inv.supplier_name||'').toLowerCase().includes(q) &&
+          !(inv.reason||'').toLowerCase().includes(q) &&
+          !(inv.filename||'').toLowerCase().includes(q)) return false
+    }
+    if (searchAmount) {
+      const amt = parseFloat(searchAmount)
+      if (!isNaN(amt) && Math.abs((inv.amount||0) - amt) > 0.01) return false
+    }
+    return true
+  })
+
   // Summary totals
   const totalBGN = invoices.filter(i => i.currency === 'BGN').reduce((s,i) => s+(i.amount||0), 0)
   const totalEUR = invoices.filter(i => i.currency === 'EUR').reduce((s,i) => s+(i.amount||0), 0)
@@ -853,19 +871,44 @@ export default function Expenses({ API }) {
             onDragLeave={() => setDragging(false)}
             onDrop={handleDrop}
             onClick={() => fileRef.current.click()}
-            className={`border-2 border-dashed rounded-xl p-6 text-center cursor-pointer mb-4 transition-all
+            className={`border-2 border-dashed rounded-xl p-4 text-center cursor-pointer mb-4 transition-all
               ${dragging ? 'border-blue-500 bg-blue-50' : 'border-gray-300 bg-white hover:border-blue-400 hover:bg-blue-50'}`}
           >
-            <div className="text-3xl mb-1">📄</div>
+            <div className="text-2xl mb-0.5">📄</div>
             <div className="text-sm text-gray-500">
               <strong className="text-blue-700">Плъзнете PDF/изображения тук</strong> или кликнете за избор
             </div>
           </div>
 
+          {/* Search row */}
+          <div className="flex gap-2 mb-3 flex-wrap">
+            <input
+              type="text"
+              placeholder="🔍 Доставчик / основание / файл..."
+              value={searchText}
+              onChange={e => setSearchText(e.target.value)}
+              className="flex-1 min-w-[200px] border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400"
+            />
+            <input
+              type="number"
+              placeholder="Сума..."
+              value={searchAmount}
+              onChange={e => setSearchAmount(e.target.value)}
+              className="w-32 border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400"
+              step="0.01" min="0"
+            />
+            {(searchText || searchAmount) && (
+              <button onClick={() => { setSearchText(''); setSearchAmount('') }}
+                className="text-xs text-gray-400 hover:text-gray-600 px-2">× изчисти</button>
+            )}
+          </div>
+
           {/* Summary bar */}
           {invoices.length > 0 && (
-            <div className="flex gap-4 flex-wrap bg-white border border-gray-200 rounded-lg px-4 py-3 mb-4 text-sm shadow-sm">
-              <span className="font-semibold text-gray-700">{invoices.length} фактури</span>
+            <div className="flex gap-4 flex-wrap bg-white border border-gray-200 rounded-lg px-4 py-3 mb-3 text-sm shadow-sm">
+              <span className="font-semibold text-gray-700">
+                {filteredInvoices.length}{filteredInvoices.length !== invoices.length ? ` / ${invoices.length}` : ''} фактури
+              </span>
               <span className="text-gray-400">|</span>
               {totalBGN > 0 && <span className="text-red-700 font-medium">BGN: {fmt(totalBGN)}</span>}
               {totalEUR > 0 && <span className="text-orange-700 font-medium">EUR: {fmt(totalEUR)}</span>}
@@ -877,26 +920,96 @@ export default function Expenses({ API }) {
             </div>
           )}
 
-          {/* Invoice cards */}
+          {/* Invoice list */}
           {invoices.length === 0 ? (
             <div className="text-center py-16 text-gray-400">
               <div className="text-5xl mb-3">📂</div>
               <div>Няма фактури. Качете PDF файлове горе.</div>
             </div>
+          ) : filteredInvoices.length === 0 ? (
+            <div className="text-center py-10 text-gray-400">Няма резултати за търсенето.</div>
           ) : (
-            invoices.map(inv => (
-              <InvoiceCard
-                key={inv.id}
-                inv={inv}
-                properties={properties}
-                counterparties={counterparties}
-                API={API}
-                onChange={() => { loadInvoices(); reloadCPs() }}
-                onDelete={deleteInvoice}
-                selected={selected.includes(inv.id)}
-                onSelect={toggleSelect}
-              />
-            ))
+            <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
+              <table className="min-w-full divide-y divide-gray-100 text-sm">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-3 py-2 w-6"><input type="checkbox" className="w-4 h-4 rounded"
+                      onChange={e => setSelected(e.target.checked ? filteredInvoices.map(i=>i.id) : [])}/></th>
+                    <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase">Статус</th>
+                    <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase">Доставчик</th>
+                    <th className="px-3 py-2 text-right text-xs font-semibold text-gray-500 uppercase">Сума</th>
+                    <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase">Категория</th>
+                    <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase">Месец</th>
+                    <th className="px-3 py-2 text-center text-xs font-semibold text-gray-500 uppercase">Платена</th>
+                    <th className="px-3 py-2 w-6"></th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {filteredInvoices.map(inv => {
+                    const isOpen = expandedId === inv.id
+                    const catBg = CAT_COLOR[inv.expense_category]
+                      ? CAT_COLOR[inv.expense_category].replace('bg-','').split(' ')[0]
+                      : ''
+                    return (
+                      <React.Fragment key={inv.id}>
+                        <tr
+                          onClick={() => setExpandedId(isOpen ? null : inv.id)}
+                          className={`cursor-pointer transition-colors ${isOpen ? 'bg-blue-50' : 'hover:bg-gray-50'}`}
+                        >
+                          <td className="px-3 py-2" onClick={e => e.stopPropagation()}>
+                            <input type="checkbox" checked={selected.includes(inv.id)}
+                              onChange={e => toggleSelect(inv.id, e.target.checked)}
+                              className="w-4 h-4 rounded text-blue-600"/>
+                          </td>
+                          <td className="px-3 py-2">
+                            <span className={`text-xs px-2 py-0.5 rounded-full font-medium whitespace-nowrap ${STATUS_COLOR[inv.status]||STATUS_COLOR.pending}`}>
+                              {STATUS_LABEL[inv.status]||inv.status}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2">
+                            <div className="font-medium text-gray-800 truncate max-w-[200px]">
+                              {inv.supplier_name || <span className="text-gray-400 italic">{inv.filename}</span>}
+                            </div>
+                            {inv.reason && <div className="text-xs text-gray-400 truncate max-w-[200px]">{inv.reason}</div>}
+                          </td>
+                          <td className="px-3 py-2 text-right font-semibold whitespace-nowrap">
+                            {inv.amount ? <span className="text-gray-800">{fmt(inv.amount)} <span className="text-xs text-gray-500">{inv.currency}</span></span> : <span className="text-gray-300">—</span>}
+                          </td>
+                          <td className="px-3 py-2">
+                            {inv.expense_category
+                              ? <span className={`text-xs px-2 py-0.5 rounded border capitalize ${CAT_COLOR[inv.expense_category]||'bg-gray-50 border-gray-200'}`}>{inv.expense_category}</span>
+                              : <span className="text-gray-300 text-xs">—</span>}
+                          </td>
+                          <td className="px-3 py-2 text-gray-500 text-xs whitespace-nowrap">{inv.месец||'—'}</td>
+                          <td className="px-3 py-2 text-center">
+                            {inv.paid ? <span className="text-green-600 font-bold">✓</span> : <span className="text-gray-300">—</span>}
+                          </td>
+                          <td className="px-3 py-2 text-right" onClick={e => e.stopPropagation()}>
+                            <button onClick={() => deleteInvoice(inv.id)} className="text-red-300 hover:text-red-600 text-lg leading-none">×</button>
+                          </td>
+                        </tr>
+                        {isOpen && (
+                          <tr>
+                            <td colSpan={8} className="px-4 py-3 bg-blue-50 border-t border-blue-100">
+                              <InvoiceCard
+                                inv={inv}
+                                properties={properties}
+                                counterparties={counterparties}
+                                API={API}
+                                onChange={() => { loadInvoices(); reloadCPs() }}
+                                onDelete={deleteInvoice}
+                                selected={selected.includes(inv.id)}
+                                onSelect={toggleSelect}
+                              />
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
       )}
