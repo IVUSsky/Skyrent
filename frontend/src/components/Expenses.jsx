@@ -760,6 +760,8 @@ export default function Expenses({ API }) {
   const [uploading, setUploading]   = useState(false)
   const [extracting, setExtracting] = useState(false)
   const [converting, setConverting] = useState(false)
+  const [clearConfirm, setClearConfirm] = useState(false)
+  const [clearResult, setClearResult] = useState(null)
   const [searchText, setSearchText] = useState('')
   const [searchAmount, setSearchAmount] = useState('')
   const [expandedId, setExpandedId] = useState(null)
@@ -834,14 +836,15 @@ export default function Expenses({ API }) {
   }
 
   const clearUploaded = async () => {
-    if (!confirm('Ще бъдат изтрити всички качени PDF фактури.\nКасовите разходи (в брой / касова бележка) и инвестициите ще останат.\n\nПродължи?')) return
+    setClearConfirm(false)
     try {
       const r = await apiFetch(`${API}/api/expenses/clear-uploaded`, { method: 'POST' })
       const data = await r.json()
       if (data.error) throw new Error(data.error)
       await loadInvoices()
-      alert(`✅ Изтрити: ${data.deleted} PDF фактури`)
-    } catch(e) { alert('Грешка: ' + e.message) }
+      setClearResult(`✅ Изтрити: ${data.deleted} фактури`)
+      setTimeout(() => setClearResult(null), 4000)
+    } catch(e) { setClearResult('❌ Грешка: ' + e.message); setTimeout(() => setClearResult(null), 5000) }
   }
 
   const deleteInvoice = async (id) => {
@@ -947,11 +950,19 @@ export default function Expenses({ API }) {
                 className="px-3 py-1.5 text-sm font-semibold bg-amber-600 text-white rounded hover:bg-amber-700 disabled:opacity-50">
                 {converting ? '⏳...' : '🔄 BGN→EUR'}
               </button>
-              <button onClick={clearUploaded}
-                title="Изтрива всички качени PDF фактури. Запазва касовите и инвестиционните записи."
-                className="px-3 py-1.5 text-sm font-semibold bg-red-700 text-white rounded hover:bg-red-800">
-                🗑 Изчисти PDF
-              </button>
+              {clearConfirm ? (
+                <span className="flex items-center gap-1">
+                  <span className="text-xs text-red-700 font-semibold">Сигурен?</span>
+                  <button onClick={clearUploaded} className="px-2 py-1 text-xs font-bold bg-red-700 text-white rounded hover:bg-red-800">Да</button>
+                  <button onClick={() => setClearConfirm(false)} className="px-2 py-1 text-xs font-bold bg-gray-200 text-gray-700 rounded hover:bg-gray-300">Не</button>
+                </span>
+              ) : (
+                <button onClick={() => setClearConfirm(true)}
+                  title="Изтрива всички качени PDF фактури. Запазва касовите и инвестиционните записи."
+                  className="px-3 py-1.5 text-sm font-semibold bg-red-700 text-white rounded hover:bg-red-800">
+                  🗑 Изчисти PDF
+                </button>
+              )}
             </div>
           </div>
 
@@ -969,6 +980,13 @@ export default function Expenses({ API }) {
               <strong className="text-blue-700">Плъзнете PDF/изображения тук</strong> или кликнете за избор
             </div>
           </div>
+
+          {/* Clear result notification */}
+          {clearResult && (
+            <div className={`mb-3 px-4 py-2 rounded-lg text-sm font-medium ${clearResult.startsWith('✅') ? 'bg-green-50 text-green-800 border border-green-200' : 'bg-red-50 text-red-800 border border-red-200'}`}>
+              {clearResult}
+            </div>
+          )}
 
           {/* Search row */}
           <div className="flex gap-2 mb-3 flex-wrap">
