@@ -464,6 +464,22 @@ IBAN EXTRACTION RULES - very important:
     }
   });
 
+  // POST /convert-bgn-eur — convert pre-2026 BGN invoices to EUR at fixed rate 1.95583
+  expRouter.post('/convert-bgn-eur', (req, res) => {
+    try {
+      const BGN_RATE = 1.95583;
+      const preview = db.prepare(
+        "SELECT COUNT(*) as cnt, SUM(amount) as total FROM expense_invoices WHERE currency='BGN' AND (месец IS NULL OR месец < '2026-01')"
+      ).get();
+      const result = db.prepare(
+        "UPDATE expense_invoices SET amount=ROUND(amount/?,2), currency='EUR' WHERE currency='BGN' AND (месец IS NULL OR месец < '2026-01')"
+      ).run(BGN_RATE);
+      res.json({ ok: true, updated: result.changes, preview_count: preview.cnt, preview_total_bgn: preview.total });
+    } catch(err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // DELETE /:id
   expRouter.delete('/:id', (req, res) => {
     const inv = db.prepare('SELECT filepath FROM expense_invoices WHERE id = ?').get(req.params.id);

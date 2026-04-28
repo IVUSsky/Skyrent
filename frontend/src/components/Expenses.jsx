@@ -705,6 +705,7 @@ export default function Expenses({ API }) {
   const [dragging, setDragging]     = useState(false)
   const [uploading, setUploading]   = useState(false)
   const [extracting, setExtracting] = useState(false)
+  const [converting, setConverting] = useState(false)
   const [searchText, setSearchText] = useState('')
   const [searchAmount, setSearchAmount] = useState('')
   const [expandedId, setExpandedId] = useState(null)
@@ -762,6 +763,20 @@ export default function Expenses({ API }) {
       await loadInvoices(); await reloadCPs()
     } catch(e) { alert('AI грешка: ' + e.message) }
     setExtracting(false)
+  }
+
+  const convertBgnToEur = async () => {
+    // First do a dry-run to show count
+    if (!confirm('Всички фактури преди 2026-01 в лева (BGN) ще се конвертират в евро (EUR) по курс 1.95583.\n\nПродължи?')) return
+    setConverting(true)
+    try {
+      const r = await apiFetch(`${API}/api/expenses/convert-bgn-eur`, { method: 'POST' })
+      const data = await r.json()
+      if (data.error) throw new Error(data.error)
+      await loadInvoices()
+      alert(`✅ Конвертирани: ${data.updated} фактури от BGN → EUR (курс 1.95583)`)
+    } catch(e) { alert('Грешка: ' + e.message) }
+    setConverting(false)
   }
 
   const deleteInvoice = async (id) => {
@@ -861,6 +876,11 @@ export default function Expenses({ API }) {
               <button onClick={() => setManualModal(true)}
                 className="px-3 py-1.5 text-sm font-semibold bg-green-600 text-white rounded hover:bg-green-700">
                 💵 В брой / Касова
+              </button>
+              <button onClick={convertBgnToEur} disabled={converting}
+                title="Конвертира всички фактури преди 2026-01 от BGN в EUR по курс 1.95583"
+                className="px-3 py-1.5 text-sm font-semibold bg-amber-600 text-white rounded hover:bg-amber-700 disabled:opacity-50">
+                {converting ? '⏳...' : '🔄 BGN→EUR'}
               </button>
             </div>
           </div>
