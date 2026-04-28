@@ -436,7 +436,9 @@ IBAN EXTRACTION RULES - very important:
           expense_category,
           currency,
           SUM(amount) as total,
-          COUNT(*) as count
+          COUNT(*) as count,
+          SUM(CASE WHEN paid=1 THEN amount ELSE 0 END) as paid_amount,
+          SUM(CASE WHEN paid=1 THEN 1 ELSE 0 END) as paid_count
         FROM expense_invoices
         WHERE (expense_category IS NULL OR expense_category != 'инвестиция') ${mf}
         GROUP BY expense_category, currency`).all(...p);

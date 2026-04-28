@@ -78,7 +78,7 @@ export default function Dashboard({ API }) {
   const ltvColor = metrics.LTV < 0.5 ? 'green' : metrics.LTV < 0.65 ? 'yellow' : 'red'
 
   // Real CF includes actual paid expense invoices
-  const totalPaidExpenses = expenseSummary?.by_category?.reduce((s, c) => s + (c.paid_amount || 0), 0) || 0
+  const totalPaidExpenses = expenseSummary?.paid_amount || 0
   const realNetCf = (metrics.наем_мес || 0) - (metrics.total_вноска || 0) - totalPaidExpenses
   const cfColor = realNetCf >= 0 ? 'green' : 'red'
 
@@ -192,7 +192,7 @@ export default function Dashboard({ API }) {
             <div className="bg-red-50 border border-red-100 rounded-lg p-3">
               <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Общо фактури</div>
               <div className="text-xl font-bold text-red-700 mt-1">
-                {fmt(expenseSummary.by_category.reduce((s, c) => s + (c.total_amount || 0), 0))} €
+                {fmt(expenseSummary.by_category.reduce((s, c) => s + (c.total || 0), 0))} лв.
               </div>
               <div className="text-xs text-gray-500">{expenseSummary.by_category.reduce((s, c) => s + (c.count || 0), 0)} бр.</div>
             </div>
@@ -206,7 +206,7 @@ export default function Dashboard({ API }) {
             <div className="bg-yellow-50 border border-yellow-100 rounded-lg p-3">
               <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Неплатени</div>
               <div className="text-xl font-bold text-yellow-700 mt-1">
-                {fmt(expenseSummary.by_category.reduce((s, c) => s + ((c.total_amount || 0) - (c.paid_amount || 0)), 0))} €
+                {fmt(expenseSummary.by_category.reduce((s, c) => s + ((c.total || 0) - (c.paid_amount || 0)), 0))} лв.
               </div>
             </div>
             <div className={`border rounded-lg p-3 ${realNetCf >= 0 ? 'bg-green-50 border-green-100' : 'bg-red-50 border-red-100'}`}>
@@ -219,9 +219,9 @@ export default function Dashboard({ API }) {
           </div>
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2">
             {expenseSummary.by_category.map(cat => (
-              <div key={cat.category || 'Друго'} className="bg-gray-50 rounded-lg p-2 text-center">
-                <div className="text-xs text-gray-500 truncate">{cat.category || 'Друго'}</div>
-                <div className="text-sm font-bold text-gray-800">{fmt(cat.total_amount)} €</div>
+              <div key={`${cat.expense_category}-${cat.currency}`} className="bg-gray-50 rounded-lg p-2 text-center">
+                <div className="text-xs text-gray-500 truncate">{cat.expense_category || 'Друго'}</div>
+                <div className="text-sm font-bold text-gray-800">{fmt(cat.total)} {cat.currency}</div>
                 <div className="text-xs text-gray-400">{cat.count} бр.</div>
               </div>
             ))}
