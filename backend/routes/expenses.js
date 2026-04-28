@@ -464,6 +464,24 @@ IBAN EXTRACTION RULES - very important:
     }
   });
 
+  // POST /clear-uploaded — delete uploaded PDF invoices, keep cash/receipt and investment ones
+  expRouter.post('/clear-uploaded', (req, res) => {
+    try {
+      const toDelete = db.prepare(
+        "SELECT id, filepath FROM expense_invoices WHERE payment_type = 'фактура' OR payment_type IS NULL"
+      ).all();
+      let deleted = 0;
+      for (const inv of toDelete) {
+        if (inv.filepath) { try { require('fs').unlinkSync(inv.filepath); } catch(_) {} }
+        db.prepare('DELETE FROM expense_invoices WHERE id = ?').run(inv.id);
+        deleted++;
+      }
+      res.json({ ok: true, deleted });
+    } catch(err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // POST /convert-bgn-eur — convert pre-2026 BGN invoices to EUR at fixed rate 1.95583
   expRouter.post('/convert-bgn-eur', (req, res) => {
     try {

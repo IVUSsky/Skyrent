@@ -77,9 +77,20 @@ export default function Dashboard({ API }) {
   const dscrColor = metrics.DSCR >= 1.25 ? 'green' : metrics.DSCR >= 1.0 ? 'yellow' : 'red'
   const ltvColor = metrics.LTV < 0.5 ? 'green' : metrics.LTV < 0.65 ? 'yellow' : 'red'
 
-  // Real CF includes actual paid expense invoices
-  const totalPaidExpenses = expenseSummary?.paid_amount || 0
-  const realNetCf = (metrics.наем_мес || 0) - (metrics.total_вноска || 0) - totalPaidExpenses
+  // Bank expenses (current year total from monthly data)
+  const curYear = new Date().getFullYear().toString()
+  const curMonth = `${curYear}-${String(new Date().getMonth()+1).padStart(2,'0')}`
+  const bankExpensesYTD = monthly.filter(m => m.месец?.startsWith(curYear)).reduce((s,m) => s + Math.abs(m.разход_total||0), 0)
+  const bankExpensesCurMonth = Math.abs(monthly.find(m => m.месец === curMonth)?.разход_total || 0)
+
+  // Cash invoices (manual, в брой) — from expenseSummary (only cash payment types remain after cleanup)
+  const cashTotal = (expenseSummary?.total_eur || 0) + (expenseSummary?.total_bgn || 0) / 1.95583
+
+  // Investments
+  const investTotal = ((expenseSummary?.invest?.total_eur || 0)) + (expenseSummary?.invest?.total_bgn || 0) / 1.95583
+
+  // Real CF: наем - вноска - bank expenses current month - cash expenses
+  const realNetCf = (metrics.наем_мес || 0) - (metrics.total_вноска || 0) - bankExpensesCurMonth
   const cfColor = realNetCf >= 0 ? 'green' : 'red'
 
   // Group properties by район for chart
@@ -170,8 +181,8 @@ export default function Dashboard({ API }) {
         />
         <KpiCard
           label="Нетен CF"
-          value={`${fmt(realNetCf)} €`}
-          sub={totalPaidExpenses > 0 ? `наем − вноска − ${fmt(totalPaidExpenses)} разх.` : 'наем − вноска'}
+          value={`${realNetCf >= 0 ? '+' : ''}${fmt(realNetCf)} €`}
+          sub={`наем − вноска − ${fmt(bankExpensesCurMonth)} банк. разх.`}
           color={cfColor}
           icon="💵"
         />
@@ -185,46 +196,94 @@ export default function Dashboard({ API }) {
       </div>
 
       {/* Expenses section */}
-      {expenseSummary && (expenseSummary.by_category?.length > 0) && (
+      {monthly.length > 0 && (
         <div className="bg-white rounded-xl shadow border border-gray-100 p-5 mb-8">
-          <h3 className="text-base font-bold text-gray-800 mb-4">💸 Разходи за месеца</h3>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
-            <div className="bg-red-50 border border-red-100 rounded-lg p-3">
-              <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Общо фактури</div>
-              <div className="text-xl font-bold text-red-700 mt-1">
-                {fmt(expenseSummary.by_category.reduce((s, c) => s + (c.total || 0), 0))} лв.
+          <h3 className="text-base font-bold text-gray-800 mb-4">💸 Разходи</h3>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+
+            {/* Bank expenses */}
+            <div className="border border-red-200 bg-red-50 rounded-xl p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <span className="text-lg">🏦</span>
+                <span className="font-bold text-gray-700 text-sm">Банкови разходи</span>
               </div>
-              <div className="text-xs text-gray-500">{expenseSummary.by_category.reduce((s, c) => s + (c.count || 0), 0)} бр.</div>
+              <div className="space-y-1.5">
+                <div className="flex justify-between items-baseline">
+                  <span className="text-xs text-gray-500">Текущ месец</span>
+                  <span className="font-bold text-red-700 text-lg">{fmt(bankExpensesCurMonth)} €</span>
+                </div>
+                <div className="flex justify-between items-baseline">
+                  <span className="text-xs text-gray-500">За {curYear}г. (общо)</span>
+                  <span className="font-semibold text-red-600">{fmt(bankExpensesYTD)} €</span>
+                </div>
+                <div className="text-xs text-gray-400 mt-1">от банкови транзакции</div>
+              </div>
             </div>
-            <div className="bg-green-50 border border-green-100 rounded-lg p-3">
-              <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Платени</div>
-              <div className="text-xl font-bold text-green-700 mt-1">
-                {fmt(totalPaidExpenses)} €
+
+            {/* Cash expenses */}
+            <div className="border border-orange-200 bg-orange-50 rounded-xl p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <span className="text-lg">💵</span>
+                <span className="font-bold text-gray-700 text-sm">Касови разходи</span>
               </div>
-              <div className="text-xs text-gray-500">{expenseSummary.by_category.reduce((s, c) => s + (c.paid_count || 0), 0)} бр.</div>
+              {expenseSummary && (expenseSummary.total_bgn > 0 || expenseSummary.total_eur > 0) ? (
+                <div className="space-y-1.5">
+                  {expenseSummary.total_eur > 0 && (
+                    <div className="flex justify-between items-baseline">
+                      <span className="text-xs text-gray-500">EUR</span>
+                      <span className="font-bold text-orange-700 text-lg">{fmt(expenseSummary.total_eur)} €</span>
+                    </div>
+                  )}
+                  {expenseSummary.total_bgn > 0 && (
+                    <div className="flex justify-between items-baseline">
+                      <span className="text-xs text-gray-500">BGN</span>
+                      <span className="font-semibold text-orange-600">{fmt(expenseSummary.total_bgn)} лв.</span>
+                    </div>
+                  )}
+                  <div className="text-xs text-gray-400">{expenseSummary.count || 0} записа (в брой / касови)</div>
+                </div>
+              ) : (
+                <div className="text-xs text-gray-400 italic">Няма касови разходи</div>
+              )}
             </div>
-            <div className="bg-yellow-50 border border-yellow-100 rounded-lg p-3">
-              <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Неплатени</div>
-              <div className="text-xl font-bold text-yellow-700 mt-1">
-                {fmt(expenseSummary.by_category.reduce((s, c) => s + ((c.total || 0) - (c.paid_amount || 0)), 0))} лв.
+
+            {/* Investments */}
+            <div className="border border-indigo-200 bg-indigo-50 rounded-xl p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <span className="text-lg">📈</span>
+                <span className="font-bold text-gray-700 text-sm">Инвестиции</span>
               </div>
-            </div>
-            <div className={`border rounded-lg p-3 ${realNetCf >= 0 ? 'bg-green-50 border-green-100' : 'bg-red-50 border-red-100'}`}>
-              <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Реален Нетен CF</div>
-              <div className={`text-xl font-bold mt-1 ${realNetCf >= 0 ? 'text-green-700' : 'text-red-700'}`}>
-                {fmt(realNetCf)} €
-              </div>
-              <div className="text-xs text-gray-500">наем − вноска − разходи</div>
+              {expenseSummary?.invest && (expenseSummary.invest.total_bgn > 0 || expenseSummary.invest.total_eur > 0) ? (
+                <div className="space-y-1.5">
+                  {expenseSummary.invest.total_eur > 0 && (
+                    <div className="flex justify-between items-baseline">
+                      <span className="text-xs text-gray-500">EUR</span>
+                      <span className="font-bold text-indigo-700 text-lg">{fmt(expenseSummary.invest.total_eur)} €</span>
+                    </div>
+                  )}
+                  {expenseSummary.invest.total_bgn > 0 && (
+                    <div className="flex justify-between items-baseline">
+                      <span className="text-xs text-gray-500">BGN</span>
+                      <span className="font-semibold text-indigo-600">{fmt(expenseSummary.invest.total_bgn)} лв.</span>
+                    </div>
+                  )}
+                  <div className="text-xs text-gray-400">{expenseSummary.invest.count || 0} инвестиции</div>
+                </div>
+              ) : (
+                <div className="text-xs text-gray-400 italic">Няма записани инвестиции</div>
+              )}
             </div>
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2">
-            {expenseSummary.by_category.map(cat => (
-              <div key={`${cat.expense_category}-${cat.currency}`} className="bg-gray-50 rounded-lg p-2 text-center">
-                <div className="text-xs text-gray-500 truncate">{cat.expense_category || 'Друго'}</div>
-                <div className="text-sm font-bold text-gray-800">{fmt(cat.total)} {cat.currency}</div>
-                <div className="text-xs text-gray-400">{cat.count} бр.</div>
-              </div>
-            ))}
+
+          {/* Net CF summary */}
+          <div className={`rounded-lg px-4 py-3 flex items-center justify-between ${realNetCf >= 0 ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'}`}>
+            <div>
+              <div className="text-xs font-semibold text-gray-500 uppercase">Нетен CF (текущ месец)</div>
+              <div className="text-xs text-gray-400">наем − вноска − банк. разходи</div>
+            </div>
+            <div className={`text-2xl font-bold ${realNetCf >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+              {realNetCf >= 0 ? '+' : ''}{fmt(realNetCf)} €
+            </div>
           </div>
         </div>
       )}

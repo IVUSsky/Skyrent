@@ -493,6 +493,7 @@ function CounterpartiesTab({ API }) {
 // ── Analysis subtab ───────────────────────────────────────────
 function AnalysisTab({ API }) {
   const [summary, setSummary] = useState(null)
+  const [monthly, setMonthly] = useState([])
   const [month, setMonth]     = useState('')
   const [loading, setLoading] = useState(false)
   const [showInvestList, setShowInvestList] = useState(false)
@@ -500,17 +501,27 @@ function AnalysisTab({ API }) {
   const load = useCallback(() => {
     setLoading(true)
     const q = month ? `?month=${month}` : ''
-    apiFetch(`${API}/api/expenses/summary${q}`)
-      .then(r => r.json())
-      .then(d => { setSummary(d); setLoading(false) })
-      .catch(() => setLoading(false))
+    Promise.all([
+      apiFetch(`${API}/api/expenses/summary${q}`).then(r => r.json()),
+      apiFetch(`${API}/api/import/monthly`).then(r => r.json()).catch(() => []),
+    ]).then(([s, mo]) => {
+      setSummary(s)
+      setMonthly(mo)
+      setLoading(false)
+    }).catch(() => setLoading(false))
   }, [month, API])
 
   useEffect(() => { load() }, [load])
 
   if (loading || !summary) return <div className="py-12 text-center text-gray-400">Зарежда...</div>
 
-  // Operational by category
+  // Bank expenses from monthly data
+  const filteredMonthly = month ? monthly.filter(m => m.месец === month) : monthly
+  const bankExpensesTotal = filteredMonthly.reduce((s, m) => s + Math.abs(m.разход_total || 0), 0)
+  const bankByMonth = [...filteredMonthly].sort((a,b) => a.месец < b.месец ? 1 : -1).slice(0, 12)
+  const maxBankMonth = Math.max(...bankByMonth.map(m => Math.abs(m.разход_total||0)), 1)
+
+  // Operational by category (cash invoices)
   const cats = (summary.by_category||[]).reduce((acc, r) => {
     const cat = r.expense_category || '—'
     if (!acc[cat]) acc[cat] = {}
@@ -543,11 +554,54 @@ function AnalysisTab({ API }) {
         {month && <button onClick={() => setMonth('')} className="text-xs text-gray-400 hover:text-gray-600">× всички</button>}
       </div>
 
+      {/* ── Банкови разходи ── */}
+      {monthly.length > 0 && (
+        <div>
+          <h3 className="text-base font-bold text-gray-700 mb-3 flex items-center gap-2">
+            <span className="text-lg">🏦</span> Банкови разходи {month ? `(${month})` : '(всички месеци)'}
+            <span className="text-xs font-normal text-gray-400">— от банкови транзакции</span>
+          </h3>
+          <div className="grid grid-cols-2 gap-4 mb-4">
+            <div className="border rounded-xl p-4 bg-red-50 border-red-200">
+              <div className="text-xs font-semibold text-gray-500 uppercase">Общо разходи</div>
+              <div className="text-2xl font-bold text-red-700">{fmt(bankExpensesTotal)} €</div>
+              <div className="text-xs text-gray-400">{filteredMonthly.length} месеца</div>
+            </div>
+            <div className="border rounded-xl p-4 bg-red-50 border-red-200">
+              <div className="text-xs font-semibold text-gray-500 uppercase">Средно/месец</div>
+              <div className="text-2xl font-bold text-red-700">
+                {filteredMonthly.length > 0 ? fmt(bankExpensesTotal / filteredMonthly.length) : '—'} €
+              </div>
+            </div>
+          </div>
+          {bankByMonth.length > 0 && (
+            <div className="bg-white rounded-xl border border-gray-200 p-4 mb-4 shadow-sm">
+              <h4 className="font-semibold text-gray-700 text-sm mb-3">По месец</h4>
+              <div className="space-y-2">
+                {bankByMonth.map(m => {
+                  const val = Math.abs(m.разход_total || 0)
+                  const pct = Math.round(val / maxBankMonth * 100)
+                  return (
+                    <div key={m.месец} className="flex items-center gap-3">
+                      <div className="w-16 text-xs text-gray-500 text-right flex-shrink-0">{m.месец}</div>
+                      <div className="flex-1 bg-gray-100 rounded-full h-4 overflow-hidden">
+                        <div className="h-4 rounded-full bg-red-400 transition-all" style={{ width: `${pct}%` }}/>
+                      </div>
+                      <div className="w-24 text-xs font-semibold text-red-700 text-right flex-shrink-0">{fmt(val)} €</div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* ── Оперативни разходи ── */}
       <div>
         <h3 className="text-base font-bold text-gray-700 mb-3 flex items-center gap-2">
-          <span className="text-lg">📋</span> Оперативни разходи {month ? `(${month})` : '(всички)'}
-          <span className="text-xs font-normal text-gray-400">— без инвестиции</span>
+          <span className="text-lg">💵</span> Касови разходи {month ? `(${month})` : '(всички)'}
+          <span className="text-xs font-normal text-gray-400">— в брой / касова бележка</span>
         </h3>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
           {[
@@ -779,6 +833,17 @@ export default function Expenses({ API }) {
     setConverting(false)
   }
 
+  const clearUploaded = async () => {
+    if (!confirm('Ще бъдат изтрити всички качени PDF фактури.\nКасовите разходи (в брой / касова бележка) и инвестициите ще останат.\n\nПродължи?')) return
+    try {
+      const r = await apiFetch(`${API}/api/expenses/clear-uploaded`, { method: 'POST' })
+      const data = await r.json()
+      if (data.error) throw new Error(data.error)
+      await loadInvoices()
+      alert(`✅ Изтрити: ${data.deleted} PDF фактури`)
+    } catch(e) { alert('Грешка: ' + e.message) }
+  }
+
   const deleteInvoice = async (id) => {
     if (!confirm('Изтриване на фактурата?')) return
     await apiFetch(`${API}/api/expenses/${id}`, { method: 'DELETE' })
@@ -881,6 +946,11 @@ export default function Expenses({ API }) {
                 title="Конвертира всички фактури преди 2026-01 от BGN в EUR по курс 1.95583"
                 className="px-3 py-1.5 text-sm font-semibold bg-amber-600 text-white rounded hover:bg-amber-700 disabled:opacity-50">
                 {converting ? '⏳...' : '🔄 BGN→EUR'}
+              </button>
+              <button onClick={clearUploaded}
+                title="Изтрива всички качени PDF фактури. Запазва касовите и инвестиционните записи."
+                className="px-3 py-1.5 text-sm font-semibold bg-red-700 text-white rounded hover:bg-red-800">
+                🗑 Изчисти PDF
               </button>
             </div>
           </div>
