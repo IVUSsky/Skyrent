@@ -467,12 +467,16 @@ IBAN EXTRACTION RULES - very important:
   // POST /clear-uploaded — delete uploaded PDF invoices, keep cash/receipt and investment ones
   expRouter.post('/clear-uploaded', (req, res) => {
     try {
-      const toDelete = db.prepare(
-        "SELECT id, filepath FROM expense_invoices WHERE payment_type = 'фактура' OR payment_type IS NULL"
-      ).all();
+      // Keep: payment_type IN ('в брой','касова бележка','банков_импорт') OR expense_category = 'инвестиция'
+      // Delete: everything else (uploaded PDFs with payment_type='фактура' or NULL)
+      const all = db.prepare('SELECT id, filepath, payment_type, expense_category FROM expense_invoices').all();
+      const keepTypes = new Set(['\u0432 \u0431\u0440\u043e\u0439', '\u043a\u0430\u0441\u043e\u0432\u0430 \u0431\u0435\u043b\u0435\u0436\u043a\u0430', '\u0431\u0430\u043d\u043a\u043e\u0432_\u0438\u043c\u043f\u043e\u0440\u0442']);
+      const toDelete = all.filter(inv =>
+        !keepTypes.has(inv.payment_type) && inv.expense_category !== '\u0438\u043d\u0432\u0435\u0441\u0442\u0438\u0446\u0438\u044f'
+      );
       let deleted = 0;
       for (const inv of toDelete) {
-        if (inv.filepath) { try { require('fs').unlinkSync(inv.filepath); } catch(_) {} }
+        if (inv.filepath) { try { fs.unlinkSync(inv.filepath); } catch(_) {} }
         db.prepare('DELETE FROM expense_invoices WHERE id = ?').run(inv.id);
         deleted++;
       }
