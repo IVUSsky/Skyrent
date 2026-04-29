@@ -4,4 +4,4 @@ COPY package*.json ./
 RUN npm ci --no-audit --no-fund
 COPY . .
 RUN npm run build
-CMD ["node_modules/.bin/serve", "-s", "dist", "-l", "3000"]
+CMD ["sh", "-c", "node_modules/.bin/serve -s dist -l ${PORT:-3000}"]
