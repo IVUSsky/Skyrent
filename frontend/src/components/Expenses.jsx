@@ -490,6 +490,97 @@ function CounterpartiesTab({ API }) {
   )
 }
 
+// ── Edit Investment Modal ─────────────────────────────────────
+function EditInvestModal({ item, API, onSave, onClose }) {
+  const [form, setForm] = useState({
+    reason:        item.reason        || '',
+    supplier_name: item.supplier_name || '',
+    amount:        item.amount        || '',
+    currency:      item.currency      || 'EUR',
+    месец:         item.месец         || '',
+    paid:          !!item.paid,
+  })
+  const [saving, setSaving] = useState(false)
+
+  const save = () => {
+    setSaving(true)
+    apiFetch(`${API}/api/expenses/${item.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...form,
+        amount: Number(form.amount) || 0,
+        expense_category: 'инвестиция',
+        property_id: item.property_id || null,
+        supplier_iban: item.supplier_iban || '',
+        supplier_bic:  item.supplier_bic  || '',
+      }),
+    })
+      .then(() => { setSaving(false); onSave() })
+      .catch(() => setSaving(false))
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-md flex flex-col">
+        <div className="px-6 py-4 border-b flex justify-between items-center">
+          <h3 className="font-bold text-gray-900 text-lg">✏️ Редактирай инвестиция</h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl">×</button>
+        </div>
+        <div className="px-6 py-4 space-y-3">
+          <div>
+            <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Описание / основание</label>
+            <input type="text" value={form.reason} onChange={e => setForm(f => ({ ...f, reason: e.target.value }))}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-indigo-400"
+              placeholder="напр. Ремонт покрив"/>
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Доставчик</label>
+            <input type="text" value={form.supplier_name} onChange={e => setForm(f => ({ ...f, supplier_name: e.target.value }))}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-indigo-400"
+              placeholder="Фирма ООД"/>
+          </div>
+          <div className="flex gap-3">
+            <div className="flex-1">
+              <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Сума</label>
+              <input type="number" step="0.01" min="0" value={form.amount}
+                onChange={e => setForm(f => ({ ...f, amount: e.target.value }))}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                placeholder="0.00"/>
+            </div>
+            <div className="w-24">
+              <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Валута</label>
+              <select value={form.currency} onChange={e => setForm(f => ({ ...f, currency: e.target.value }))}
+                className="w-full border border-gray-300 rounded-lg px-2 py-2 text-sm focus:outline-none">
+                {CURRENCIES.map(c => <option key={c}>{c}</option>)}
+              </select>
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Месец</label>
+            <input type="month" value={form.месец} onChange={e => setForm(f => ({ ...f, месец: e.target.value }))}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none"/>
+          </div>
+          <label className="flex items-center gap-2 cursor-pointer text-sm">
+            <input type="checkbox" checked={form.paid} onChange={e => setForm(f => ({ ...f, paid: e.target.checked }))}
+              className="w-4 h-4 rounded text-green-600"/>
+            <span className={form.paid ? 'text-green-700 font-semibold' : 'text-gray-500'}>
+              {form.paid ? '✓ Платена' : 'Неплатена'}
+            </span>
+          </label>
+        </div>
+        <div className="px-6 py-4 border-t flex justify-end gap-2">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 bg-gray-100 rounded hover:bg-gray-200">Отказ</button>
+          <button onClick={save} disabled={saving}
+            className="px-5 py-2 text-sm font-bold text-white bg-indigo-600 rounded hover:bg-indigo-700 disabled:opacity-50">
+            {saving ? 'Запазва...' : 'Запази'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Analysis subtab ───────────────────────────────────────────
 function AnalysisTab({ API }) {
   const [summary, setSummary] = useState(null)
@@ -497,6 +588,7 @@ function AnalysisTab({ API }) {
   const [month, setMonth]     = useState('')
   const [loading, setLoading] = useState(false)
   const [showInvestList, setShowInvestList] = useState(false)
+  const [editItem, setEditItem] = useState(null)
 
   const load = useCallback(() => {
     setLoading(true)
@@ -712,6 +804,7 @@ function AnalysisTab({ API }) {
                     <th className="px-4 py-2 text-left text-xs font-semibold text-gray-500 uppercase">Месец</th>
                     <th className="px-4 py-2 text-right text-xs font-semibold text-gray-500 uppercase">Сума</th>
                     <th className="px-4 py-2 text-center text-xs font-semibold text-gray-500 uppercase">Платено</th>
+                    <th className="px-4 py-2 w-8"></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
@@ -723,6 +816,10 @@ function AnalysisTab({ API }) {
                       <td className="px-4 py-2 text-gray-500">{item.месец || '—'}</td>
                       <td className="px-4 py-2 text-right font-semibold text-indigo-700">{fmt(item.amount)} {item.currency}</td>
                       <td className="px-4 py-2 text-center">{item.paid ? '✅' : '⏳'}</td>
+                      <td className="px-4 py-2 text-right">
+                        <button onClick={() => setEditItem(item)}
+                          className="text-indigo-400 hover:text-indigo-700 text-sm font-bold px-1" title="Редактирай">✏️</button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -737,6 +834,15 @@ function AnalysisTab({ API }) {
           </div>
         )}
       </div>
+
+      {editItem && (
+        <EditInvestModal
+          item={editItem}
+          API={API}
+          onSave={() => { setEditItem(null); load() }}
+          onClose={() => setEditItem(null)}
+        />
+      )}
     </div>
   )
 }
