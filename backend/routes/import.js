@@ -143,8 +143,16 @@ module.exports = function(db) {
       const normMap = Object.fromEntries(Object.entries(tenantMap).map(([k,v]) => [k.toLowerCase(), v]));
 
       const rules = loadRules();
-      const { transactions, unknownTenants } = parseBuffer(req.file.buffer, normMap, rules);
-      res.json({ transactions, unknownTenants });
+      let { transactions, unknownTenants } = parseBuffer(req.file.buffer, normMap, rules);
+      const dupCheck = db.prepare(
+        'SELECT id FROM transactions WHERE дата=? AND ROUND(сума,2)=ROUND(?,2) AND operation=? AND контрагент=?'
+      );
+      transactions = transactions.map(tx => ({
+        ...tx,
+        is_duplicate: !!(tx.дата && dupCheck.get(tx.дата, tx.сума || 0, tx.operation || '', tx.контрагент || ''))
+      }));
+      const dupCount = transactions.filter(t => t.is_duplicate).length;
+      res.json({ transactions, unknownTenants, dupCount });
     } catch (err) {
       console.error('Parse error:', err);
       res.status(500).json({ error: err.message });
@@ -179,7 +187,17 @@ module.exports = function(db) {
       // Sort chronologically
       allTx.sort((a, b) => (a.дата || '').localeCompare(b.дата || ''));
 
-      res.json({ transactions: allTx, unknownTenants: allUnknown, errors });
+      // Mark duplicates
+      const dupCheck = db.prepare(
+        'SELECT id FROM transactions WHERE дата=? AND ROUND(сума,2)=ROUND(?,2) AND operation=? AND контрагент=?'
+      );
+      allTx = allTx.map(tx => ({
+        ...tx,
+        is_duplicate: !!(tx.дата && dupCheck.get(tx.дата, tx.сума || 0, tx.operation || '', tx.контрагент || ''))
+      }));
+
+      const dupCount = allTx.filter(t => t.is_duplicate).length;
+      res.json({ transactions: allTx, unknownTenants: allUnknown, errors, dupCount });
     } catch (err) {
       console.error('Parse-multi error:', err);
       res.status(500).json({ error: err.message });

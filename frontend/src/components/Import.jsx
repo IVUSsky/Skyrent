@@ -699,9 +699,12 @@ function ImportTab({ API, onSaved }) {
 
   const catCounts = {}
   transactions.forEach(tx => { catCounts[tx.категория] = (catCounts[tx.категория] || 0) + 1 })
-  const pendingCount = transactions.filter(tx => tx.validated === 0).length
-  const categories   = ['all', ...Object.keys(catCounts)]
-  const filteredTx   = filterCat === 'all' ? transactions : transactions.filter(tx => tx.категория === filterCat)
+  const pendingCount  = transactions.filter(tx => tx.validated === 0).length
+  const dupCount      = transactions.filter(tx => tx.is_duplicate).length
+  const categories    = ['all', 'дубликати', ...Object.keys(catCounts)]
+  const filteredTx    = filterCat === 'all' ? transactions
+    : filterCat === 'дубликати' ? transactions.filter(tx => tx.is_duplicate)
+    : transactions.filter(tx => tx.категория === filterCat)
 
   return (
     <div>
@@ -862,6 +865,11 @@ function ImportTab({ API, onSaved }) {
             <div>
               <h3 className="text-lg font-bold text-gray-800">
                 Преглед: <span className="text-blue-600">{transactions.length}</span> транзакции
+                {dupCount > 0 && (
+                  <span className="ml-2 text-sm font-normal text-red-700 bg-red-100 px-2 py-0.5 rounded-full">
+                    ⚠ {dupCount} дублирани — ще се пропуснат
+                  </span>
+                )}
                 {pendingCount > 0 && (
                   <span className="ml-2 text-sm font-normal text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">
                     ⚡ {pendingCount} авто по правила
@@ -884,9 +892,11 @@ function ImportTab({ API, onSaved }) {
             {categories.map(cat => (
               <button key={cat} onClick={() => setFilterCat(cat)}
                 className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
-                  filterCat===cat ? 'bg-blue-600 text-white border-blue-600' : `${CATEGORY_STYLES[cat]||'bg-gray-100 text-gray-600 border-gray-200'} hover:opacity-80`
+                  filterCat===cat ? 'bg-blue-600 text-white border-blue-600'
+                  : cat==='дубликати' ? 'bg-red-50 text-red-700 border-red-200 hover:bg-red-100'
+                  : `${CATEGORY_STYLES[cat]||'bg-gray-100 text-gray-600 border-gray-200'} hover:opacity-80`
                 }`}>
-                {cat==='all'?'Всички':cat} ({cat==='all'?transactions.length:catCounts[cat]||0})
+                {cat==='all'?'Всички':cat} ({cat==='all'?transactions.length:cat==='дубликати'?dupCount:catCounts[cat]||0})
               </button>
             ))}
           </div>
@@ -905,7 +915,7 @@ function ImportTab({ API, onSaved }) {
                   {filteredTx.map((tx, idx) => {
                     const realIdx = transactions.indexOf(tx)
                     return (
-                      <tr key={realIdx} className={`hover:bg-gray-50 ${tx.validated===0?'bg-amber-50/40':''}`}>
+                      <tr key={realIdx} className={`hover:bg-gray-50 ${tx.is_duplicate?'bg-red-50 opacity-60':tx.validated===0?'bg-amber-50/40':''}`}>
                         <td className="px-3 py-2 text-gray-600 whitespace-nowrap text-xs">{tx.дата}</td>
                         <td className="px-3 py-2 text-gray-800 max-w-[160px] truncate text-xs" title={tx.контрагент}>{tx.контрагент}</td>
                         <td className="px-3 py-2 text-gray-600 max-w-[200px] truncate text-xs" title={tx.основание}>{tx.основание}</td>
@@ -927,7 +937,11 @@ function ImportTab({ API, onSaved }) {
                             className="w-14 border border-gray-200 rounded px-1 py-0.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"/>
                         </td>
                         <td className="px-3 py-2 text-center">
-                          {tx.validated===0 ? <span className="text-amber-500" title="Авто по правило">⚡</span> : <span className="text-gray-200">—</span>}
+                          {tx.is_duplicate
+                            ? <span className="text-red-500 text-xs font-bold" title="Вече съществува — ще се пропусне">⚠ дубл.</span>
+                            : tx.validated===0
+                              ? <span className="text-amber-500" title="Авто по правило">⚡</span>
+                              : <span className="text-gray-200">—</span>}
                         </td>
                       </tr>
                     )
