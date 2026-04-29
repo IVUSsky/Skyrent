@@ -55,6 +55,15 @@ npm start      # serve dist/ with `serve` (used by Railway)
 - `settings` table is a key-value store (`key TEXT PRIMARY KEY, value TEXT`). SMTP config is stored as JSON under key `smtp`
 - `rent_invoices` and `contracts` tables are created at startup in `server.js` (not in `schema.sql`)
 - `tenant_history` tracks historical tenants per property
+- `expense_invoices.payment_type`: `'фактура'` (PDF upload), `'в брой'` (cash), `'касова бележка'` (receipt), `'банков_импорт'` (linked bank tx)
+- `expense_invoices.expense_category` includes `'инвестиция'` — excluded from operational expense totals everywhere; shown separately in Dashboard and Analysis
+- `transactions.currency`: `'BGN'` for dates before 2026-01-01, `'EUR'` for 2026-01-01 onwards (Bulgaria adopted EUR). BGN→EUR fixed rate: **1.95583**. Monthly aggregations convert BGN amounts via `÷1.95583` in SQL
+
+### Cyrillic string comparisons in Node.js
+Avoid SQL `WHERE column = 'кирилица'` — encoding issues in some environments. Use JS `.toLowerCase().includes()` after fetching rows instead.
+
+### Frontend bundle
+`vite.config.js` splits Recharts into a separate chunk (`vendor-recharts`) — keeps main bundle ~255KB instead of ~778KB.
 
 ## Deployment (Railway)
 
@@ -65,3 +74,7 @@ Two separate Railway services from the same GitHub repo (`IVUSsky/Skyrent`):
 Required Railway environment variables:
 - Backend: `DB_PATH=/data/portfolio.db`, `APP_USERNAME`, `APP_PASSWORD`, `JWT_SECRET`, `RESEND_API_KEY`, `RESEND_FROM_EMAIL`
 - Frontend: `VITE_API_URL=https://[backend-domain].up.railway.app` (must be set before build — also hardcoded in `frontend/.env.production`)
+
+Builder config: backend uses `Dockerfile` (`backend/railway.toml`), frontend uses `nixpacks` (`frontend/railway.toml`). Do not switch frontend to Dockerfile — Railway has container startup issues finding `serve`.
+
+`browser confirm()/alert()` are **blocked** on Railway HTTPS. Use inline React state confirm patterns instead (e.g. `confirmState ? <Да/Не buttons> : <trigger button>`).
