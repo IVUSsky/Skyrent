@@ -148,7 +148,7 @@ module.exports = function(db) {
         payment_type === 'в брой' ? '💵 В брой' : '🧾 Касова бележка',
         supplier_name || '',
         Number(amount),
-        currency || 'EUR',
+        currency || (ефМесец >= '2026-01' ? 'EUR' : 'BGN'),
         reason || '',
         property_id || null,
         expense_category || 'друго',

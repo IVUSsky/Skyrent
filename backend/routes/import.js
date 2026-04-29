@@ -237,7 +237,7 @@ module.exports = function(db) {
       const insertExpense = db.prepare(`
         INSERT INTO expense_invoices
           (filename, status, supplier_name, amount, currency, reason, property_id, expense_category, месец, payment_type, bank_tx_id, paid, paid_date)
-        VALUES (?, 'done', ?, ?, 'BGN', ?, ?, ?, ?, 'банков_импорт', ?, 1, ?)
+        VALUES (?, 'done', ?, ?, ?, ?, ?, ?, ?, 'банков_импорт', ?, 1, ?)
       `);
 
       let saved = 0, skipped = 0;
@@ -275,6 +275,7 @@ module.exports = function(db) {
               `🏦 ${tx.контрагент || 'Банков разход'}`,
               tx.контрагент || '',
               tx.сума || 0,
+              tx.currency || (tx.дата >= '2026-01-01' ? 'EUR' : 'BGN'),
               tx.основание || '',
               tx.property_id || null,
               tx.категория === 'разход' ? 'разход' : 'друго',

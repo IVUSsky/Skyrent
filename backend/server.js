@@ -65,6 +65,9 @@ async function main() {
   // Backfill currency based on дата for existing transactions
   db.exec("UPDATE transactions SET currency='EUR' WHERE currency IS NULL AND дата >= '2026-01-01'");
   db.exec("UPDATE transactions SET currency='BGN' WHERE currency IS NULL");
+  // Backfill expense_invoices currency based on месец (банков_импорт rows had 'BGN' hardcoded)
+  db.exec("UPDATE expense_invoices SET currency='EUR' WHERE (currency IS NULL OR currency='BGN') AND месец >= '2026-01'");
+  db.exec("UPDATE expense_invoices SET currency='BGN' WHERE currency IS NULL");
 
   // Contract templates & contracts
   db.exec(`CREATE TABLE IF NOT EXISTS contract_templates (
