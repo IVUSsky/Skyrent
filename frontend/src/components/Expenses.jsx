@@ -589,6 +589,7 @@ function AnalysisTab({ API }) {
   const [loading, setLoading] = useState(false)
   const [showInvestList, setShowInvestList] = useState(false)
   const [editItem, setEditItem] = useState(null)
+  const [deleteConfirm, setDeleteConfirm] = useState(null)
 
   const load = useCallback(() => {
     setLoading(true)
@@ -816,9 +817,21 @@ function AnalysisTab({ API }) {
                       <td className="px-4 py-2 text-gray-500">{item.месец || '—'}</td>
                       <td className="px-4 py-2 text-right font-semibold text-indigo-700">{fmt(item.amount)} {item.currency}</td>
                       <td className="px-4 py-2 text-center">{item.paid ? '✅' : '⏳'}</td>
-                      <td className="px-4 py-2 text-right">
+                      <td className="px-4 py-2 text-right whitespace-nowrap">
                         <button onClick={() => setEditItem(item)}
                           className="text-indigo-400 hover:text-indigo-700 text-sm font-bold px-1" title="Редактирай">✏️</button>
+                        <button onClick={() => {
+                          if (deleteConfirm === item.id) {
+                            apiFetch(`${API}/api/expenses/${item.id}`, { method: 'DELETE' })
+                              .then(() => { setDeleteConfirm(null); load() })
+                          } else {
+                            setDeleteConfirm(item.id)
+                          }
+                        }}
+                          className={`text-sm font-bold px-1 ml-1 ${deleteConfirm === item.id ? 'text-red-700 underline' : 'text-red-300 hover:text-red-600'}`}
+                          title={deleteConfirm === item.id ? 'Кликни пак за потвърждение' : 'Изтрий'}>
+                          {deleteConfirm === item.id ? 'Сигурен?' : '×'}
+                        </button>
                       </td>
                     </tr>
                   ))}
