@@ -476,5 +476,17 @@ module.exports = function(db) {
     }
   });
 
+  // DELETE /transactions/all — clear all transactions and import sessions
+  router.delete('/transactions/all', (req, res) => {
+    try {
+      const count = db.prepare('SELECT COUNT(*) as c FROM transactions').get().c;
+      db.prepare('DELETE FROM transactions').run();
+      db.prepare('DELETE FROM import_sessions').run();
+      res.json({ ok: true, deleted: count });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   return router;
 };

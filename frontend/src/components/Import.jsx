@@ -571,7 +571,27 @@ function ImportTab({ API, onSaved }) {
   const [unmatchedAssign, setUA]  = useState({})
   const [unmatchedSaving, setUS]  = useState(false)
   const [showUnmatched, setSU]    = useState(false)
+  const [clearConfirm, setClearConfirm] = useState(false)
+  const [clearResult, setClearResult]   = useState(null)
   const fileInputRef = useRef()
+
+  const clearAllTransactions = async () => {
+    setClearConfirm(false)
+    try {
+      const r = await apiFetch(`${API}/api/import/transactions/all`, { method: 'DELETE' })
+      const data = await r.json()
+      if (data.error) throw new Error(data.error)
+      setTx([])
+      setSaveResult(null)
+      loadUnmatched()
+      onSaved && onSaved()
+      setClearResult(`✅ Изтрити: ${data.deleted} транзакции`)
+      setTimeout(() => setClearResult(null), 4000)
+    } catch(e) {
+      setClearResult('❌ Грешка: ' + e.message)
+      setTimeout(() => setClearResult(null), 5000)
+    }
+  }
 
   const loadUnmatched = () =>
     apiFetch(`${API}/api/import/unmatched`).then(r => r.json()).then(setUnmatched).catch(() => {})
@@ -728,6 +748,27 @@ function ImportTab({ API, onSaved }) {
           )}
         </div>
       )}
+
+      {/* Clear all transactions */}
+      {clearResult && (
+        <div className={`mb-3 px-4 py-2 rounded-lg text-sm font-medium ${clearResult.startsWith('✅') ? 'bg-green-50 text-green-800 border border-green-200' : 'bg-red-50 text-red-800 border border-red-200'}`}>
+          {clearResult}
+        </div>
+      )}
+      <div className="flex justify-end mb-3">
+        {clearConfirm ? (
+          <span className="flex items-center gap-2">
+            <span className="text-sm text-red-700 font-semibold">Изтриване на всички транзакции?</span>
+            <button onClick={clearAllTransactions} className="px-3 py-1.5 text-sm font-bold bg-red-700 text-white rounded hover:bg-red-800">Да, изтрий</button>
+            <button onClick={() => setClearConfirm(false)} className="px-3 py-1.5 text-sm font-bold bg-gray-200 text-gray-700 rounded hover:bg-gray-300">Отказ</button>
+          </span>
+        ) : (
+          <button onClick={() => setClearConfirm(true)}
+            className="px-3 py-1.5 text-sm font-semibold bg-red-700 text-white rounded hover:bg-red-800">
+            🗑 Изчисти всички транзакции
+          </button>
+        )}
+      </div>
 
       {/* Drop zone */}
       {!transactions.length && (
