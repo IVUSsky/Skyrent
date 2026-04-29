@@ -7,5 +7,15 @@ export default defineConfig({
     proxy: {
       '/api': 'http://localhost:3002'
     }
+  },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor-react':    ['react', 'react-dom'],
+          'vendor-recharts': ['recharts'],
+        }
+      }
+    }
   }
 })
