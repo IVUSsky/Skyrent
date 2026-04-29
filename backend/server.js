@@ -60,6 +60,11 @@ async function main() {
   // Transactions: add validated + rule_id for smart categorization
   try { db.exec("ALTER TABLE transactions ADD COLUMN validated INTEGER DEFAULT 1"); console.log('Migration: added validated'); } catch(_) {}
   try { db.exec("ALTER TABLE transactions ADD COLUMN rule_id INTEGER");             console.log('Migration: added rule_id');   } catch(_) {}
+  // Transactions: currency (BGN before 2026, EUR from 2026)
+  try { db.exec("ALTER TABLE transactions ADD COLUMN currency TEXT"); console.log('Migration: added currency to transactions'); } catch(_) {}
+  // Backfill currency based on дата for existing transactions
+  db.exec("UPDATE transactions SET currency='EUR' WHERE currency IS NULL AND дата >= '2026-01-01'");
+  db.exec("UPDATE transactions SET currency='BGN' WHERE currency IS NULL");
 
   // Contract templates & contracts
   db.exec(`CREATE TABLE IF NOT EXISTS contract_templates (

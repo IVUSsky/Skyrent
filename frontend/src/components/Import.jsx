@@ -920,7 +920,7 @@ function ImportTab({ API, onSaved }) {
                         <td className="px-3 py-2 text-gray-800 max-w-[160px] truncate text-xs" title={tx.контрагент}>{tx.контрагент}</td>
                         <td className="px-3 py-2 text-gray-600 max-w-[200px] truncate text-xs" title={tx.основание}>{tx.основание}</td>
                         <td className={`px-3 py-2 text-right font-medium whitespace-nowrap text-xs ${tx.operation==='Кт'?'text-green-700':'text-red-700'}`}>
-                          {tx.operation==='Кт'?'+':'-'}{fmt(tx.сума)}
+                          {tx.operation==='Кт'?'+':'-'}{fmt(tx.сума)} <span className="text-gray-400 font-normal">{tx.currency||'BGN'}</span>
                         </td>
                         <td className="px-3 py-2 text-center">
                           <span className={`inline-block px-1.5 py-0.5 rounded text-xs font-mono ${tx.operation==='Кт'?'bg-green-100 text-green-700':'bg-red-100 text-red-700'}`}>{tx.operation}</span>

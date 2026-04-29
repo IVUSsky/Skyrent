@@ -125,7 +125,10 @@ module.exports = function(db) {
         }
       }
 
-      transactions.push({ дата, контрагент, основание, сума, operation, категория, property_id, месец, rule_id, validated });
+      // Currency: BGN before 2026-01-01, EUR from 2026-01-01 onward
+      const currency = дата >= '2026-01-01' ? 'EUR' : 'BGN';
+
+      transactions.push({ дата, контрагент, основание, сума, operation, категория, property_id, месец, rule_id, validated, currency });
     }
 
     return { transactions, unknownTenants };
@@ -222,8 +225,8 @@ module.exports = function(db) {
       `);
 
       const insertTx = db.prepare(`
-        INSERT INTO transactions (session_id, дата, контрагент, основание, сума, operation, категория, property_id, месец, validated, rule_id)
-        VALUES (@session_id, @дата, @контрагент, @основание, @сума, @operation, @категория, @property_id, @месец, @validated, @rule_id)
+        INSERT INTO transactions (session_id, дата, контрагент, основание, сума, operation, категория, property_id, месец, validated, rule_id, currency)
+        VALUES (@session_id, @дата, @контрагент, @основание, @сума, @operation, @категория, @property_id, @месец, @validated, @rule_id, @currency)
       `);
 
       // Check for duplicate
@@ -262,6 +265,7 @@ module.exports = function(db) {
             месец:      tx.месец      || null,
             validated:  tx.validated  != null ? tx.validated : 1,
             rule_id:    tx.rule_id    || null,
+            currency:   tx.currency   || (tx.дата >= '2026-01-01' ? 'EUR' : 'BGN'),
           });
           saved++;
 
@@ -376,14 +380,17 @@ module.exports = function(db) {
   // ── GET /monthly ───────────────────────────────────────────
   router.get('/monthly', (req, res) => {
     try {
+      // All amounts converted to EUR (BGN / 1.95583, EUR as-is)
+      const BGN_RATE = 1.95583;
       const rows = db.prepare(`
         SELECT
           месец,
-          SUM(CASE WHEN категория='наем' THEN сума ELSE 0 END) as наем_total,
-          SUM(CASE WHEN категория='вноска' THEN сума ELSE 0 END) as вноска_total,
-          SUM(CASE WHEN категория IN ('разход','разход_друг') THEN сума ELSE 0 END) as разход_total,
-          SUM(CASE WHEN категория='нап_ддс' THEN сума ELSE 0 END) as нап_ддс_total,
-          SUM(CASE WHEN категория='equity_inject' THEN сума ELSE 0 END) as equity_total
+          COALESCE(currency, CASE WHEN месец < '2026-01' THEN 'BGN' ELSE 'EUR' END) as currency,
+          SUM(CASE WHEN категория='наем'                       THEN CASE WHEN COALESCE(currency, CASE WHEN месец < '2026-01' THEN 'BGN' ELSE 'EUR' END)='BGN' THEN сума/${BGN_RATE} ELSE сума END ELSE 0 END) as наем_total,
+          SUM(CASE WHEN категория='вноска'                     THEN CASE WHEN COALESCE(currency, CASE WHEN месец < '2026-01' THEN 'BGN' ELSE 'EUR' END)='BGN' THEN сума/${BGN_RATE} ELSE сума END ELSE 0 END) as вноска_total,
+          SUM(CASE WHEN категория IN ('разход','разход_друг')  THEN CASE WHEN COALESCE(currency, CASE WHEN месец < '2026-01' THEN 'BGN' ELSE 'EUR' END)='BGN' THEN сума/${BGN_RATE} ELSE сума END ELSE 0 END) as разход_total,
+          SUM(CASE WHEN категория='нап_ддс'                    THEN CASE WHEN COALESCE(currency, CASE WHEN месец < '2026-01' THEN 'BGN' ELSE 'EUR' END)='BGN' THEN сума/${BGN_RATE} ELSE сума END ELSE 0 END) as нап_ддс_total,
+          SUM(CASE WHEN категория='equity_inject'              THEN CASE WHEN COALESCE(currency, CASE WHEN месец < '2026-01' THEN 'BGN' ELSE 'EUR' END)='BGN' THEN сума/${BGN_RATE} ELSE сума END ELSE 0 END) as equity_total
         FROM transactions
         WHERE месец IS NOT NULL AND месец != ''
         GROUP BY месец
