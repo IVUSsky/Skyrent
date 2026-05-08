@@ -1,7 +1,7 @@
 import { apiFetch } from '../api'
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 
-const CATEGORIES = ['ток','вода','ремонт','застраховка','такса','счетоводство','друго','инвестиция']
+const CATEGORIES = ['ток','вода','ремонт','застраховка','такса','счетоводство','друго','инвестиция','благородни метали']
 const CURRENCIES  = ['BGN','EUR','USD']
 const PAYER_IBAN  = 'BG75PRCB92301053911901'
 
