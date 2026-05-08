@@ -54,6 +54,16 @@ export default function Dashboard({ API }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
+  const [plMonth, setPlMonth] = useState(() => {
+    const d = new Date()
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+  })
+  const [plExpenses, setPlExpenses] = useState(null)
+  const [showOpEx, setShowOpEx] = useState(true)
+  const [showMortgage, setShowMortgage] = useState(true)
+  const [showRenov, setShowRenov] = useState(true)
+  const [showInvest, setShowInvest] = useState(false)
+
   useEffect(() => {
     Promise.all([
       apiFetch(`${API}/api/metrics`).then(r => r.json()),
@@ -71,6 +81,15 @@ export default function Dashboard({ API }) {
       .catch(e => { setError(e.message); setLoading(false) })
   }, [])
 
+  useEffect(() => {
+    if (!API) return
+    const q = plMonth ? `?month=${plMonth}` : ''
+    apiFetch(`${API}/api/expenses/summary${q}`)
+      .then(r => r.json())
+      .then(setPlExpenses)
+      .catch(() => setPlExpenses(null))
+  }, [API, plMonth])
+
   if (loading) return <div className="flex justify-center py-16 text-gray-500 text-lg">Зарежда...</div>
   if (error) return <div className="bg-red-50 text-red-700 p-4 rounded-lg">Грешка: {error}</div>
 
@@ -80,6 +99,25 @@ export default function Dashboard({ API }) {
   // Bank expenses (current year total from monthly data)
   const curYear = new Date().getFullYear().toString()
   const curMonth = `${curYear}-${String(new Date().getMonth()+1).padStart(2,'0')}`
+
+  // ── P&L calculations ──────────────────────────────────────
+  const plRow = monthly.find(m => m.месец === plMonth)
+  const plIncome   = plRow?.наем_total   ?? metrics.наем_мес   ?? 0
+  const plMortgage = plRow?.вноска_total ?? metrics.total_вноска ?? 0
+  const toEur = (eur, bgn) => (eur || 0) + (bgn || 0) / 1.95583
+  const plOpEx   = plExpenses ? toEur(plExpenses.total_eur, plExpenses.total_bgn) : 0
+  const plRenov  = plExpenses?.renov  ? toEur(plExpenses.renov.total_eur,  plExpenses.renov.total_bgn)  : 0
+  const plInvest = plExpenses?.invest ? toEur(plExpenses.invest.total_eur, plExpenses.invest.total_bgn) : 0
+
+  const grossProfit = plIncome - (showOpEx ? plOpEx : 0)
+  const netProfit   = grossProfit
+    - (showMortgage ? plMortgage : 0)
+    - (showRenov    ? plRenov    : 0)
+    - (showInvest   ? plInvest   : 0)
+  const tax      = Math.max(0, netProfit) * 0.10
+  const afterTax = netProfit - tax
+  const annualNet = netProfit * 12
+  const annualTax = Math.max(0, annualNet) * 0.10
   const bankExpensesYTD = monthly.filter(m => m.месец?.startsWith(curYear)).reduce((s,m) => s + Math.abs(m.разход_total||0), 0)
   const bankExpensesCurMonth = Math.abs(monthly.find(m => m.месец === curMonth)?.разход_total || 0)
 
@@ -287,6 +325,126 @@ export default function Dashboard({ API }) {
           </div>
         </div>
       )}
+
+      {/* ── Финансово резюме / P&L ── */}
+      <div className="bg-white rounded-xl shadow border border-gray-100 p-5 mb-8">
+        <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+          <h3 className="text-base font-bold text-gray-800">📊 Финансово резюме</h3>
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-gray-500">Месец:</label>
+            <input type="month" value={plMonth} onChange={e => setPlMonth(e.target.value)}
+              className="border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400"/>
+            {plMonth && (
+              <button onClick={() => setPlMonth('')} className="text-xs text-gray-400 hover:text-gray-600">× изчисти</button>
+            )}
+          </div>
+        </div>
+
+        {/* Toggles */}
+        <div className="flex gap-2 flex-wrap mb-5">
+          {[
+            [showOpEx,    setShowOpEx,    'Оперативни',  'bg-red-100 text-red-700 border-red-200'],
+            [showMortgage,setShowMortgage,'Ипотека',     'bg-orange-100 text-orange-700 border-orange-200'],
+            [showRenov,   setShowRenov,   'Ремонт',      'bg-amber-100 text-amber-700 border-amber-200'],
+            [showInvest,  setShowInvest,  'Инвестиции',  'bg-indigo-100 text-indigo-700 border-indigo-200'],
+          ].map(([val, setter, label, activeClass]) => (
+            <button key={label} onClick={() => setter(v => !v)}
+              className={`px-3 py-1 rounded-full text-xs font-semibold border transition-colors ${val ? activeClass : 'bg-gray-50 text-gray-400 border-gray-200'}`}>
+              {val ? '✓' : '○'} {label}
+            </button>
+          ))}
+        </div>
+
+        {/* P&L rows */}
+        <div className="space-y-0 text-sm mb-5">
+          <div className="flex justify-between items-center py-2.5 border-b border-gray-200">
+            <span className="font-semibold text-gray-700">Приход от наеми</span>
+            <span className="font-bold text-green-700 text-base">+{fmt(plIncome, 2)} €</span>
+          </div>
+          {showOpEx && (
+            <div className="flex justify-between items-center py-2 text-red-600">
+              <span className="flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-red-400 inline-block"/>
+                Оперативни разходи
+              </span>
+              <span className="font-medium">−{fmt(plOpEx, 2)} €</span>
+            </div>
+          )}
+          <div className={`flex justify-between items-center py-2.5 border-t border-b font-semibold ${grossProfit >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+            <span>Брутна печалба</span>
+            <span>{grossProfit >= 0 ? '+' : ''}{fmt(grossProfit, 2)} €</span>
+          </div>
+          {showMortgage && (
+            <div className="flex justify-between items-center py-2 text-orange-600">
+              <span className="flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-orange-400 inline-block"/>
+                Ипотечни вноски
+              </span>
+              <span className="font-medium">−{fmt(plMortgage, 2)} €</span>
+            </div>
+          )}
+          {showRenov && (
+            <div className="flex justify-between items-center py-2 text-amber-600">
+              <span className="flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-amber-400 inline-block"/>
+                Разходи за ремонт
+              </span>
+              <span className="font-medium">−{fmt(plRenov, 2)} €</span>
+            </div>
+          )}
+          {showInvest && (
+            <div className="flex justify-between items-center py-2 text-indigo-600">
+              <span className="flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-indigo-400 inline-block"/>
+                Инвестиции
+              </span>
+              <span className="font-medium">−{fmt(plInvest, 2)} €</span>
+            </div>
+          )}
+          <div className={`flex justify-between items-center py-2.5 border-t font-bold ${netProfit >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+            <span>Нетна печалба</span>
+            <span className="text-lg">{netProfit >= 0 ? '+' : ''}{fmt(netProfit, 2)} €</span>
+          </div>
+          {netProfit > 0 && (
+            <div className="flex justify-between items-center py-2 text-purple-600">
+              <span className="flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-purple-400 inline-block"/>
+                Корпоративен данък (10%)
+              </span>
+              <span className="font-medium">−{fmt(tax, 2)} €</span>
+            </div>
+          )}
+          {netProfit > 0 && (
+            <div className="flex justify-between items-center py-2.5 border-t font-bold text-blue-700">
+              <span>След данъци</span>
+              <span className="text-lg">+{fmt(afterTax, 2)} €</span>
+            </div>
+          )}
+        </div>
+
+        {/* Annual projection */}
+        <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+          <div className="text-xs font-semibold text-gray-500 uppercase mb-3">Годишна проекция ({plMonth ? `${plMonth} × 12` : 'текущ месец × 12'})</div>
+          <div className="grid grid-cols-3 gap-4">
+            <div>
+              <div className="text-xs text-gray-500 mb-0.5">Нетна печалба</div>
+              <div className={`font-bold text-lg ${annualNet >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+                {annualNet >= 0 ? '+' : ''}{fmt(annualNet)} €
+              </div>
+            </div>
+            <div>
+              <div className="text-xs text-gray-500 mb-0.5">Корп. данък</div>
+              <div className="font-bold text-lg text-purple-700">−{fmt(annualTax)} €</div>
+            </div>
+            <div>
+              <div className="text-xs text-gray-500 mb-0.5">След данъци</div>
+              <div className={`font-bold text-lg ${(annualNet - annualTax) >= 0 ? 'text-blue-700' : 'text-red-700'}`}>
+                {(annualNet - annualTax) >= 0 ? '+' : ''}{fmt(annualNet - annualTax)} €
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
 
       {/* Group breakdown */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">

@@ -400,7 +400,7 @@ IBAN EXTRACTION RULES - very important:
       const mf = month ? 'AND месец = ?' : '';      // month filter for simple queries
       const mfe = month ? 'AND ei.месец = ?' : '';  // month filter for joined queries
 
-      // Operational totals (excluding инвестиция)
+      // Operational totals (excluding инвестиция and ремонт)
       const totals = db.prepare(`
         SELECT
           SUM(CASE WHEN currency='BGN' THEN amount ELSE 0 END) as total_bgn,
@@ -410,7 +410,7 @@ IBAN EXTRACTION RULES - very important:
           SUM(CASE WHEN paid=1 THEN amount ELSE 0 END) as paid_amount,
           SUM(CASE WHEN paid=0 THEN amount ELSE 0 END) as unpaid_amount
         FROM expense_invoices
-        WHERE (expense_category IS NULL OR expense_category != 'инвестиция') ${mf}`).get(...p);
+        WHERE (expense_category IS NULL OR (expense_category != 'инвестиция' AND expense_category != 'ремонт')) ${mf}`).get(...p);
 
       // Investment totals
       const investTotals = db.prepare(`
@@ -430,6 +430,15 @@ IBAN EXTRACTION RULES - very important:
         WHERE ei.expense_category = 'инвестиция' ${mfe}
         ORDER BY ei.месец DESC`).all(...p);
 
+      // Renovation totals
+      const renovTotals = db.prepare(`
+        SELECT
+          SUM(CASE WHEN currency='BGN' THEN amount ELSE 0 END) as total_bgn,
+          SUM(CASE WHEN currency='EUR' THEN amount ELSE 0 END) as total_eur,
+          COUNT(*) as count
+        FROM expense_invoices
+        WHERE expense_category = 'ремонт' ${mf}`).get(...p);
+
       // Operational by category (expense_category + currency + total)
       const byCategory = db.prepare(`
         SELECT
@@ -440,7 +449,7 @@ IBAN EXTRACTION RULES - very important:
           SUM(CASE WHEN paid=1 THEN amount ELSE 0 END) as paid_amount,
           SUM(CASE WHEN paid=1 THEN 1 ELSE 0 END) as paid_count
         FROM expense_invoices
-        WHERE (expense_category IS NULL OR expense_category != 'инвестиция') ${mf}
+        WHERE (expense_category IS NULL OR (expense_category != 'инвестиция' AND expense_category != 'ремонт')) ${mf}
         GROUP BY expense_category, currency`).all(...p);
 
       // By property (operational only, with currency)
@@ -449,12 +458,13 @@ IBAN EXTRACTION RULES - very important:
         FROM expense_invoices ei
         LEFT JOIN properties p ON p.id = ei.property_id
         WHERE ei.property_id IS NOT NULL
-          AND (ei.expense_category IS NULL OR ei.expense_category != 'инвестиция') ${mfe}
+          AND (ei.expense_category IS NULL OR (ei.expense_category != 'инвестиция' AND ei.expense_category != 'ремонт')) ${mfe}
         GROUP BY ei.property_id, ei.currency`).all(...p);
 
       res.json({
         ...totals,
         invest: { ...investTotals, items: investItems },
+        renov: renovTotals,
         by_category: byCategory,
         by_property: byProperty
       });
