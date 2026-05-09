@@ -149,7 +149,8 @@ export default function Dashboard({ API }) {
 
   // ── P&L calculations ──────────────────────────────────────
   const plRow = monthly.find(m => m.месец === plMonth)
-  const plIncome   = plRow?.наем_total   ?? metrics.наем_мес   ?? 0
+  const plRetained = plRow?.задържан_депозит_total ?? 0
+  const plIncome   = (plRow?.наем_total ?? metrics.наем_мес ?? 0) + plRetained
   const plMortgage = plRow?.вноска_total ?? metrics.total_вноска ?? 0
   const toEur = (eur, bgn) => (eur || 0) + (bgn || 0) / 1.95583
   const plOpEx   = plExpenses ? toEur(plExpenses.total_eur, plExpenses.total_bgn) : 0
@@ -415,7 +416,10 @@ export default function Dashboard({ API }) {
         {/* P&L rows */}
         <div className="space-y-0 text-sm mb-5">
           <div className="flex justify-between items-center py-2.5 border-b border-gray-200">
-            <span className="font-semibold text-gray-700">Приход от наеми</span>
+            <span className="font-semibold text-gray-700">
+              Приход от наеми
+              {plRetained > 0 && <span className="ml-2 text-xs text-teal-600 font-normal">(вкл. {fmt(plRetained, 2)} € задържани депозити)</span>}
+            </span>
             <span className="font-bold text-green-700 text-base">+{fmt(plIncome, 2)} €</span>
           </div>
           {showOpEx && (

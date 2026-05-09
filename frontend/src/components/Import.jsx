@@ -15,8 +15,9 @@ const CATEGORY_STYLES = {
   'друго':             'bg-gray-50 text-gray-500 border-gray-100',
   'депозит_получен':   'bg-teal-100 text-teal-800 border-teal-200',
   'депозит_върнат':    'bg-teal-50 text-teal-700 border-teal-200',
+  'депозит_задържан':  'bg-amber-100 text-amber-800 border-amber-200',
 }
-const ALL_CATS = ['наем','вноска','разход','разход_друг','нап_ддс','equity_inject','приход_друг','депозит_получен','депозит_върнат','друго']
+const ALL_CATS = ['наем','вноска','разход','разход_друг','нап_ддс','equity_inject','приход_друг','депозит_получен','депозит_върнат','депозит_задържан','друго']
 
 const fmt  = n => (n||0).toLocaleString('bg-BG', { minimumFractionDigits:2, maximumFractionDigits:2 })
 const fmt0 = n => (n||0).toLocaleString('bg-BG', { minimumFractionDigits:0, maximumFractionDigits:0 })
@@ -28,9 +29,10 @@ const fmtMonth = m => {
 
 // ── Deposits Tab ───────────────────────────────────────────────
 function DepositsTab({ API, properties }) {
-  const [data, setData]   = useState(null)
-  const [loading, setLoading] = useState(true)
+  const [data, setData]           = useState(null)
+  const [loading, setLoading]     = useState(true)
   const [showDetails, setShowDetails] = useState(false)
+  const [retaining, setRetaining] = useState(null)
 
   const load = () => {
     setLoading(true)
@@ -43,43 +45,91 @@ function DepositsTab({ API, properties }) {
 
   const assignProperty = (txId, propertyId) => {
     apiFetch(`${API}/api/import/transactions/${txId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ property_id: propertyId }),
     }).then(load)
   }
 
-  if (loading) return <div className="py-12 text-center text-gray-400">Зарежда...</div>
-  if (!data) return <div className="py-12 text-center text-gray-400">Грешка при зареждане.</div>
+  const retainDeposit = (txId) => {
+    setRetaining(txId)
+    apiFetch(`${API}/api/import/transactions/${txId}/retain-deposit`, { method: 'POST' })
+      .then(() => { setRetaining(null); load() })
+      .catch(() => setRetaining(null))
+  }
 
-  const totalHeld = data.summary.reduce((s, r) => s + ((r.получени || 0) - (r.върнати || 0)), 0)
+  const fmtEur = n => (n || 0).toLocaleString('bg-BG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
+  if (loading) return <div className="py-12 text-center text-gray-400">Зарежда...</div>
+  if (!data)   return <div className="py-12 text-center text-gray-400">Грешка при зареждане.</div>
+
+  const totalReceived = data.summary.reduce((s, r) => s + (r.получени  || 0), 0)
+  const totalReturned = data.summary.reduce((s, r) => s + (r.върнати   || 0), 0)
+  const totalRetained = data.summary.reduce((s, r) => s + (r.задържани || 0), 0)
+  const totalHeld     = totalReceived - totalReturned - totalRetained
+
+  const curYear       = new Date().getFullYear().toString()
+  const retainedYTD   = (data.retainedByMonth || [])
+    .filter(r => r.месец?.startsWith(curYear))
+    .reduce((s, r) => s + (r.сума || 0), 0)
 
   return (
     <div className="space-y-5">
       <div className="bg-teal-50 border border-teal-200 rounded-xl p-4 text-sm text-teal-800">
-        <strong>Депозити</strong> — сумите държани като гаранция от наематели. Не са приход, не са разход.
-        Засичат се автоматично по ключови думи: <em>депозит, deposit, гаранция</em>.
+        <strong>Депозити</strong> — гаранции от наематели. Не са приход/разход докато не бъдат задържани.
+        При нарушение на договора натиснете <strong>"🔒 Задържи"</strong> — сумата се добавя към приходите.
+        Засичат се автоматично по: <em>депозит, deposit, гаранция</em>.
       </div>
 
-      {/* Summary card */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      {/* KPI cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="border border-teal-200 bg-teal-50 rounded-xl p-4">
-          <div className="text-xs font-semibold text-gray-500 uppercase">Общо държани депозити</div>
-          <div className="text-2xl font-bold text-teal-700 mt-1">{(totalHeld).toLocaleString('bg-BG', {minimumFractionDigits:2,maximumFractionDigits:2})} €</div>
+          <div className="text-xs font-semibold text-gray-500 uppercase">Държани в момента</div>
+          <div className="text-2xl font-bold text-teal-700 mt-1">{fmtEur(totalHeld)} €</div>
+          <div className="text-xs text-gray-400 mt-0.5">получени − върнати − задържани</div>
         </div>
         <div className="border border-green-200 bg-green-50 rounded-xl p-4">
-          <div className="text-xs font-semibold text-gray-500 uppercase">Получени</div>
-          <div className="text-2xl font-bold text-green-700 mt-1">
-            {data.summary.reduce((s,r) => s+(r.получени||0), 0).toLocaleString('bg-BG', {minimumFractionDigits:2,maximumFractionDigits:2})} €
-          </div>
+          <div className="text-xs font-semibold text-gray-500 uppercase">Получени (общо)</div>
+          <div className="text-2xl font-bold text-green-700 mt-1">{fmtEur(totalReceived)} €</div>
         </div>
         <div className="border border-orange-200 bg-orange-50 rounded-xl p-4">
-          <div className="text-xs font-semibold text-gray-500 uppercase">Върнати</div>
-          <div className="text-2xl font-bold text-orange-700 mt-1">
-            {data.summary.reduce((s,r) => s+(r.върнати||0), 0).toLocaleString('bg-BG', {minimumFractionDigits:2,maximumFractionDigits:2})} €
-          </div>
+          <div className="text-xs font-semibold text-gray-500 uppercase">Върнати (общо)</div>
+          <div className="text-2xl font-bold text-orange-700 mt-1">{fmtEur(totalReturned)} €</div>
+        </div>
+        <div className="border border-red-200 bg-red-50 rounded-xl p-4">
+          <div className="text-xs font-semibold text-gray-500 uppercase">Задържани → Приход</div>
+          <div className="text-2xl font-bold text-red-700 mt-1">{fmtEur(totalRetained)} €</div>
+          <div className="text-xs text-gray-400 mt-0.5">{curYear}г.: {fmtEur(retainedYTD)} €</div>
         </div>
       </div>
+
+      {/* Retained by month */}
+      {data.retainedByMonth?.length > 0 && (
+        <div className="bg-white rounded-xl border border-red-200 overflow-hidden shadow-sm">
+          <div className="px-5 py-3 border-b bg-red-50">
+            <h3 className="font-semibold text-red-700 text-sm">💰 Задържани депозити (приход) — по месец</h3>
+          </div>
+          <table className="min-w-full divide-y divide-gray-100 text-sm">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-4 py-2 text-left text-xs font-semibold text-gray-500 uppercase">Месец</th>
+                <th className="px-4 py-2 text-right text-xs font-semibold text-gray-500 uppercase">Сума</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {data.retainedByMonth.map(r => (
+                <tr key={r.месец} className="hover:bg-gray-50">
+                  <td className="px-4 py-2 font-medium text-gray-800">{r.месец}</td>
+                  <td className="px-4 py-2 text-right font-bold text-red-700">+{fmtEur(r.сума)} €</td>
+                </tr>
+              ))}
+              <tr className="bg-red-50 font-bold border-t-2 border-red-200">
+                <td className="px-4 py-2 text-gray-700">Общо</td>
+                <td className="px-4 py-2 text-right text-red-700">+{fmtEur(totalRetained)} €</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {/* Per property */}
       {data.summary.length > 0 && (
@@ -94,20 +144,22 @@ function DepositsTab({ API, properties }) {
                 <th className="px-4 py-2 text-left text-xs font-semibold text-gray-500 uppercase">Наемател</th>
                 <th className="px-4 py-2 text-right text-xs font-semibold text-gray-500 uppercase">Получени</th>
                 <th className="px-4 py-2 text-right text-xs font-semibold text-gray-500 uppercase">Върнати</th>
+                <th className="px-4 py-2 text-right text-xs font-semibold text-gray-500 uppercase">Задържани</th>
                 <th className="px-4 py-2 text-right text-xs font-semibold text-gray-500 uppercase">Салдо</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {data.summary.map((r, i) => {
-                const салдо = (r.получени || 0) - (r.върнати || 0)
+                const салдо = (r.получени || 0) - (r.върнати || 0) - (r.задържани || 0)
                 return (
                   <tr key={i} className="hover:bg-gray-50">
                     <td className="px-4 py-2 font-medium text-gray-800">{r['адрес'] || `Имот #${r.property_id}`}</td>
                     <td className="px-4 py-2 text-gray-500">{r.наемател || '—'}</td>
-                    <td className="px-4 py-2 text-right text-green-700 font-medium">{(r.получени||0).toLocaleString('bg-BG',{minimumFractionDigits:2,maximumFractionDigits:2})} €</td>
-                    <td className="px-4 py-2 text-right text-orange-600">{(r.върнати||0).toLocaleString('bg-BG',{minimumFractionDigits:2,maximumFractionDigits:2})} €</td>
+                    <td className="px-4 py-2 text-right text-green-700">{fmtEur(r.получени)} €</td>
+                    <td className="px-4 py-2 text-right text-orange-600">{fmtEur(r.върнати)} €</td>
+                    <td className="px-4 py-2 text-right text-red-600 font-medium">{fmtEur(r.задържани)} €</td>
                     <td className={`px-4 py-2 text-right font-bold ${салдо > 0 ? 'text-teal-700' : салдо < 0 ? 'text-red-600' : 'text-gray-400'}`}>
-                      {салдо.toLocaleString('bg-BG',{minimumFractionDigits:2,maximumFractionDigits:2})} €
+                      {fmtEur(салдо)} €
                     </td>
                   </tr>
                 )
@@ -127,10 +179,9 @@ function DepositsTab({ API, properties }) {
                 <span className="text-xs text-gray-500 w-24 flex-shrink-0">{tx.дата}</span>
                 <span className="text-sm flex-1 min-w-[150px]">{tx.контрагент}</span>
                 <span className={`text-xs px-2 py-0.5 rounded border ${CATEGORY_STYLES[tx.категория]||''}`}>{tx.категория}</span>
-                <span className="font-semibold text-sm">{tx.сума?.toLocaleString('bg-BG',{minimumFractionDigits:2})} {tx.currency}</span>
+                <span className="font-semibold text-sm">{fmtEur(tx.сума)} {tx.currency}</span>
                 <select onChange={e => e.target.value && assignProperty(tx.id, e.target.value)}
-                  className="border border-gray-300 rounded px-2 py-1 text-xs focus:outline-none"
-                  defaultValue="">
+                  className="border border-gray-300 rounded px-2 py-1 text-xs focus:outline-none" defaultValue="">
                   <option value="">— свържи с имот —</option>
                   {properties.map(p => <option key={p.id} value={p.id}>#{p.id} {p['адрес']}</option>)}
                 </select>
@@ -140,7 +191,7 @@ function DepositsTab({ API, properties }) {
         </div>
       )}
 
-      {/* All deposit transactions */}
+      {/* All deposit transactions with Retain button */}
       {data.details?.length > 0 && (
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
           <button onClick={() => setShowDetails(v => !v)}
@@ -157,19 +208,31 @@ function DepositsTab({ API, properties }) {
                   <th className="px-4 py-2 text-left text-xs font-semibold text-gray-500 uppercase">Имот</th>
                   <th className="px-4 py-2 text-left text-xs font-semibold text-gray-500 uppercase">Тип</th>
                   <th className="px-4 py-2 text-right text-xs font-semibold text-gray-500 uppercase">Сума</th>
+                  <th className="px-4 py-2 w-28"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {data.details.map(tx => (
-                  <tr key={tx.id} className="hover:bg-gray-50">
+                  <tr key={tx.id} className={`hover:bg-gray-50 ${tx.категория === 'депозит_задържан' ? 'bg-red-50' : ''}`}>
                     <td className="px-4 py-2 text-gray-500 whitespace-nowrap">{tx.дата}</td>
-                    <td className="px-4 py-2 text-gray-700 truncate max-w-[200px]">{tx.контрагент}</td>
-                    <td className="px-4 py-2 text-gray-500">{tx['адрес'] || '—'}</td>
+                    <td className="px-4 py-2 text-gray-700 truncate max-w-[180px]">{tx.контрагент}</td>
+                    <td className="px-4 py-2 text-gray-500 text-xs">{tx['адрес'] || '—'}</td>
                     <td className="px-4 py-2">
                       <span className={`text-xs px-2 py-0.5 rounded border ${CATEGORY_STYLES[tx.категория]||''}`}>{tx.категория}</span>
                     </td>
-                    <td className={`px-4 py-2 text-right font-semibold ${tx.категория === 'депозит_получен' ? 'text-green-700' : 'text-orange-600'}`}>
-                      {tx.категория === 'депозит_получен' ? '+' : '−'}{tx.сума?.toLocaleString('bg-BG',{minimumFractionDigits:2})} {tx.currency}
+                    <td className={`px-4 py-2 text-right font-semibold ${
+                      tx.категория === 'депозит_получен'  ? 'text-green-700' :
+                      tx.категория === 'депозит_задържан' ? 'text-red-700'   : 'text-orange-600'}`}>
+                      {tx.категория === 'депозит_получен' ? '+' : '−'}{fmtEur(tx.сума)} {tx.currency}
+                    </td>
+                    <td className="px-4 py-2 text-right">
+                      {tx.категория === 'депозит_получен' && (
+                        <button onClick={() => retainDeposit(tx.id)} disabled={retaining === tx.id}
+                          className="text-xs px-2 py-1 bg-red-100 text-red-700 hover:bg-red-200 rounded font-semibold disabled:opacity-50"
+                          title="Задържи — при нарушение на договора, става приход">
+                          {retaining === tx.id ? '...' : '🔒 Задържи'}
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -179,10 +242,10 @@ function DepositsTab({ API, properties }) {
         </div>
       )}
 
-      {data.summary.length === 0 && data.unlinked?.length === 0 && (
+      {!data.summary.length && !data.unlinked?.length && (
         <div className="text-center py-12 text-gray-400">
           <div className="text-4xl mb-3">💰</div>
-          <div>Няма депозитни транзакции. Системата автоматично ще засече транзакции с думи <em>депозит, deposit, гаранция</em>.</div>
+          <div>Няма депозитни транзакции. Засичат се автоматично по: <em>депозит, deposit, гаранция</em>.</div>
         </div>
       )}
     </div>

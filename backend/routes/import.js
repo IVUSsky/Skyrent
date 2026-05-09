@@ -401,7 +401,8 @@ module.exports = function(db) {
           SUM(CASE WHEN категория='вноска'                     THEN CASE WHEN COALESCE(currency, CASE WHEN месец < '2026-01' THEN 'BGN' ELSE 'EUR' END)='BGN' THEN сума/${BGN_RATE} ELSE сума END ELSE 0 END) as вноска_total,
           SUM(CASE WHEN категория IN ('разход','разход_друг')  THEN CASE WHEN COALESCE(currency, CASE WHEN месец < '2026-01' THEN 'BGN' ELSE 'EUR' END)='BGN' THEN сума/${BGN_RATE} ELSE сума END ELSE 0 END) as разход_total,
           SUM(CASE WHEN категория='нап_ддс'                    THEN CASE WHEN COALESCE(currency, CASE WHEN месец < '2026-01' THEN 'BGN' ELSE 'EUR' END)='BGN' THEN сума/${BGN_RATE} ELSE сума END ELSE 0 END) as нап_ддс_total,
-          SUM(CASE WHEN категория='equity_inject'              THEN CASE WHEN COALESCE(currency, CASE WHEN месец < '2026-01' THEN 'BGN' ELSE 'EUR' END)='BGN' THEN сума/${BGN_RATE} ELSE сума END ELSE 0 END) as equity_total
+          SUM(CASE WHEN категория='equity_inject'              THEN CASE WHEN COALESCE(currency, CASE WHEN месец < '2026-01' THEN 'BGN' ELSE 'EUR' END)='BGN' THEN сума/${BGN_RATE} ELSE сума END ELSE 0 END) as equity_total,
+          SUM(CASE WHEN категория='депозит_задържан'           THEN CASE WHEN COALESCE(currency, CASE WHEN месец < '2026-01' THEN 'BGN' ELSE 'EUR' END)='BGN' THEN сума/${BGN_RATE} ELSE сума END ELSE 0 END) as задържан_депозит_total
         FROM transactions
         WHERE месец IS NOT NULL AND месец != ''
         GROUP BY месец
@@ -409,13 +410,14 @@ module.exports = function(db) {
       `).all();
 
       res.json(rows.map(r => ({
-        месец:       r.месец,
-        наем_total:    r.наем_total    || 0,
-        вноска_total:  r.вноска_total  || 0,
-        разход_total:  r.разход_total  || 0,
-        нап_ддс_total: r.нап_ддс_total || 0,
-        equity_total:  r.equity_total  || 0,
-        net: (r.наем_total || 0) + (r.нап_ддс_total || 0) - (r.вноска_total || 0) - (r.разход_total || 0),
+        месец:                    r.месец,
+        наем_total:               r.наем_total               || 0,
+        вноска_total:             r.вноска_total             || 0,
+        разход_total:             r.разход_total             || 0,
+        нап_ддс_total:            r.нап_ддс_total            || 0,
+        equity_total:             r.equity_total             || 0,
+        задържан_депозит_total:   r.задържан_депозит_total   || 0,
+        net: (r.наем_total || 0) + (r.задържан_депозит_total || 0) - (r.вноска_total || 0) - (r.разход_total || 0),
       })));
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -516,28 +518,37 @@ module.exports = function(db) {
   router.get('/deposits', (req, res) => {
     try {
       const BGN_RATE = 1.95583;
-      const rows = db.prepare(`
+      const toEur = `CASE WHEN t.currency='BGN' THEN t.сума/${BGN_RATE} ELSE t.сума END`;
+
+      const summary = db.prepare(`
         SELECT
           t.property_id,
           p.адрес,
           p.наемател,
-          SUM(CASE WHEN t.категория='депозит_получен'
-            THEN CASE WHEN t.currency='BGN' THEN t.сума/${BGN_RATE} ELSE t.сума END ELSE 0 END) as получени,
-          SUM(CASE WHEN t.категория='депозит_върнат'
-            THEN CASE WHEN t.currency='BGN' THEN t.сума/${BGN_RATE} ELSE t.сума END ELSE 0 END) as върнати,
-          COUNT(CASE WHEN t.категория='депозит_получен' THEN 1 END) as брой_получени,
-          COUNT(CASE WHEN t.категория='депозит_върнат'  THEN 1 END) as брой_върнати
+          SUM(CASE WHEN t.категория='депозит_получен'  THEN ${toEur} ELSE 0 END) as получени,
+          SUM(CASE WHEN t.категория='депозит_върнат'   THEN ${toEur} ELSE 0 END) as върнати,
+          SUM(CASE WHEN t.категория='депозит_задържан' THEN ${toEur} ELSE 0 END) as задържани
         FROM transactions t
         LEFT JOIN properties p ON p.id = t.property_id
-        WHERE t.категория IN ('депозит_получен', 'депозит_върнат')
+        WHERE t.категория IN ('депозит_получен','депозит_върнат','депозит_задържан')
         GROUP BY t.property_id
         ORDER BY p.адрес ASC
+      `).all();
+
+      // Retained deposits by month
+      const retainedByMonth = db.prepare(`
+        SELECT t.месец,
+          SUM(CASE WHEN t.currency='BGN' THEN t.сума/${BGN_RATE} ELSE t.сума END) as сума
+        FROM transactions t
+        WHERE t.категория = 'депозит_задържан' AND t.месец IS NOT NULL
+        GROUP BY t.месец
+        ORDER BY t.месец DESC
       `).all();
 
       const unlinked = db.prepare(`
         SELECT t.id, t.дата, t.контрагент, t.основание, t.сума, t.currency, t.категория, t.месец
         FROM transactions t
-        WHERE t.категория IN ('депозит_получен', 'депозит_върнат')
+        WHERE t.категория IN ('депозит_получен','депозит_върнат','депозит_задържан')
           AND (t.property_id IS NULL OR t.property_id = 0)
         ORDER BY t.дата DESC
       `).all();
@@ -547,11 +558,24 @@ module.exports = function(db) {
                p.адрес, t.property_id
         FROM transactions t
         LEFT JOIN properties p ON p.id = t.property_id
-        WHERE t.категория IN ('депозит_получен', 'депозит_върнат')
+        WHERE t.категория IN ('депозит_получен','депозит_върнат','депозит_задържан')
         ORDER BY t.дата DESC
       `).all();
 
-      res.json({ summary: rows, unlinked, details });
+      res.json({ summary, unlinked, details, retainedByMonth });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── POST /transactions/:id/retain-deposit ──────────────────
+  router.post('/transactions/:id/retain-deposit', (req, res) => {
+    try {
+      const tx = db.prepare('SELECT * FROM transactions WHERE id=?').get(req.params.id);
+      if (!tx) return res.status(404).json({ error: 'Транзакцията не е намерена' });
+      db.prepare('UPDATE transactions SET категория=?, validated=1 WHERE id=?')
+        .run('депозит_задържан', req.params.id);
+      res.json({ ok: true });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
