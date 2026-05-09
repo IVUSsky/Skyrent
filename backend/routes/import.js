@@ -269,6 +269,22 @@ module.exports = function(db) {
         VALUES (?, 'done', ?, ?, ?, ?, ?, ?, ?, 'банков_импорт', ?, 1, ?)
       `);
 
+      // Find existing unpaid invoice matching this bank payment (amount + currency + date within 60 days)
+      const findMatchingInvoice = db.prepare(`
+        SELECT id FROM expense_invoices
+        WHERE ROUND(amount, 2) = ROUND(?, 2)
+          AND currency = ?
+          AND payment_type != 'банков_импорт'
+          AND (paid = 0 OR paid IS NULL)
+          AND bank_tx_id IS NULL
+          AND ABS(julianday(?) - julianday(COALESCE(invoice_date, paid_date, месец || '-01'))) <= 60
+        ORDER BY ABS(julianday(?) - julianday(COALESCE(invoice_date, paid_date, месец || '-01')))
+        LIMIT 1
+      `);
+      const linkInvoice = db.prepare(`
+        UPDATE expense_invoices SET paid=1, paid_date=?, bank_tx_id=?, payment_type='банков_импорт' WHERE id=?
+      `);
+
       let saved = 0, skipped = 0;
 
       const doImport = db.transaction(() => {
@@ -308,20 +324,27 @@ module.exports = function(db) {
             );
           }
 
-          // Дт разходи → expense_invoices
+          // Дт разходи → link to existing invoice or create new expense record
           if (tx.operation === 'Дт' && (tx.категория === 'разход' || tx.категория === 'разход_друг')) {
-            insertExpense.run(
-              `🏦 ${tx.контрагент || 'Банков разход'}`,
-              tx.контрагент || '',
-              tx.сума || 0,
-              tx.currency || (tx.дата >= '2026-01-01' ? 'EUR' : 'BGN'),
-              tx.основание || '',
-              tx.property_id || null,
-              tx.категория === 'разход' ? 'разход' : 'друго',
-              tx.месец || null,
-              txResult.lastInsertRowid,
-              tx.дата || null
-            );
+            const currency = tx.currency || (tx.дата >= '2026-01-01' ? 'EUR' : 'BGN');
+            const matched = findMatchingInvoice.get(tx.сума || 0, currency, tx.дата, tx.дата);
+            if (matched) {
+              // Link bank payment to existing invoice instead of creating duplicate
+              linkInvoice.run(tx.дата || null, txResult.lastInsertRowid, matched.id);
+            } else {
+              insertExpense.run(
+                `🏦 ${tx.контрагент || 'Банков разход'}`,
+                tx.контрагент || '',
+                tx.сума || 0,
+                currency,
+                tx.основание || '',
+                tx.property_id || null,
+                tx.категория === 'разход' ? 'разход' : 'друго',
+                tx.месец || null,
+                txResult.lastInsertRowid,
+                tx.дата || null
+              );
+            }
           }
         }
         return session_id;
