@@ -97,9 +97,11 @@ module.exports = function(db) {
         ? суmaRaw
         : parseFloat(String(суmaRaw || '').replace(/\s/g, '').replace(',', '.')) || 0;
 
-      const operation   = String(row[7]  || '').trim();
-      const контрагент  = String(row[10] || '').trim();
-      const основание   = String(row[12] || '').trim();
+      const operation         = String(row[7]  || '').trim();
+      const контрагент        = String(row[10] || '').trim();
+      const контрагент_iban   = String(row[11] || '').replace(/\s/g,'').toUpperCase();
+      const контрагент_bic    = String(row[9]  || '').trim().toUpperCase();
+      const основание         = String(row[12] || '').trim();
       const kontLower   = контрагент.toLowerCase();
       const osnLower    = основание.toLowerCase();
 
@@ -138,7 +140,7 @@ module.exports = function(db) {
       // Currency: BGN before 2026-01-01, EUR from 2026-01-01 onward
       const currency = дата >= '2026-01-01' ? 'EUR' : 'BGN';
 
-      transactions.push({ дата, контрагент, основание, сума, operation, категория, property_id, месец, rule_id, validated, currency });
+      transactions.push({ дата, контрагент, контрагент_iban, контрагент_bic, основание, сума, operation, категория, property_id, месец, rule_id, validated, currency });
     }
 
     return { transactions, unknownTenants };
@@ -244,6 +246,12 @@ module.exports = function(db) {
         'SELECT id FROM transactions WHERE дата=? AND ROUND(сума,2)=ROUND(?,2) AND operation=? AND контрагент=?'
       );
 
+      const upsertCP = db.prepare(`
+        INSERT INTO counterparties (name, iban, bic, currency)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(name) DO UPDATE SET iban=excluded.iban, bic=excluded.bic, currency=excluded.currency
+      `);
+
       const insertExpense = db.prepare(`
         INSERT INTO expense_invoices
           (filename, status, supplier_name, amount, currency, reason, property_id, expense_category, месец, payment_type, bank_tx_id, paid, paid_date)
@@ -278,6 +286,16 @@ module.exports = function(db) {
             currency:   tx.currency   || (tx.дата >= '2026-01-01' ? 'EUR' : 'BGN'),
           });
           saved++;
+
+          // Auto-upsert counterparty if we have name + IBAN
+          if (tx.контрагент && tx.контрагент_iban) {
+            upsertCP.run(
+              tx.контрагент.trim(),
+              tx.контрагент_iban,
+              tx.контрагент_bic || '',
+              tx.currency || 'EUR'
+            );
+          }
 
           // Дт разходи → expense_invoices
           if (tx.operation === 'Дт' && (tx.категория === 'разход' || tx.категория === 'разход_друг')) {
