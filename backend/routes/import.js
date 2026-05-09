@@ -12,6 +12,15 @@ module.exports = function(db) {
     catch { return []; }
   }
 
+  // ── Helper: extract merchant name from POS description ───────
+  function parsePosName(основание) {
+    const text = основание.replace(/\|/g, ' ').replace(/\s+/g, ' ');
+    const m = text.match(/ПОС [Пп]лащане [\d,.]+ [A-Z]{3} (?:[A-Z0-9]{8} )?(.+)/i);
+    if (!m) return null;
+    let name = m[1].replace(/\s+(Sofia|Sofiya|GR\.|CC\s|\d{4,}|Курс|\*{3}).*$/i, '').trim();
+    return name || null;
+  }
+
   // ── Helper: categorize one row ─────────────────────────────
   function categorizeRow({ operation, контрагент, основание, property_id_from_map }) {
     const kontLower = контрагент.toLowerCase();
@@ -98,10 +107,12 @@ module.exports = function(db) {
         : parseFloat(String(суmaRaw || '').replace(/\s/g, '').replace(',', '.')) || 0;
 
       const operation         = String(row[7]  || '').trim();
-      const контрагент        = String(row[10] || '').trim();
+      const контрагент_raw    = String(row[10] || '').trim();
       const контрагент_iban   = String(row[11] || '').replace(/\s/g,'').toUpperCase();
       const контрагент_bic    = String(row[9]  || '').trim().toUpperCase();
       const основание         = String(row[12] || '').trim();
+      // For POS payments (no counterparty name), parse merchant from description
+      const контрагент        = контрагент_raw || (operation === 'Дт' ? parsePosName(основание) || '' : '');
       const kontLower   = контрагент.toLowerCase();
       const osnLower    = основание.toLowerCase();
 
@@ -287,12 +298,12 @@ module.exports = function(db) {
           });
           saved++;
 
-          // Auto-upsert counterparty if we have name + IBAN
-          if (tx.контрагент && tx.контрагент_iban) {
+          // Auto-upsert counterparty for all Дт transactions with a name
+          if (tx.operation === 'Дт' && tx.контрагент) {
             upsertCP.run(
               tx.контрагент.trim(),
-              tx.контрагент_iban,
-              tx.контрагент_bic || '',
+              tx.контрагент_iban || '',
+              tx.контрагент_bic  || '',
               tx.currency || 'EUR'
             );
           }
