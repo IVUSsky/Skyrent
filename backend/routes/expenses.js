@@ -401,7 +401,7 @@ IBAN EXTRACTION RULES - very important:
       const mfe = month ? 'AND ei.месец = ?' : '';  // month filter for joined queries
 
       const INVEST_CATS = `('инвестиция', 'благородни метали')`
-      const NON_OPEX    = `('инвестиция', 'благородни метали', 'ремонт')`
+      const NON_OPEX    = `('инвестиция', 'благородни метали', 'ремонт', 'ремонт д')`
 
       // Operational totals (excluding инвестиция, благородни метали, ремонт)
       const totals = db.prepare(`
@@ -442,6 +442,15 @@ IBAN EXTRACTION RULES - very important:
         FROM expense_invoices
         WHERE expense_category = 'ремонт' ${mf}`).get(...p);
 
+      // Renovation D totals (external / non-business)
+      const renovDTotals = db.prepare(`
+        SELECT
+          SUM(CASE WHEN currency='BGN' THEN amount ELSE 0 END) as total_bgn,
+          SUM(CASE WHEN currency='EUR' THEN amount ELSE 0 END) as total_eur,
+          COUNT(*) as count
+        FROM expense_invoices
+        WHERE expense_category = 'ремонт д' ${mf}`).get(...p);
+
       // Operational by category (expense_category + currency + total)
       const byCategory = db.prepare(`
         SELECT
@@ -468,6 +477,7 @@ IBAN EXTRACTION RULES - very important:
         ...totals,
         invest: { ...investTotals, items: investItems },
         renov: renovTotals,
+        renovD: renovDTotals,
         by_category: byCategory,
         by_property: byProperty
       });

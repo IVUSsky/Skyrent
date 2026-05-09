@@ -62,6 +62,7 @@ export default function Dashboard({ API }) {
   const [showOpEx, setShowOpEx] = useState(true)
   const [showMortgage, setShowMortgage] = useState(true)
   const [showRenov, setShowRenov] = useState(true)
+  const [showRenovD, setShowRenovD] = useState(false)
   const [showInvest, setShowInvest] = useState(false)
 
   useEffect(() => {
@@ -107,12 +108,14 @@ export default function Dashboard({ API }) {
   const toEur = (eur, bgn) => (eur || 0) + (bgn || 0) / 1.95583
   const plOpEx   = plExpenses ? toEur(plExpenses.total_eur, plExpenses.total_bgn) : 0
   const plRenov  = plExpenses?.renov  ? toEur(plExpenses.renov.total_eur,  plExpenses.renov.total_bgn)  : 0
+  const plRenovD = plExpenses?.renovD ? toEur(plExpenses.renovD.total_eur, plExpenses.renovD.total_bgn) : 0
   const plInvest = plExpenses?.invest ? toEur(plExpenses.invest.total_eur, plExpenses.invest.total_bgn) : 0
 
   const grossProfit = plIncome - (showOpEx ? plOpEx : 0)
   const netProfit   = grossProfit
     - (showMortgage ? plMortgage : 0)
     - (showRenov    ? plRenov    : 0)
+    - (showRenovD   ? plRenovD   : 0)
     - (showInvest   ? plInvest   : 0)
   const tax      = Math.max(0, netProfit) * 0.10
   const afterTax = netProfit - tax
@@ -346,6 +349,7 @@ export default function Dashboard({ API }) {
             [showOpEx,    setShowOpEx,    'Оперативни',  'bg-red-100 text-red-700 border-red-200'],
             [showMortgage,setShowMortgage,'Ипотека',     'bg-orange-100 text-orange-700 border-orange-200'],
             [showRenov,   setShowRenov,   'Ремонт',      'bg-amber-100 text-amber-700 border-amber-200'],
+            [showRenovD,  setShowRenovD,  'Ремонт Д',    'bg-yellow-100 text-yellow-700 border-yellow-200'],
             [showInvest,  setShowInvest,  'Инвестиции',  'bg-indigo-100 text-indigo-700 border-indigo-200'],
           ].map(([val, setter, label, activeClass]) => (
             <button key={label} onClick={() => setter(v => !v)}
@@ -390,6 +394,15 @@ export default function Dashboard({ API }) {
                 Разходи за ремонт
               </span>
               <span className="font-medium">−{fmt(plRenov, 2)} €</span>
+            </div>
+          )}
+          {showRenovD && (
+            <div className="flex justify-between items-center py-2 text-yellow-600">
+              <span className="flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-yellow-400 inline-block"/>
+                Ремонт Д (извън бизнеса)
+              </span>
+              <span className="font-medium">−{fmt(plRenovD, 2)} €</span>
             </div>
           )}
           {showInvest && (
