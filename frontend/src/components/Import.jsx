@@ -463,7 +463,7 @@ function TransactionsTab({ API, properties, onRuleCreated }) {
   const [кат, setКат]       = useState('all')
   const [search, setSearch] = useState('')
   const [offset, setOffset] = useState(0)
-  const [ruleModal, setRuleModal] = useState(null) // {tx, категория}
+  const [toast, setToast] = useState(null) // { msg }
   const LIMIT = 200
 
   const load = useCallback(() => {
@@ -480,26 +480,25 @@ function TransactionsTab({ API, properties, onRuleCreated }) {
 
   useEffect(() => { load() }, [load])
 
+  const showToast = (msg) => {
+    setToast(msg)
+    setTimeout(() => setToast(null), 4000)
+  }
+
   const updateCategory = (tx, newCat) => {
     apiFetch(`${API}/api/import/transactions/${tx.id}/category`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ категория: newCat }),
-    }).then(() => {
+    }).then(r => r.json()).then(res => {
       setRows(prev => prev.map(r => r.id === tx.id ? { ...r, категория: newCat, validated: 1 } : r))
-      // Offer to create rule if category changed from default
-      if (tx.контрагент && newCat !== tx.категория) {
-        setRuleModal({ tx: { ...tx }, категория: newCat })
+      if (res.affected > 0) {
+        showToast(`Правилото е запазено — още ${res.affected} транзакции от "${tx.контрагент}" актуализирани автоматично.`)
+        load() // reload to reflect updated rows
+      } else if (res.rule_saved) {
+        showToast(`Правилото за "${tx.контрагент}" е запазено.`)
       }
     })
-  }
-
-  const createRule = (pattern, категория, property_id) => {
-    apiFetch(`${API}/api/import/rules`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pattern, категория, property_id: property_id || null }),
-    }).then(() => { setRuleModal(null); onRuleCreated && onRuleCreated() })
   }
 
   const totalIncome  = rows.filter(r => r.operation==='Кт').reduce((s,r) => s+(r.сума||0), 0)
@@ -507,27 +506,10 @@ function TransactionsTab({ API, properties, onRuleCreated }) {
 
   return (
     <div className="space-y-4">
-      {/* Rule creation modal */}
-      {ruleModal && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-6">
-            <h3 className="font-bold text-gray-900 text-lg mb-2">Запази като правило?</h3>
-            <p className="text-sm text-gray-600 mb-4">
-              Следващия път когато видим транзакция от <strong className="text-blue-800">{ruleModal.tx.контрагент}</strong>
-              автоматично ще я категоризираме като <strong>{ruleModal.категория}</strong>.
-            </p>
-            <div className="flex gap-3 justify-end">
-              <button onClick={() => setRuleModal(null)}
-                className="px-4 py-2 text-sm text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg">
-                Не, само тази
-              </button>
-              <button
-                onClick={() => createRule(ruleModal.tx.контрагент, ruleModal.категория, ruleModal.tx.property_id)}
-                className="px-4 py-2 text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg">
-                ✓ Създай правило
-              </button>
-            </div>
-          </div>
+      {/* Auto-learn toast */}
+      {toast && (
+        <div className="fixed bottom-6 right-6 z-50 bg-green-700 text-white text-sm px-5 py-3 rounded-xl shadow-xl max-w-sm">
+          {toast}
         </div>
       )}
 

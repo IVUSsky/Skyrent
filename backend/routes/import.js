@@ -363,13 +363,48 @@ module.exports = function(db) {
   });
 
   // ── PATCH /transactions/:id/category ──────────────────────
+  // Auto-learns: saves a rule and retroactively applies it to matching unvalidated transactions
   router.patch('/transactions/:id/category', (req, res) => {
     try {
       const { категория, property_id } = req.body;
       if (!категория) return res.status(400).json({ error: 'категория е задължителна' });
+
+      // Update this transaction
       db.prepare('UPDATE transactions SET категория=?, property_id=COALESCE(?,property_id), validated=1 WHERE id=?')
         .run(категория, property_id || null, req.params.id);
-      res.json({ ok: true });
+
+      // Get the counterparty name to learn from
+      const tx = db.prepare('SELECT контрагент FROM transactions WHERE id=?').get(req.params.id);
+      let affected = 0;
+      let rule_saved = false;
+
+      if (tx && tx.контрагент) {
+        const pattern = tx.контрагент.trim();
+
+        // Upsert rule
+        const existing = db.prepare('SELECT id FROM tx_rules WHERE LOWER(pattern)=LOWER(?)').get(pattern);
+        if (existing) {
+          db.prepare('UPDATE tx_rules SET категория=?, property_id=? WHERE id=?')
+            .run(категория, property_id || null, existing.id);
+        } else {
+          db.prepare('INSERT INTO tx_rules (pattern, категория, property_id) VALUES (?,?,?)')
+            .run(pattern, категория, property_id || null);
+        }
+        rule_saved = true;
+
+        // Apply retroactively to all unvalidated transactions with same counterparty
+        const patLower = pattern.toLowerCase();
+        const unvalidated = db.prepare('SELECT id, контрагент FROM transactions WHERE validated=0 AND id != ?').all(req.params.id);
+        const toUpdate = unvalidated.filter(t => t.контрагент && t.контрагент.toLowerCase().includes(patLower));
+        if (toUpdate.length) {
+          const upd = db.prepare('UPDATE transactions SET категория=?, property_id=COALESCE(?,property_id), validated=1 WHERE id=?');
+          const run = db.transaction(list => list.forEach(t => upd.run(категория, property_id || null, t.id)));
+          run(toUpdate);
+          affected = toUpdate.length;
+        }
+      }
+
+      res.json({ ok: true, rule_saved, affected });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
