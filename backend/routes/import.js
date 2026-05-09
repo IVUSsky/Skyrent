@@ -19,23 +19,33 @@ module.exports = function(db) {
     let категория  = '';
     let property_id = property_id_from_map;
 
+    const isDeposit = ['депозит','deposit','гаранция','garantion'].some(kw => kontLower.includes(kw) || osnLower.includes(kw));
+
     if (operation === 'Кт') {
-      const hasRentKw = ['наем','rent'].some(kw => osnLower.includes(kw) || kontLower.includes(kw));
-      if (hasRentKw || property_id !== null) {
-        категория = 'наем';
-      } else if (kontLower.includes('иво лазаров') || osnLower.includes('заем')) {
-        категория = 'equity_inject';
-      } else if (osnLower.includes('нап') || osnLower.includes('ддс')) {
-        категория = 'нап_ддс';
+      if (isDeposit) {
+        категория = 'депозит_получен';
       } else {
-        категория = 'приход_друг';
+        const hasRentKw = ['наем','rent'].some(kw => osnLower.includes(kw) || kontLower.includes(kw));
+        if (hasRentKw || property_id !== null) {
+          категория = 'наем';
+        } else if (kontLower.includes('иво лазаров') || osnLower.includes('заем')) {
+          категория = 'equity_inject';
+        } else if (osnLower.includes('нап') || osnLower.includes('ддс')) {
+          категория = 'нап_ддс';
+        } else {
+          категория = 'приход_друг';
+        }
       }
     } else if (operation === 'Дт') {
-      const isLoan    = ['прокредит','unicredit','уникредит','пощенска','вноска','кредит'].some(kw => kontLower.includes(kw) || osnLower.includes(kw));
-      const isExpense = ['такса','застраховка','счетоводство','поддръжка','нотариус'].some(kw => kontLower.includes(kw) || osnLower.includes(kw));
-      if (isLoan)         категория = 'вноска';
-      else if (isExpense) категория = 'разход';
-      else                категория = 'разход_друг';
+      if (isDeposit) {
+        категория = 'депозит_върнат';
+      } else {
+        const isLoan    = ['прокредит','unicredit','уникредит','пощенска','вноска','кредит'].some(kw => kontLower.includes(kw) || osnLower.includes(kw));
+        const isExpense = ['такса','застраховка','счетоводство','поддръжка','нотариус'].some(kw => kontLower.includes(kw) || osnLower.includes(kw));
+        if (isLoan)         категория = 'вноска';
+        else if (isExpense) категория = 'разход';
+        else                категория = 'разход_друг';
+      }
     } else {
       категория = 'друго';
     }
@@ -497,6 +507,51 @@ module.exports = function(db) {
     try {
       db.prepare('DELETE FROM tx_rules WHERE id=?').run(req.params.id);
       res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── GET /deposits — deposit balances per property ──────────
+  router.get('/deposits', (req, res) => {
+    try {
+      const BGN_RATE = 1.95583;
+      const rows = db.prepare(`
+        SELECT
+          t.property_id,
+          p.адрес,
+          p.наемател,
+          SUM(CASE WHEN t.категория='депозит_получен'
+            THEN CASE WHEN t.currency='BGN' THEN t.сума/${BGN_RATE} ELSE t.сума END ELSE 0 END) as получени,
+          SUM(CASE WHEN t.категория='депозит_върнат'
+            THEN CASE WHEN t.currency='BGN' THEN t.сума/${BGN_RATE} ELSE t.сума END ELSE 0 END) as върнати,
+          COUNT(CASE WHEN t.категория='депозит_получен' THEN 1 END) as брой_получени,
+          COUNT(CASE WHEN t.категория='депозит_върнат'  THEN 1 END) as брой_върнати
+        FROM transactions t
+        LEFT JOIN properties p ON p.id = t.property_id
+        WHERE t.категория IN ('депозит_получен', 'депозит_върнат')
+        GROUP BY t.property_id
+        ORDER BY p.адрес ASC
+      `).all();
+
+      const unlinked = db.prepare(`
+        SELECT t.id, t.дата, t.контрагент, t.основание, t.сума, t.currency, t.категория, t.месец
+        FROM transactions t
+        WHERE t.категория IN ('депозит_получен', 'депозит_върнат')
+          AND (t.property_id IS NULL OR t.property_id = 0)
+        ORDER BY t.дата DESC
+      `).all();
+
+      const details = db.prepare(`
+        SELECT t.id, t.дата, t.контрагент, t.основание, t.сума, t.currency, t.категория, t.месец,
+               p.адрес, t.property_id
+        FROM transactions t
+        LEFT JOIN properties p ON p.id = t.property_id
+        WHERE t.категория IN ('депозит_получен', 'депозит_върнат')
+        ORDER BY t.дата DESC
+      `).all();
+
+      res.json({ summary: rows, unlinked, details });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }

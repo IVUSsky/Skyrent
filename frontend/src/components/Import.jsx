@@ -5,16 +5,18 @@ import {
 } from 'recharts'
 
 const CATEGORY_STYLES = {
-  'наем':         'bg-green-100 text-green-800 border-green-200',
-  'вноска':       'bg-orange-100 text-orange-800 border-orange-200',
-  'разход':       'bg-red-100 text-red-800 border-red-200',
-  'разход_друг':  'bg-red-50 text-red-700 border-red-100',
-  'нап_ддс':      'bg-purple-100 text-purple-800 border-purple-200',
-  'equity_inject':'bg-blue-100 text-blue-800 border-blue-200',
-  'приход_друг':  'bg-gray-100 text-gray-700 border-gray-200',
-  'друго':        'bg-gray-50 text-gray-500 border-gray-100',
+  'наем':              'bg-green-100 text-green-800 border-green-200',
+  'вноска':            'bg-orange-100 text-orange-800 border-orange-200',
+  'разход':            'bg-red-100 text-red-800 border-red-200',
+  'разход_друг':       'bg-red-50 text-red-700 border-red-100',
+  'нап_ддс':           'bg-purple-100 text-purple-800 border-purple-200',
+  'equity_inject':     'bg-blue-100 text-blue-800 border-blue-200',
+  'приход_друг':       'bg-gray-100 text-gray-700 border-gray-200',
+  'друго':             'bg-gray-50 text-gray-500 border-gray-100',
+  'депозит_получен':   'bg-teal-100 text-teal-800 border-teal-200',
+  'депозит_върнат':    'bg-teal-50 text-teal-700 border-teal-200',
 }
-const ALL_CATS = ['наем','вноска','разход','разход_друг','нап_ддс','equity_inject','приход_друг','друго']
+const ALL_CATS = ['наем','вноска','разход','разход_друг','нап_ддс','equity_inject','приход_друг','депозит_получен','депозит_върнат','друго']
 
 const fmt  = n => (n||0).toLocaleString('bg-BG', { minimumFractionDigits:2, maximumFractionDigits:2 })
 const fmt0 = n => (n||0).toLocaleString('bg-BG', { minimumFractionDigits:0, maximumFractionDigits:0 })
@@ -22,6 +24,169 @@ const fmtMonth = m => {
   if (!m) return ''
   const [y, mo] = m.split('-')
   return ['Яну','Фев','Мар','Апр','Май','Юни','Юли','Авг','Сеп','Окт','Ное','Дек'][parseInt(mo)-1] + ' ' + y.slice(2)
+}
+
+// ── Deposits Tab ───────────────────────────────────────────────
+function DepositsTab({ API, properties }) {
+  const [data, setData]   = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [showDetails, setShowDetails] = useState(false)
+
+  const load = () => {
+    setLoading(true)
+    apiFetch(`${API}/api/import/deposits`)
+      .then(r => r.json())
+      .then(d => { setData(d); setLoading(false) })
+      .catch(() => setLoading(false))
+  }
+  useEffect(() => { load() }, [API])
+
+  const assignProperty = (txId, propertyId) => {
+    apiFetch(`${API}/api/import/transactions/${txId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ property_id: propertyId }),
+    }).then(load)
+  }
+
+  if (loading) return <div className="py-12 text-center text-gray-400">Зарежда...</div>
+  if (!data) return <div className="py-12 text-center text-gray-400">Грешка при зареждане.</div>
+
+  const totalHeld = data.summary.reduce((s, r) => s + ((r.получени || 0) - (r.върнати || 0)), 0)
+
+  return (
+    <div className="space-y-5">
+      <div className="bg-teal-50 border border-teal-200 rounded-xl p-4 text-sm text-teal-800">
+        <strong>Депозити</strong> — сумите държани като гаранция от наематели. Не са приход, не са разход.
+        Засичат се автоматично по ключови думи: <em>депозит, deposit, гаранция</em>.
+      </div>
+
+      {/* Summary card */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="border border-teal-200 bg-teal-50 rounded-xl p-4">
+          <div className="text-xs font-semibold text-gray-500 uppercase">Общо държани депозити</div>
+          <div className="text-2xl font-bold text-teal-700 mt-1">{(totalHeld).toLocaleString('bg-BG', {minimumFractionDigits:2,maximumFractionDigits:2})} €</div>
+        </div>
+        <div className="border border-green-200 bg-green-50 rounded-xl p-4">
+          <div className="text-xs font-semibold text-gray-500 uppercase">Получени</div>
+          <div className="text-2xl font-bold text-green-700 mt-1">
+            {data.summary.reduce((s,r) => s+(r.получени||0), 0).toLocaleString('bg-BG', {minimumFractionDigits:2,maximumFractionDigits:2})} €
+          </div>
+        </div>
+        <div className="border border-orange-200 bg-orange-50 rounded-xl p-4">
+          <div className="text-xs font-semibold text-gray-500 uppercase">Върнати</div>
+          <div className="text-2xl font-bold text-orange-700 mt-1">
+            {data.summary.reduce((s,r) => s+(r.върнати||0), 0).toLocaleString('bg-BG', {minimumFractionDigits:2,maximumFractionDigits:2})} €
+          </div>
+        </div>
+      </div>
+
+      {/* Per property */}
+      {data.summary.length > 0 && (
+        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
+          <div className="px-5 py-3 border-b bg-gray-50">
+            <h3 className="font-semibold text-gray-700 text-sm">По имот</h3>
+          </div>
+          <table className="min-w-full divide-y divide-gray-100 text-sm">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-4 py-2 text-left text-xs font-semibold text-gray-500 uppercase">Имот</th>
+                <th className="px-4 py-2 text-left text-xs font-semibold text-gray-500 uppercase">Наемател</th>
+                <th className="px-4 py-2 text-right text-xs font-semibold text-gray-500 uppercase">Получени</th>
+                <th className="px-4 py-2 text-right text-xs font-semibold text-gray-500 uppercase">Върнати</th>
+                <th className="px-4 py-2 text-right text-xs font-semibold text-gray-500 uppercase">Салдо</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {data.summary.map((r, i) => {
+                const салдо = (r.получени || 0) - (r.върнати || 0)
+                return (
+                  <tr key={i} className="hover:bg-gray-50">
+                    <td className="px-4 py-2 font-medium text-gray-800">{r['адрес'] || `Имот #${r.property_id}`}</td>
+                    <td className="px-4 py-2 text-gray-500">{r.наемател || '—'}</td>
+                    <td className="px-4 py-2 text-right text-green-700 font-medium">{(r.получени||0).toLocaleString('bg-BG',{minimumFractionDigits:2,maximumFractionDigits:2})} €</td>
+                    <td className="px-4 py-2 text-right text-orange-600">{(r.върнати||0).toLocaleString('bg-BG',{minimumFractionDigits:2,maximumFractionDigits:2})} €</td>
+                    <td className={`px-4 py-2 text-right font-bold ${салдо > 0 ? 'text-teal-700' : салдо < 0 ? 'text-red-600' : 'text-gray-400'}`}>
+                      {салдо.toLocaleString('bg-BG',{minimumFractionDigits:2,maximumFractionDigits:2})} €
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Unlinked deposits */}
+      {data.unlinked?.length > 0 && (
+        <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4">
+          <h3 className="font-semibold text-yellow-800 text-sm mb-3">⚠ Депозити без свързан имот ({data.unlinked.length})</h3>
+          <div className="space-y-2">
+            {data.unlinked.map(tx => (
+              <div key={tx.id} className="flex items-center gap-3 flex-wrap">
+                <span className="text-xs text-gray-500 w-24 flex-shrink-0">{tx.дата}</span>
+                <span className="text-sm flex-1 min-w-[150px]">{tx.контрагент}</span>
+                <span className={`text-xs px-2 py-0.5 rounded border ${CATEGORY_STYLES[tx.категория]||''}`}>{tx.категория}</span>
+                <span className="font-semibold text-sm">{tx.сума?.toLocaleString('bg-BG',{minimumFractionDigits:2})} {tx.currency}</span>
+                <select onChange={e => e.target.value && assignProperty(tx.id, e.target.value)}
+                  className="border border-gray-300 rounded px-2 py-1 text-xs focus:outline-none"
+                  defaultValue="">
+                  <option value="">— свържи с имот —</option>
+                  {properties.map(p => <option key={p.id} value={p.id}>#{p.id} {p['адрес']}</option>)}
+                </select>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* All deposit transactions */}
+      {data.details?.length > 0 && (
+        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
+          <button onClick={() => setShowDetails(v => !v)}
+            className="w-full px-5 py-3 flex items-center justify-between hover:bg-gray-50 transition-colors">
+            <span className="font-semibold text-gray-700 text-sm">Всички депозитни транзакции ({data.details.length})</span>
+            <span className="text-gray-400 text-sm">{showDetails ? '▲' : '▼'}</span>
+          </button>
+          {showDetails && (
+            <table className="min-w-full divide-y divide-gray-100 text-sm">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-4 py-2 text-left text-xs font-semibold text-gray-500 uppercase">Дата</th>
+                  <th className="px-4 py-2 text-left text-xs font-semibold text-gray-500 uppercase">Контрагент</th>
+                  <th className="px-4 py-2 text-left text-xs font-semibold text-gray-500 uppercase">Имот</th>
+                  <th className="px-4 py-2 text-left text-xs font-semibold text-gray-500 uppercase">Тип</th>
+                  <th className="px-4 py-2 text-right text-xs font-semibold text-gray-500 uppercase">Сума</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {data.details.map(tx => (
+                  <tr key={tx.id} className="hover:bg-gray-50">
+                    <td className="px-4 py-2 text-gray-500 whitespace-nowrap">{tx.дата}</td>
+                    <td className="px-4 py-2 text-gray-700 truncate max-w-[200px]">{tx.контрагент}</td>
+                    <td className="px-4 py-2 text-gray-500">{tx['адрес'] || '—'}</td>
+                    <td className="px-4 py-2">
+                      <span className={`text-xs px-2 py-0.5 rounded border ${CATEGORY_STYLES[tx.категория]||''}`}>{tx.категория}</span>
+                    </td>
+                    <td className={`px-4 py-2 text-right font-semibold ${tx.категория === 'депозит_получен' ? 'text-green-700' : 'text-orange-600'}`}>
+                      {tx.категория === 'депозит_получен' ? '+' : '−'}{tx.сума?.toLocaleString('bg-BG',{minimumFractionDigits:2})} {tx.currency}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+
+      {data.summary.length === 0 && data.unlinked?.length === 0 && (
+        <div className="text-center py-12 text-gray-400">
+          <div className="text-4xl mb-3">💰</div>
+          <div>Няма депозитни транзакции. Системата автоматично ще засече транзакции с думи <em>депозит, deposit, гаранция</em>.</div>
+        </div>
+      )}
+    </div>
+  )
 }
 
 // ── Rules Tab ─────────────────────────────────────────────────
@@ -976,6 +1141,7 @@ export default function Import({ API }) {
     { id: 'import',       label: '📥 Импорт' },
     { id: 'transactions', label: '📋 Транзакции' },
     { id: 'analysis',     label: '📊 Анализ' },
+    { id: 'deposits',     label: '💰 Депозити' },
     { id: 'rules',        label: '⚡ Правила' },
   ]
 
@@ -1008,6 +1174,7 @@ export default function Import({ API }) {
       {tab === 'import'       && <ImportTab       API={API} onSaved={refreshPending}/>}
       {tab === 'transactions' && <TransactionsTab API={API} properties={properties} onRuleCreated={refreshPending}/>}
       {tab === 'analysis'     && <AnalysisTab     API={API}/>}
+      {tab === 'deposits'     && <DepositsTab     API={API} properties={properties}/>}
       {tab === 'rules'        && <RulesTab        API={API} properties={properties}/>}
     </div>
   )
