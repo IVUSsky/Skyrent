@@ -46,8 +46,54 @@ function KpiCard({ label, value, sub, color, icon }) {
 
 const CHART_COLORS = ['#4AABCC','#1a1a2e','#2d8aab','#7ec8de','#1a5f7a','#a3dae8','#0e3d52','#5bbdd4','#c2ebf4','#2c7a97']
 
+const LEGEND = [
+  { term: 'P&L',      full: 'Profit & Loss',              bg: 'Приходи и разходи — финансово резюме за избран период' },
+  { term: 'NOI',      full: 'Net Operating Income',        bg: 'Нетен оперативен доход = годишен наем × 90% (vacancy rate)' },
+  { term: 'DSCR',     full: 'Debt Service Coverage Ratio', bg: 'Коефициент на покритие на дълга = NOI / годишни вноски. Над 1.25 = устойчив, 1.0–1.25 = приемлив, под 1.0 = риск' },
+  { term: 'LTV',      full: 'Loan to Value',               bg: 'Отношение дълг/стойност на активите. Под 50% = нисък риск, 50–65% = умерен, над 65% = висок' },
+  { term: 'Cap Rate', full: 'Capitalization Rate',         bg: 'Доходност на имотите = NOI / стойност на активите. Показва колко % годишна доходност генерира портфолиото' },
+  { term: 'CF',       full: 'Cash Flow',                   bg: 'Паричен поток = приход от наеми − ипотечни вноски − разходи' },
+  { term: 'Нетен CF', full: 'Net Cash Flow',               bg: 'Реален месечен паричен поток след всички плащания' },
+  { term: 'Equity',   full: 'Собствен капитал',            bg: 'Стойност на активите минус общия дълг по кредитите' },
+  { term: 'YTD',      full: 'Year to Date',                bg: 'От началото на годината до днес' },
+  { term: 'Брутна печалба', full: 'Gross Profit',         bg: 'Приход от наеми минус оперативните разходи (ток, вода, такси и др.)' },
+  { term: 'Нетна печалба',  full: 'Net Profit',           bg: 'Брутна печалба минус ипотека, ремонти и инвестиции (според избраните toggles)' },
+  { term: 'Корп. данък',    full: 'Корпоративен данък',   bg: '10% върху положителната нетна печалба (ставката в България)' },
+  { term: 'Ремонт Д', full: 'Ремонт Друго',               bg: 'Разходи за ремонт извън наемния бизнес (лични имоти или друго дружество) — включва се по избор' },
+  { term: 'Вноска',   full: 'Ипотечна вноска',            bg: 'Месечна вноска по кредити/ипотеки към банките' },
+  { term: 'НАП+ДДС',  full: 'НАП и ДДС плащания',        bg: 'Плащания към НАП — корпоративен данък, осигуровки, ДДС' },
+]
+
+function LegendModal({ onClose }) {
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="px-6 py-4 border-b flex justify-between items-center">
+          <h3 className="font-bold text-gray-900 text-lg">📖 Легенда — съкращения и термини</h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl">×</button>
+        </div>
+        <div className="overflow-y-auto flex-1 divide-y divide-gray-100">
+          {LEGEND.map(({ term, full, bg }) => (
+            <div key={term} className="px-6 py-3">
+              <div className="flex items-baseline gap-2 mb-0.5">
+                <span className="font-bold text-blue-700 text-sm min-w-[90px]">{term}</span>
+                <span className="text-xs text-gray-400 italic">{full}</span>
+              </div>
+              <div className="text-sm text-gray-600">{bg}</div>
+            </div>
+          ))}
+        </div>
+        <div className="px-6 py-3 border-t text-right">
+          <button onClick={onClose} className="px-4 py-2 text-sm bg-gray-100 hover:bg-gray-200 rounded-lg text-gray-700">Затвори</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function Dashboard({ API }) {
   const [metrics, setMetrics] = useState(null)
+  const [showLegend, setShowLegend] = useState(false)
   const [monthly, setMonthly] = useState([])
   const [properties, setProperties] = useState([])
   const [expenseSummary, setExpenseSummary] = useState(null)
@@ -146,7 +192,14 @@ export default function Dashboard({ API }) {
 
   return (
     <div>
-      <h2 className="text-2xl font-bold mb-6" style={{ color: '#1a1a2e' }}>Dashboard</h2>
+      <div className="flex items-center justify-between mb-6">
+        <h2 className="text-2xl font-bold" style={{ color: '#1a1a2e' }}>Dashboard</h2>
+        <button onClick={() => setShowLegend(true)}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-500 hover:text-blue-700 border border-gray-200 hover:border-blue-300 rounded-lg transition-colors bg-white">
+          <span className="font-bold text-base leading-none">?</span> Легенда
+        </button>
+      </div>
+      {showLegend && <LegendModal onClose={() => setShowLegend(false)} />}
 
       {/* KPI Grid */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-8">
