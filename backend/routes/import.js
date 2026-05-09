@@ -264,7 +264,7 @@ module.exports = function(db) {
       `);
 
       const insertExpense = db.prepare(`
-        INSERT INTO expense_invoices
+        INSERT OR IGNORE INTO expense_invoices
           (filename, status, supplier_name, amount, currency, reason, property_id, expense_category, месец, payment_type, bank_tx_id, paid, paid_date)
         VALUES (?, 'done', ?, ?, ?, ?, ?, ?, ?, 'банков_импорт', ?, 1, ?)
       `);

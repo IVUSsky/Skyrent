@@ -57,6 +57,17 @@ async function main() {
   // Set balance_date to today for loans that don't have one
   db.exec("UPDATE loans SET balance_date = date('now') WHERE balance_date IS NULL");
 
+  // Deduplicate expense_invoices from bank import (keep lowest id per bank_tx_id)
+  db.exec(`
+    DELETE FROM expense_invoices
+    WHERE bank_tx_id IS NOT NULL
+      AND id NOT IN (
+        SELECT MIN(id) FROM expense_invoices WHERE bank_tx_id IS NOT NULL GROUP BY bank_tx_id
+      )
+  `);
+  // Unique index to prevent future duplicates (partial — only for bank imports)
+  try { db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_expense_bank_tx ON expense_invoices(bank_tx_id) WHERE bank_tx_id IS NOT NULL"); } catch(_) {}
+
   // Transactions: add validated + rule_id for smart categorization
   try { db.exec("ALTER TABLE transactions ADD COLUMN validated INTEGER DEFAULT 1"); console.log('Migration: added validated'); } catch(_) {}
   try { db.exec("ALTER TABLE transactions ADD COLUMN rule_id INTEGER");             console.log('Migration: added rule_id');   } catch(_) {}
