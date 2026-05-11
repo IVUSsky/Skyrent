@@ -17,6 +17,15 @@ module.exports = function(db) {
     return crypto.createHmac('sha256', ACCESS_SECRET).update(signStr).digest('hex').toUpperCase();
   }
 
+  // Sort query params alphabetically — required by Tuya signing algorithm
+  function sortedPath(path) {
+    const idx = path.indexOf('?');
+    if (idx === -1) return path;
+    const base   = path.slice(0, idx);
+    const sorted = path.slice(idx + 1).split('&').sort().join('&');
+    return base + '?' + sorted;
+  }
+
   async function tuyaRequest(method, path, body) {
     const t     = Date.now().toString();
     const nonce = crypto.randomBytes(8).toString('hex');
@@ -37,20 +46,20 @@ module.exports = function(db) {
       }
     });
     const tokenData = await tokenRes.json();
-    console.log('[Tuya] token response:', JSON.stringify(tokenData));
     if (!tokenData.success) throw new Error('Tuya token error: ' + (tokenData.msg || JSON.stringify(tokenData)));
     const token = tokenData.result.access_token;
 
     // ── Step 2: Make actual request ───────────────────────────
-    const t2      = Date.now().toString();
-    const nonce2  = crypto.randomBytes(8).toString('hex');
-    const bodyStr = body ? JSON.stringify(body) : '';
+    const t2       = Date.now().toString();
+    const nonce2   = crypto.randomBytes(8).toString('hex');
+    const bodyStr  = body ? JSON.stringify(body) : '';
     const bodyHash = crypto.createHash('sha256').update(bodyStr).digest('hex');
-    const stringToSign = [method, bodyHash, '', path].join('\n');
-    const signStr = ACCESS_ID + token + t2 + nonce2 + stringToSign;
-    const reqSign = crypto.createHmac('sha256', ACCESS_SECRET).update(signStr).digest('hex').toUpperCase();
+    const signPath = sortedPath(path); // sort query params for signing
+    const stringToSign = [method, bodyHash, '', signPath].join('\n');
+    const signStr  = ACCESS_ID + token + t2 + nonce2 + stringToSign;
+    const reqSign  = crypto.createHmac('sha256', ACCESS_SECRET).update(signStr).digest('hex').toUpperCase();
 
-    const res = await fetch(`${BASE_URL}${path}`, {
+    const res = await fetch(`${BASE_URL}${signPath}`, {
       method,
       headers: {
         'client_id':    ACCESS_ID,
