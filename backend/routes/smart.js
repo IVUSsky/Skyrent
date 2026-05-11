@@ -301,8 +301,8 @@ module.exports = function(db) {
       const dev = db.prepare('SELECT * FROM smart_devices WHERE id=?').get(req.params.id);
       if (!dev) return res.status(404).json({ error: 'Device not found' });
 
-      const { size = 20 } = req.query;
-      const codes = 'unlock_fingerprint,unlock_password,unlock_card,unlock_app,unlock_temp_pwd,unlock_key,unlock_face,alarm_lock';
+      const { size = 50 } = req.query;
+      const codes = 'unlock_fingerprint,unlock_password,unlock_card,unlock_app,unlock_temporary,unlock_key,unlock_face,alarm_lock,open_inside,close_inside';
       const now  = Date.now();
       const from = now - 30 * 24 * 3600 * 1000; // last 30 days
 
@@ -323,10 +323,20 @@ module.exports = function(db) {
       console.log('[Smart] lock status raw:', JSON.stringify(data));
       const dps = {};
       for (const dp of (data.result || [])) dps[dp.code] = dp.value;
-      // Common lock state DPs
-      const locked = dps['lock_motor_state'] === 'close' || dps['switch_1'] === true ||
-                     dps['lock'] === true || dps['closed'] === true;
-      res.json({ ok: data.success, locked, dps });
+      // Determine locked state from available DPs
+      // lock_motor_state / switch_1 / lock / closed — standard DPs (may not exist on all locks)
+      // arming_switch — alarm armed state (armed = more secure, proxy for locked)
+      // Default to "locked" (true) since door locks auto-relock after brief unlock
+      let locked = true;
+      if ('lock_motor_state' in dps) locked = dps['lock_motor_state'] === 'close';
+      else if ('switch_1' in dps)    locked = !dps['switch_1'];
+      else if ('lock' in dps)        locked = dps['lock'];
+      else if ('closed' in dps)      locked = dps['closed'];
+      // If none of the above, locked = true (assume locked by default)
+
+      const battery = dps['residual_electricity'] ?? dps['battery_percentage'] ?? null;
+      const armed   = dps['arming_switch'] ?? null;
+      res.json({ ok: data.success, locked, battery, armed, dps });
     } catch(err) { res.status(500).json({ error: err.message }); }
   });
 
@@ -337,25 +347,50 @@ module.exports = function(db) {
       if (!dev) return res.status(404).json({ error: 'Device not found' });
 
       const { unlock } = req.body;
-      // Get current DPs to find the right control code
-      const statusData = await tuyaRequest('GET', `/v1.0/devices/${dev.tuya_device_id}/status`);
-      const dps = {};
-      for (const dp of (statusData.result || [])) dps[dp.code] = dp.value;
 
-      // Determine correct command based on available DPs
-      let command;
-      if ('switch_1' in dps)           command = { code: 'switch_1',         value: !unlock };
-      else if ('lock' in dps)          command = { code: 'lock',              value: !unlock };
-      else if ('lock_motor_state' in dps) command = { code: 'lock_motor_state', value: unlock ? 'open' : 'close' };
-      else                             command = { code: 'unlock_app',        value: unlock };
+      if (unlock) {
+        // Remote unlock: use Tuya password ticket mechanism
+        // Step 1: get a one-time ticket
+        const ticketData = await tuyaRequest('POST',
+          `/v1.0/devices/${dev.tuya_device_id}/door-lock/password-ticket`, {}
+        );
+        console.log('[Smart] lock ticket:', JSON.stringify(ticketData));
 
-      console.log('[Smart] lock control command:', JSON.stringify(command), 'available dps:', Object.keys(dps));
-      const data = await tuyaRequest('POST', `/v1.0/devices/${dev.tuya_device_id}/commands`, {
-        commands: [command]
-      });
-      console.log('[Smart] lock control result:', JSON.stringify(data));
-      res.json({ ok: data.success, result: data, command });
-    } catch(err) { res.status(500).json({ error: err.message }); }
+        if (ticketData.success && ticketData.result?.ticket_id) {
+          // Step 2: send unlock command with ticket
+          const data = await tuyaRequest('POST', `/v1.0/devices/${dev.tuya_device_id}/commands`, {
+            commands: [{ code: 'unlock_app', value: ticketData.result.ticket_id }]
+          });
+          console.log('[Smart] lock unlock result:', JSON.stringify(data));
+          res.json({ ok: data.success, result: data, method: 'ticket' });
+        } else {
+          // Fallback: direct unlock_app command
+          const data = await tuyaRequest('POST', `/v1.0/devices/${dev.tuya_device_id}/commands`, {
+            commands: [{ code: 'unlock_app', value: true }]
+          });
+          console.log('[Smart] lock unlock fallback result:', JSON.stringify(data));
+          res.json({ ok: data.success, result: data, method: 'direct', ticket_error: ticketData.msg });
+        }
+      } else {
+        // Lock: try standard lock commands in order
+        const statusData = await tuyaRequest('GET', `/v1.0/devices/${dev.tuya_device_id}/status`);
+        const dps = {};
+        for (const dp of (statusData.result || [])) dps[dp.code] = dp.value;
+
+        let command;
+        if ('lock_motor_state' in dps) command = { code: 'lock_motor_state', value: 'close' };
+        else if ('switch_1' in dps)    command = { code: 'switch_1', value: false };
+        else if ('lock' in dps)        command = { code: 'lock', value: true };
+        else                           command = { code: 'arming_switch', value: true };
+
+        console.log('[Smart] lock command:', JSON.stringify(command));
+        const data = await tuyaRequest('POST', `/v1.0/devices/${dev.tuya_device_id}/commands`, {
+          commands: [command]
+        });
+        console.log('[Smart] lock result:', JSON.stringify(data));
+        res.json({ ok: data.success, result: data, command });
+      }
+    } catch(err) { console.error('[Smart] lock control error:', err.message); res.status(500).json({ error: err.message }); }
   });
 
   // ── GET /api/smart/devices/:id/lock/members — password users ─

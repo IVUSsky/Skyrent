@@ -229,10 +229,13 @@ const UNLOCK_LABELS = {
   unlock_password:    '🔢 Парола',
   unlock_card:        '💳 Карта',
   unlock_app:         '📱 Приложение',
+  unlock_temporary:   '⏱ Временна парола',
   unlock_temp_pwd:    '⏱ Временна парола',
   unlock_key:         '🔑 Ключ',
   unlock_face:        '😊 Лице',
   alarm_lock:         '🚨 Аларма',
+  open_inside:        '🚪 Отворена отвътре',
+  close_inside:       '🚪 Затворена отвътре',
 }
 
 function LockCard({ device, API, properties, onDelete }) {
@@ -244,6 +247,7 @@ function LockCard({ device, API, properties, onDelete }) {
   const [loadingMem, setLoadingMem] = useState(false)
   const [confirmAction, setConfirmAction] = useState(null) // 'unlock' | 'lock'
   const [controlling, setControlling]     = useState(false)
+  const [controlMsg, setControlMsg]       = useState(null)
   const [tempForm, setTempForm] = useState({ name: '', hours: 24 })
   const [tempResult, setTempResult] = useState(null)
   const [generating, setGenerating] = useState(false)
@@ -274,13 +278,15 @@ function LockCard({ device, API, properties, onDelete }) {
   useEffect(() => { if (tab === 'members') loadMembers() }, [tab, loadMembers])
 
   const control = async (unlock) => {
-    setControlling(true); setConfirmAction(null)
-    await apiFetch(`${API}/api/smart/devices/${device.id}/lock/control`, {
+    setControlling(true); setConfirmAction(null); setControlMsg(null)
+    const r = await apiFetch(`${API}/api/smart/devices/${device.id}/lock/control`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ unlock }),
-    })
+    }).then(r => r.json()).catch(e => ({ ok: false, error: e.message }))
     setControlling(false)
-    setTimeout(() => { loadStatus(); loadRecords() }, 2000)
+    if (!r.ok) setControlMsg(`✗ ${r.error || r.result?.msg || 'Грешка'}`)
+    else setControlMsg(unlock ? '✓ Командата за отключване е изпратена' : '✓ Командата за заключване е изпратена')
+    setTimeout(() => { setControlMsg(null); loadStatus(); loadRecords() }, 3000)
   }
 
   const generateTemp = async () => {
@@ -326,13 +332,20 @@ function LockCard({ device, API, properties, onDelete }) {
 
       {/* Status + controls */}
       <div className="mb-4 space-y-2">
-        <div className="flex items-center gap-2 mb-1">
+        <div className="flex items-center gap-2 mb-1 flex-wrap">
           <span className={`text-xs px-2 py-1 rounded-full font-medium ${
             lockStatus == null ? 'bg-gray-100 text-gray-500' :
             lockStatus.locked ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'
           }`}>
             {lockStatus == null ? '⏳ Зарежда...' : lockStatus.locked ? '🔒 Заключена' : '🔓 Отключена'}
           </span>
+          {lockStatus?.battery != null && (
+            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+              lockStatus.battery > 30 ? 'bg-green-50 text-green-600' : 'bg-amber-50 text-amber-600'
+            }`}>
+              🔋 {lockStatus.battery}%
+            </span>
+          )}
           <button onClick={loadStatus} className="text-xs text-gray-400 hover:text-gray-600">↻</button>
         </div>
 
@@ -360,6 +373,12 @@ function LockCard({ device, API, properties, onDelete }) {
           </div>
         )}
       </div>
+
+      {controlMsg && (
+        <div className={`text-xs px-3 py-1.5 rounded-lg mb-2 ${controlMsg.startsWith('✓') ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
+          {controlMsg}
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="flex gap-1 bg-gray-100 rounded-lg p-1 mb-4">
