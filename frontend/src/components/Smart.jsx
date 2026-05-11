@@ -21,10 +21,13 @@ function StatusCard({ label, value, unit, icon, color = 'gray' }) {
 }
 
 function DeviceCard({ device, API, properties, onDelete }) {
-  const [status, setStatus]   = useState(null)
-  const [loading, setLoading] = useState(false)
+  const [status, setStatus]     = useState(null)
+  const [loading, setLoading]   = useState(false)
   const [toggling, setToggling] = useState(false)
   const [confirmOff, setConfirmOff] = useState(false)
+  const [reporting, setReporting]   = useState(false)
+  const [reportMonth, setReportMonth] = useState(new Date().toISOString().slice(0, 7))
+  const [reportMsg, setReportMsg]     = useState(null)
 
   const loadStatus = useCallback(() => {
     setLoading(true)
@@ -50,6 +53,19 @@ function DeviceCard({ device, API, properties, onDelete }) {
     })
     setTimeout(loadStatus, 1500)
     setToggling(false)
+  }
+
+  const sendReport = async () => {
+    setReporting(true)
+    setReportMsg(null)
+    const r = await apiFetch(`${API}/api/smart/devices/${device.id}/report`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ month: reportMonth }),
+    }).then(r => r.json())
+    setReporting(false)
+    setReportMsg(r.ok ? `✓ Изпратен на ${r.sent_to} — ${r.monthly_kwh?.toFixed(2)} kWh` : `✗ ${r.error}`)
+    setTimeout(() => setReportMsg(null), 6000)
   }
 
   const prop = properties.find(p => p.id === device.property_id)
@@ -115,6 +131,23 @@ function DeviceCard({ device, API, properties, onDelete }) {
               ↻
             </button>
           </>
+        )}
+      </div>
+      {/* Monthly report */}
+      <div className="mt-4 pt-4 border-t border-gray-100">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-xs font-semibold text-gray-500 uppercase">📧 Месечен отчет</span>
+          <input type="month" value={reportMonth} onChange={e => setReportMonth(e.target.value)}
+            className="border border-gray-300 rounded-lg px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400" />
+          <button onClick={sendReport} disabled={reporting}
+            className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg disabled:opacity-50">
+            {reporting ? 'Изпраща...' : 'Изпрати'}
+          </button>
+        </div>
+        {reportMsg && (
+          <div className={`mt-2 text-xs px-3 py-1.5 rounded-lg ${reportMsg.startsWith('✓') ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
+            {reportMsg}
+          </div>
         )}
       </div>
     </div>

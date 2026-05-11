@@ -177,7 +177,7 @@ module.exports = function(db) {
       const dev = db.prepare('SELECT * FROM smart_devices WHERE id=?').get(req.params.id);
       if (!dev) return res.status(404).json({ error: 'Device not found' });
 
-      const { month } = req.query; // YYYY-MM, defaults to current month
+      const { month } = req.query;
       const m    = month || new Date().toISOString().slice(0, 7);
       const from = new Date(m + '-01T00:00:00Z').getTime();
       const to   = new Date(new Date(from).setMonth(new Date(from).getMonth() + 1)).getTime() - 1;
@@ -188,6 +188,101 @@ module.exports = function(db) {
 
       res.json({ ok: data.success, month: m, logs: data.result || [] });
     } catch(err) { res.status(500).json({ error: err.message }); }
+  });
+
+  // ── POST /api/smart/devices/:id/report — send monthly email ──
+  router.post('/devices/:id/report', async (req, res) => {
+    try {
+      const { Resend } = require('resend');
+      const resend = new Resend(process.env.RESEND_API_KEY);
+      if (!process.env.RESEND_API_KEY) return res.status(400).json({ error: 'RESEND_API_KEY не е зададен' });
+
+      const dev = db.prepare('SELECT s.*, p.адрес FROM smart_devices s LEFT JOIN properties p ON p.id=s.property_id WHERE s.id=?').get(req.params.id);
+      if (!dev) return res.status(404).json({ error: 'Device not found' });
+
+      const { month, to_email } = req.body;
+      const m    = month || new Date().toISOString().slice(0, 7);
+      const from = new Date(m + '-01T00:00:00Z').getTime();
+      const to   = new Date(new Date(from).setMonth(new Date(from).getMonth() + 1)).getTime() - 1;
+
+      // Get live status for current readings
+      const statusData = await tuyaRequest('GET', `/v1.0/devices/${dev.tuya_device_id}/status`);
+      const dps = {};
+      for (const dp of (statusData.result || [])) dps[dp.code] = dp.value;
+      const totalKwh   = dps['add_ele'] != null ? dps['add_ele'] / 100 : 0;
+      const voltageV   = dps['cur_voltage'] != null ? dps['cur_voltage'] / 10 : 0;
+      const powerW     = dps['cur_power']   != null ? dps['cur_power']   / 10 : 0;
+
+      // Get energy logs for the month
+      const logsData = await tuyaRequest('GET',
+        `/v1.0/devices/${dev.tuya_device_id}/logs?codes=add_ele&start_row_key=&start_time=${from}&end_time=${to}&size=200`
+      );
+      const logs = (logsData.result?.logs || logsData.result || []);
+
+      // Calculate monthly consumption from log difference
+      let monthlyKwh = 0;
+      if (logs.length >= 2) {
+        const sorted = [...logs].sort((a, b) => a.event_time - b.event_time);
+        const first  = parseInt(sorted[0].value) / 100;
+        const last   = parseInt(sorted[sorted.length - 1].value) / 100;
+        monthlyKwh   = Math.max(0, last - first);
+      }
+
+      const monthNames = ['Януари','Февруари','Март','Април','Май','Юни','Юли','Август','Септември','Октомври','Ноември','Декември'];
+      const [y, mo] = m.split('-');
+      const monthLabel = `${monthNames[parseInt(mo)-1]} ${y}`;
+      const costBgn    = (monthlyKwh * 0.30).toFixed(2);
+      const costEur    = (monthlyKwh * 0.15).toFixed(2);
+      const smtpRow    = db.prepare("SELECT value FROM settings WHERE key='smtp'").get();
+      const smtp       = smtpRow ? JSON.parse(smtpRow.value) : {};
+      const fromEmail  = smtp.user || 'onboarding@resend.dev';
+      const fromName   = smtp.from_name || 'Sky Capital';
+
+      const html = `
+        <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;color:#1a1a1a;">
+          <div style="background:#0e3d52;padding:24px 32px;border-radius:12px 12px 0 0;">
+            <h2 style="color:#fff;margin:0;font-size:22px;">⚡ Месечен енергиен отчет</h2>
+            <p style="color:#7ec8de;margin:6px 0 0;">${monthLabel}</p>
+          </div>
+          <div style="background:#f8fafc;padding:24px 32px;border-radius:0 0 12px 12px;border:1px solid #e2e8f0;border-top:none;">
+            <table style="width:100%;border-collapse:collapse;">
+              <tr><td style="padding:8px 0;color:#64748b;font-size:14px;">Имот</td>
+                  <td style="padding:8px 0;font-weight:bold;text-align:right;">${dev.адрес || '—'}</td></tr>
+              <tr><td style="padding:8px 0;color:#64748b;font-size:14px;">Устройство</td>
+                  <td style="padding:8px 0;font-weight:bold;text-align:right;">${dev.name}</td></tr>
+              <tr style="border-top:1px solid #e2e8f0;">
+                <td style="padding:12px 0;color:#64748b;font-size:14px;">Консумация за месеца</td>
+                <td style="padding:12px 0;font-weight:bold;text-align:right;font-size:20px;color:#0e3d52;">${monthlyKwh.toFixed(2)} kWh</td></tr>
+              <tr><td style="padding:8px 0;color:#64748b;font-size:14px;">Обща консумация (брояч)</td>
+                  <td style="padding:8px 0;font-weight:bold;text-align:right;">${totalKwh.toFixed(2)} kWh</td></tr>
+              <tr><td style="padding:8px 0;color:#64748b;font-size:14px;">Текущо напрежение</td>
+                  <td style="padding:8px 0;font-weight:bold;text-align:right;">${voltageV.toFixed(1)} V</td></tr>
+              <tr><td style="padding:8px 0;color:#64748b;font-size:14px;">Текуща мощност</td>
+                  <td style="padding:8px 0;font-weight:bold;text-align:right;">${powerW.toFixed(1)} W</td></tr>
+              <tr style="border-top:1px solid #e2e8f0;">
+                <td style="padding:12px 0;color:#64748b;font-size:14px;">Прогнозна стойност</td>
+                <td style="padding:12px 0;font-weight:bold;text-align:right;color:#059669;">${costBgn} лв / ${costEur} €</td></tr>
+            </table>
+            <p style="color:#94a3b8;font-size:12px;margin-top:24px;">
+              * Прогнозната стойност е изчислена при 0.30 лв/kWh (0.15 €/kWh).<br>
+              Генерирано автоматично от Skyrent — Sky Capital OOD
+            </p>
+          </div>
+        </div>`;
+
+      const recipient = to_email || smtp.user;
+      if (!recipient) return res.status(400).json({ error: 'Няма email адрес за изпращане' });
+
+      const { error } = await resend.emails.send({
+        from: `${fromName} <${fromEmail}>`,
+        to: recipient,
+        subject: `⚡ Енергиен отчет — ${dev.адрес || dev.name} — ${monthLabel}`,
+        html,
+      });
+
+      if (error) return res.status(500).json({ error: error.message });
+      res.json({ ok: true, monthly_kwh: monthlyKwh, sent_to: recipient });
+    } catch(err) { console.error('[Smart] report error:', err.message); res.status(500).json({ error: err.message }); }
   });
 
   return router;
