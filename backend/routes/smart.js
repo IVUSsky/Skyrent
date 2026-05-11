@@ -400,15 +400,33 @@ module.exports = function(db) {
       if (!dev) return res.status(404).json({ error: 'Device not found' });
 
       const { name, effective_time, invalid_time } = req.body;
-      // effective_time and invalid_time are unix timestamps in seconds
       const now = Math.floor(Date.now() / 1000);
-      const data = await tuyaRequest('POST', `/v1.0/devices/${dev.tuya_device_id}/door-lock/temp-passwords`, {
+      const body = {
         name:           name || 'Временен код',
         effective_time: effective_time || now,
-        invalid_time:   invalid_time   || now + 24 * 3600, // 24h default
-        password_type:  'ticket',
-      });
-      console.log('[Smart] temp password:', JSON.stringify(data));
+        invalid_time:   invalid_time   || now + 24 * 3600,
+      };
+
+      // Try jtmspro-specific endpoint first, then fallback to standard
+      let data = await tuyaRequest('POST',
+        `/v1.0/devices/${dev.tuya_device_id}/door-lock/temp-pwd`, body
+      );
+      console.log('[Smart] temp-pwd:', JSON.stringify(data));
+
+      if (!data.success && (data.code === 1100 || data.code === 2017 || String(data.msg).includes('uri'))) {
+        data = await tuyaRequest('POST',
+          `/v1.0/devices/${dev.tuya_device_id}/door-lock/temp-passwords`, { ...body, password_type: 'normal' }
+        );
+        console.log('[Smart] temp-passwords (normal):', JSON.stringify(data));
+      }
+
+      if (!data.success && (data.code === 1100 || data.code === 2017 || String(data.msg).includes('uri'))) {
+        data = await tuyaRequest('POST',
+          `/v2.0/devices/${dev.tuya_device_id}/door-lock/temp-passwords`, body
+        );
+        console.log('[Smart] temp-passwords v2:', JSON.stringify(data));
+      }
+
       res.json({ ok: data.success, result: data.result, error: data.msg, code: data.code });
     } catch(err) { res.status(500).json({ error: err.message }); }
   });
