@@ -464,12 +464,11 @@ export default function Smart({ API }) {
         </div>
       ) : (
         <div className="grid gap-5 md:grid-cols-2">
-          {devices.map(dev => (
-            {dev.type === 'lock'
+          {devices.map(dev =>
+            dev.type === 'lock'
               ? <LockCard key={dev.id} device={dev} API={API} properties={properties} onDelete={id => setConfirmDel(id)} />
               : <DeviceCard key={dev.id} device={dev} API={API} properties={properties} onDelete={id => setConfirmDel(id)} />
-            }
-          ))}
+          )}
         </div>
       )}
 
