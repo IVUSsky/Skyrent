@@ -264,6 +264,8 @@ async function main() {
   app.use('/api/expenses',       expRouter);
   app.use('/api/counterparties', cpRouter);
 
+  app.use('/api/smart', require('./routes/smart')(db));
+
   app.listen(PORT, () => console.log(`Backend running on port ${PORT}`));
 }
 

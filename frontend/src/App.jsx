@@ -12,6 +12,7 @@ import Invoices from './components/Invoices'
 import Contracts from './components/Contracts'
 import Settings from './components/Settings'
 import Expenses from './components/Expenses'
+import Smart from './components/Smart'
 
 const API = import.meta.env.VITE_API_URL || ''
 
@@ -27,6 +28,7 @@ const ALL_TABS = [
   { id: 'analysis',  label: 'Анализ',         roles: ['admin'] },
   { id: 'expenses',  label: '💸 Разходи',     roles: ['admin'] },
   { id: 'import',    label: '📥 Банка',       roles: ['admin'] },
+  { id: 'smart',     label: '⚡ Смарт',       roles: ['admin'] },
   { id: 'settings',  label: '⚙️ Настройки',  roles: ['admin'] },
 ]
 
@@ -119,6 +121,7 @@ export default function App() {
         {validTab === 'analysis'  && <Analysis API={API} />}
         {validTab === 'expenses'  && <Expenses API={API} />}
         {validTab === 'import'    && <Import API={API} />}
+        {validTab === 'smart'     && <Smart API={API} />}
         {validTab === 'settings'  && <Settings API={API} />}
       </main>
     </div>
