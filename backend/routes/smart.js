@@ -310,16 +310,26 @@ module.exports = function(db) {
       const dev = db.prepare('SELECT * FROM smart_devices WHERE id=?').get(req.params.id);
       if (!dev) return res.status(404).json({ error: 'Device not found' });
 
-      const { size = 50 } = req.query;
-      const codes = 'unlock_fingerprint,unlock_password,unlock_card,unlock_app,unlock_temporary,unlock_key,unlock_face,alarm_lock,open_inside,close_inside';
+      // Try door-lock specific records endpoint first (jtmspro category)
       const now  = Date.now();
-      const from = now - 30 * 24 * 3600 * 1000; // last 30 days
-
+      const from = now - 30 * 24 * 3600 * 1000;
       const data = await tuyaRequest('GET',
-        `/v1.0/devices/${dev.tuya_device_id}/logs?codes=${codes}&start_time=${from}&end_time=${now}&size=${size}`
+        `/v1.0/devices/${dev.tuya_device_id}/door-lock/records?start_time=${from}&end_time=${now}&size=50`
       );
-      console.log('[Smart] lock records:', JSON.stringify(data));
-      res.json({ ok: data.success, records: data.result?.logs || data.result || [] });
+      console.log('[Smart] lock records (door-lock API):', JSON.stringify(data));
+
+      if (data.success) {
+        const records = data.result?.records || data.result?.list || data.result || [];
+        return res.json({ ok: true, records });
+      }
+
+      // Fallback: generic device logs with URL-encoded codes
+      const codes = encodeURIComponent('unlock_fingerprint,unlock_password,unlock_card,unlock_app,unlock_temporary,unlock_key,unlock_face,alarm_lock');
+      const data2 = await tuyaRequest('GET',
+        `/v1.0/devices/${dev.tuya_device_id}/logs?codes=${codes}&start_time=${from}&end_time=${now}&size=50`
+      );
+      console.log('[Smart] lock records (logs API):', JSON.stringify(data2));
+      res.json({ ok: data2.success, records: data2.result?.logs || data2.result || [], fallback: true });
     } catch(err) { res.status(500).json({ error: err.message }); }
   });
 
