@@ -348,47 +348,57 @@ module.exports = function(db) {
 
       const { unlock } = req.body;
 
-      if (unlock) {
-        // Remote unlock: use Tuya password ticket mechanism
-        // Step 1: get a one-time ticket
-        const ticketData = await tuyaRequest('POST',
-          `/v1.0/devices/${dev.tuya_device_id}/door-lock/password-ticket`, {}
-        );
-        console.log('[Smart] lock ticket:', JSON.stringify(ticketData));
+      // Get device specs to find writable DPs
+      const specData = await tuyaRequest('GET', `/v1.0/devices/${dev.tuya_device_id}/specifications`);
+      console.log('[Smart] lock specs:', JSON.stringify(specData));
+      const functions = specData.result?.functions || [];
+      const writableCodes = functions.map(f => f.code);
+      console.log('[Smart] writable DPs:', writableCodes);
 
-        if (ticketData.success && ticketData.result?.ticket_id) {
-          // Step 2: send unlock command with ticket
-          const data = await tuyaRequest('POST', `/v1.0/devices/${dev.tuya_device_id}/commands`, {
-            commands: [{ code: 'unlock_app', value: ticketData.result.ticket_id }]
+      if (unlock) {
+        // Try writable DPs in order of preference for unlock
+        let data;
+        if (writableCodes.includes('remote_door_open')) {
+          data = await tuyaRequest('POST', `/v1.0/devices/${dev.tuya_device_id}/commands`, {
+            commands: [{ code: 'remote_door_open', value: true }]
           });
-          console.log('[Smart] lock unlock result:', JSON.stringify(data));
-          res.json({ ok: data.success, result: data, method: 'ticket' });
+          console.log('[Smart] remote_door_open result:', JSON.stringify(data));
+          res.json({ ok: data.success, result: data, method: 'remote_door_open' });
+        } else if (writableCodes.includes('lock_motor_state')) {
+          data = await tuyaRequest('POST', `/v1.0/devices/${dev.tuya_device_id}/commands`, {
+            commands: [{ code: 'lock_motor_state', value: 'open' }]
+          });
+          res.json({ ok: data.success, result: data, method: 'lock_motor_state' });
+        } else if (writableCodes.includes('switch_1')) {
+          data = await tuyaRequest('POST', `/v1.0/devices/${dev.tuya_device_id}/commands`, {
+            commands: [{ code: 'switch_1', value: true }]
+          });
+          res.json({ ok: data.success, result: data, method: 'switch_1' });
         } else {
-          // Fallback: direct unlock_app command
-          const data = await tuyaRequest('POST', `/v1.0/devices/${dev.tuya_device_id}/commands`, {
-            commands: [{ code: 'unlock_app', value: true }]
-          });
-          console.log('[Smart] lock unlock fallback result:', JSON.stringify(data));
-          res.json({ ok: data.success, result: data, method: 'direct', ticket_error: ticketData.msg });
+          // No known writable unlock DP found
+          res.json({ ok: false, error: 'Не е намерен writable DP за отключване', writable: writableCodes });
         }
       } else {
-        // Lock: try standard lock commands in order
-        const statusData = await tuyaRequest('GET', `/v1.0/devices/${dev.tuya_device_id}/status`);
-        const dps = {};
-        for (const dp of (statusData.result || [])) dps[dp.code] = dp.value;
-
-        let command;
-        if ('lock_motor_state' in dps) command = { code: 'lock_motor_state', value: 'close' };
-        else if ('switch_1' in dps)    command = { code: 'switch_1', value: false };
-        else if ('lock' in dps)        command = { code: 'lock', value: true };
-        else                           command = { code: 'arming_switch', value: true };
-
-        console.log('[Smart] lock command:', JSON.stringify(command));
-        const data = await tuyaRequest('POST', `/v1.0/devices/${dev.tuya_device_id}/commands`, {
-          commands: [command]
-        });
-        console.log('[Smart] lock result:', JSON.stringify(data));
-        res.json({ ok: data.success, result: data, command });
+        // Lock
+        let data;
+        if (writableCodes.includes('lock_motor_state')) {
+          data = await tuyaRequest('POST', `/v1.0/devices/${dev.tuya_device_id}/commands`, {
+            commands: [{ code: 'lock_motor_state', value: 'close' }]
+          });
+          res.json({ ok: data.success, result: data, method: 'lock_motor_state' });
+        } else if (writableCodes.includes('switch_1')) {
+          data = await tuyaRequest('POST', `/v1.0/devices/${dev.tuya_device_id}/commands`, {
+            commands: [{ code: 'switch_1', value: false }]
+          });
+          res.json({ ok: data.success, result: data, method: 'switch_1' });
+        } else if (writableCodes.includes('arming_switch')) {
+          data = await tuyaRequest('POST', `/v1.0/devices/${dev.tuya_device_id}/commands`, {
+            commands: [{ code: 'arming_switch', value: true }]
+          });
+          res.json({ ok: data.success, result: data, method: 'arming_switch' });
+        } else {
+          res.json({ ok: false, error: 'Не е намерен writable DP за заключване', writable: writableCodes });
+        }
       }
     } catch(err) { console.error('[Smart] lock control error:', err.message); res.status(500).json({ error: err.message }); }
   });
