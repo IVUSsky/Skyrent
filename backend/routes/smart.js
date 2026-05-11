@@ -310,39 +310,8 @@ module.exports = function(db) {
       const dev = db.prepare('SELECT * FROM smart_devices WHERE id=?').get(req.params.id);
       if (!dev) return res.status(404).json({ error: 'Device not found' });
 
-      const now  = Date.now();
-      const from = now - 30 * 24 * 3600 * 1000;
-
-      // Try 1: door-lock/records with pagination params
-      const d1 = await tuyaRequest('GET',
-        `/v1.0/devices/${dev.tuya_device_id}/door-lock/records?page_no=1&page_size=50&type=1`
-      );
-      console.log('[Smart] door-lock/records:', JSON.stringify(d1));
-      if (d1.success) {
-        const records = d1.result?.records || d1.result?.list || d1.result || [];
-        return res.json({ ok: true, records });
-      }
-
-      // Try 2: door-lock/records without type filter
-      const d2 = await tuyaRequest('GET',
-        `/v1.0/devices/${dev.tuya_device_id}/door-lock/records?page_no=1&page_size=50`
-      );
-      console.log('[Smart] door-lock/records (no type):', JSON.stringify(d2));
-      if (d2.success) {
-        const records = d2.result?.records || d2.result?.list || d2.result || [];
-        return res.json({ ok: true, records });
-      }
-
-      // Try 3: device logs — only 2 codes to minimize URL length
-      const d3 = await tuyaRequest('GET',
-        `/v1.0/devices/${dev.tuya_device_id}/logs?codes=unlock_app,alarm_lock&end_time=${now}&size=50&start_time=${from}`
-      );
-      console.log('[Smart] device logs (short):', JSON.stringify(d3));
-      if (d3.success) {
-        return res.json({ ok: true, records: d3.result?.logs || d3.result || [], fallback: 'logs' });
-      }
-
-      res.json({ ok: false, records: [], errors: [d1.msg, d2.msg, d3.msg] });
+      // jtmspro hotel locks don't support /logs or /door-lock/records via consumer API
+      res.json({ ok: false, records: [], unsupported: true });
     } catch(err) { res.status(500).json({ error: err.message }); }
   });
 

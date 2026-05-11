@@ -260,10 +260,16 @@ function LockCard({ device, API, properties, onDelete }) {
       .then(r => r.json()).then(setLockStatus).catch(() => {})
   }, [API, device.id])
 
+  const [recordsUnsupported, setRecordsUnsupported] = useState(false)
+
   const loadRecords = useCallback(() => {
     setLoadingRec(true)
     apiFetch(`${API}/api/smart/devices/${device.id}/lock/records`)
-      .then(r => r.json()).then(d => { setRecords(d.records || []); setLoadingRec(false) })
+      .then(r => r.json()).then(d => {
+        setRecords(d.records || [])
+        setRecordsUnsupported(!!d.unsupported)
+        setLoadingRec(false)
+      })
       .catch(() => setLoadingRec(false))
   }, [API, device.id])
 
@@ -398,6 +404,7 @@ function LockCard({ device, API, properties, onDelete }) {
             <button onClick={loadRecords} className="text-xs text-blue-600 hover:underline">↻ Обнови</button>
           </div>
           {loadingRec ? <div className="text-sm text-gray-400 py-4 text-center">Зарежда...</div> :
+          recordsUnsupported ? <div className="text-sm text-gray-400 py-4 text-center">История не се поддържа за този модел брава</div> :
           records.length === 0 ? <div className="text-sm text-gray-400 py-4 text-center">Няма записи</div> :
           <div className="space-y-1 max-h-64 overflow-y-auto">
             {records.map((r, i) => (
