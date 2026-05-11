@@ -348,57 +348,38 @@ module.exports = function(db) {
 
       const { unlock } = req.body;
 
-      // Get device specs to find writable DPs
-      const specData = await tuyaRequest('GET', `/v1.0/devices/${dev.tuya_device_id}/specifications`);
-      console.log('[Smart] lock specs:', JSON.stringify(specData));
-      const functions = specData.result?.functions || [];
-      const writableCodes = functions.map(f => f.code);
-      console.log('[Smart] writable DPs:', writableCodes);
-
       if (unlock) {
-        // Try writable DPs in order of preference for unlock
-        let data;
-        if (writableCodes.includes('remote_door_open')) {
-          data = await tuyaRequest('POST', `/v1.0/devices/${dev.tuya_device_id}/commands`, {
+        // jtmspro / hotel locks: remote unlock via password ticket + remote-no-dp-key
+        // Step 1: get one-time ticket
+        const ticketData = await tuyaRequest('POST',
+          `/v1.0/devices/${dev.tuya_device_id}/door-lock/password-ticket`, {}
+        );
+        console.log('[Smart] lock ticket:', JSON.stringify(ticketData));
+
+        if (ticketData.success && ticketData.result) {
+          const { ticket_id, ticket_key } = ticketData.result;
+          // Step 2: remote unlock with ticket (no-dp-key method for jtmspro)
+          const data = await tuyaRequest('POST',
+            `/v1.0/devices/${dev.tuya_device_id}/door-lock/remote-no-dp-key`,
+            { ticket_id, ticket_key }
+          );
+          console.log('[Smart] remote-no-dp-key result:', JSON.stringify(data));
+          res.json({ ok: data.success, result: data, method: 'remote-no-dp-key' });
+        } else {
+          // Fallback: try direct DP command remote_door_open
+          const data = await tuyaRequest('POST', `/v1.0/devices/${dev.tuya_device_id}/commands`, {
             commands: [{ code: 'remote_door_open', value: true }]
           });
-          console.log('[Smart] remote_door_open result:', JSON.stringify(data));
-          res.json({ ok: data.success, result: data, method: 'remote_door_open' });
-        } else if (writableCodes.includes('lock_motor_state')) {
-          data = await tuyaRequest('POST', `/v1.0/devices/${dev.tuya_device_id}/commands`, {
-            commands: [{ code: 'lock_motor_state', value: 'open' }]
-          });
-          res.json({ ok: data.success, result: data, method: 'lock_motor_state' });
-        } else if (writableCodes.includes('switch_1')) {
-          data = await tuyaRequest('POST', `/v1.0/devices/${dev.tuya_device_id}/commands`, {
-            commands: [{ code: 'switch_1', value: true }]
-          });
-          res.json({ ok: data.success, result: data, method: 'switch_1' });
-        } else {
-          // No known writable unlock DP found
-          res.json({ ok: false, error: 'Не е намерен writable DP за отключване', writable: writableCodes });
+          console.log('[Smart] remote_door_open fallback:', JSON.stringify(data));
+          res.json({ ok: data.success, result: data, method: 'remote_door_open', ticket_error: ticketData.msg });
         }
       } else {
-        // Lock
-        let data;
-        if (writableCodes.includes('lock_motor_state')) {
-          data = await tuyaRequest('POST', `/v1.0/devices/${dev.tuya_device_id}/commands`, {
-            commands: [{ code: 'lock_motor_state', value: 'close' }]
-          });
-          res.json({ ok: data.success, result: data, method: 'lock_motor_state' });
-        } else if (writableCodes.includes('switch_1')) {
-          data = await tuyaRequest('POST', `/v1.0/devices/${dev.tuya_device_id}/commands`, {
-            commands: [{ code: 'switch_1', value: false }]
-          });
-          res.json({ ok: data.success, result: data, method: 'switch_1' });
-        } else if (writableCodes.includes('arming_switch')) {
-          data = await tuyaRequest('POST', `/v1.0/devices/${dev.tuya_device_id}/commands`, {
-            commands: [{ code: 'arming_switch', value: true }]
-          });
-          res.json({ ok: data.success, result: data, method: 'arming_switch' });
-        } else {
-          res.json({ ok: false, error: 'Не е намерен writable DP за заключване', writable: writableCodes });
-        }
+        // Lock — jtmspro locks typically auto-relock; try arming_switch as best effort
+        const data = await tuyaRequest('POST', `/v1.0/devices/${dev.tuya_device_id}/commands`, {
+          commands: [{ code: 'arming_switch', value: true }]
+        });
+        console.log('[Smart] lock arming result:', JSON.stringify(data));
+        res.json({ ok: data.success, result: data, method: 'arming_switch' });
       }
     } catch(err) { console.error('[Smart] lock control error:', err.message); res.status(500).json({ error: err.message }); }
   });
