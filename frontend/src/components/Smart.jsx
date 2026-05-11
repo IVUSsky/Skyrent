@@ -20,7 +20,7 @@ function StatusCard({ label, value, unit, icon, color = 'gray' }) {
   )
 }
 
-function DeviceCard({ device, API, properties, onDelete }) {
+function DeviceCard({ device, API, properties, onDelete, onTypeChange }) {
   const [status, setStatus]     = useState(null)
   const [loading, setLoading]   = useState(false)
   const [toggling, setToggling] = useState(false)
@@ -85,6 +85,12 @@ function DeviceCard({ device, API, properties, onDelete }) {
           }`}>
             {loading ? 'Зарежда...' : isOn ? '⚡ Включен' : '○ Изключен'}
           </span>
+          <select defaultValue={device.type} onChange={e => onTypeChange(device.id, e.target.value)}
+            className="text-xs border border-gray-200 rounded px-1 py-0.5 text-gray-500">
+            <option value="breaker">Бушон</option>
+            <option value="lock">Брава</option>
+            <option value="router">Рутер</option>
+          </select>
           <button onClick={() => onDelete(device.id)}
             className="text-gray-300 hover:text-red-400 text-lg transition-colors">×</button>
         </div>
@@ -461,6 +467,13 @@ export default function Smart({ API }) {
 
   useEffect(() => { load() }, [])
 
+  const changeType = (id, type) => {
+    apiFetch(`${API}/api/smart/devices/${id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type }),
+    }).then(load)
+  }
+
   const deleteDevice = (id) => {
     apiFetch(`${API}/api/smart/devices/${id}`, { method: 'DELETE' }).then(load)
     setConfirmDel(null)
@@ -492,7 +505,7 @@ export default function Smart({ API }) {
           {devices.map(dev =>
             dev.type === 'lock'
               ? <LockCard key={dev.id} device={dev} API={API} properties={properties} onDelete={id => setConfirmDel(id)} />
-              : <DeviceCard key={dev.id} device={dev} API={API} properties={properties} onDelete={id => setConfirmDel(id)} />
+              : <DeviceCard key={dev.id} device={dev} API={API} properties={properties} onDelete={id => setConfirmDel(id)} onTypeChange={changeType} />
           )}
         </div>
       )}

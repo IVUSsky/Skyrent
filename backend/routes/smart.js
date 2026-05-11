@@ -106,6 +106,16 @@ module.exports = function(db) {
     } catch(err) { res.status(500).json({ error: err.message }); }
   });
 
+  // ── PATCH /api/smart/devices/:id ────────────────────────────
+  router.patch('/devices/:id', (req, res) => {
+    try {
+      const { name, type, property_id } = req.body;
+      db.prepare('UPDATE smart_devices SET name=COALESCE(?,name), type=COALESCE(?,type), property_id=COALESCE(?,property_id) WHERE id=?')
+        .run(name || null, type || null, property_id || null, req.params.id);
+      res.json({ ok: true });
+    } catch(err) { res.status(500).json({ error: err.message }); }
+  });
+
   // ── DELETE /api/smart/devices/:id ───────────────────────────
   router.delete('/devices/:id', (req, res) => {
     try {
