@@ -349,36 +349,26 @@ module.exports = function(db) {
       const { unlock } = req.body;
 
       if (unlock) {
-        // jtmspro hotel lock — remote_no_dp_key is a Raw writable DP
-        // Try multiple approaches in sequence, log all results
-        const results = [];
+        // jtmspro hotel lock: read current remote_no_pd_setkey value from status,
+        // then send it as remote_no_dp_key to trigger unlock
+        const statusData = await tuyaRequest('GET', `/v1.0/devices/${dev.tuya_device_id}/status`);
+        const dps = {};
+        for (const dp of (statusData.result || [])) dps[dp.code] = dp.value;
+        const setKey = dps['remote_no_pd_setkey'] || 'AAAB';
+        console.log('[Smart] remote_no_pd_setkey value:', setKey);
 
-        // Approach 1: remote_no_dp_key via commands with empty raw value
-        const r1 = await tuyaRequest('POST', `/v1.0/devices/${dev.tuya_device_id}/commands`, {
+        const data = await tuyaRequest('POST', `/v1.0/devices/${dev.tuya_device_id}/commands`, {
+          commands: [{ code: 'remote_no_dp_key', value: setKey }]
+        });
+        console.log('[Smart] remote_no_dp_key unlock result:', JSON.stringify(data));
+        if (data.success) return res.json({ ok: true, result: data, method: 'remote_no_dp_key', key: setKey });
+
+        // Fallback: try with empty string
+        const r2 = await tuyaRequest('POST', `/v1.0/devices/${dev.tuya_device_id}/commands`, {
           commands: [{ code: 'remote_no_dp_key', value: '' }]
         });
-        console.log('[Smart] remote_no_dp_key empty:', JSON.stringify(r1));
-        results.push({ method: 'remote_no_dp_key_empty', ok: r1.success, msg: r1.msg, code: r1.code });
-        if (r1.success) return res.json({ ok: true, result: r1, method: 'remote_no_dp_key_empty' });
-
-        // Approach 2: remote_no_dp_key with hex "00"
-        const r2 = await tuyaRequest('POST', `/v1.0/devices/${dev.tuya_device_id}/commands`, {
-          commands: [{ code: 'remote_no_dp_key', value: '00' }]
-        });
-        console.log('[Smart] remote_no_dp_key 00:', JSON.stringify(r2));
-        results.push({ method: 'remote_no_dp_key_00', ok: r2.success, msg: r2.msg, code: r2.code });
-        if (r2.success) return res.json({ ok: true, result: r2, method: 'remote_no_dp_key_00' });
-
-        // Approach 3: remote_no_pd_setkey (note: pd not dp — also in spec)
-        const r3 = await tuyaRequest('POST', `/v1.0/devices/${dev.tuya_device_id}/commands`, {
-          commands: [{ code: 'remote_no_pd_setkey', value: '' }]
-        });
-        console.log('[Smart] remote_no_pd_setkey:', JSON.stringify(r3));
-        results.push({ method: 'remote_no_pd_setkey', ok: r3.success, msg: r3.msg, code: r3.code });
-        if (r3.success) return res.json({ ok: true, result: r3, method: 'remote_no_pd_setkey' });
-
-        // All failed — return all results for debugging
-        res.json({ ok: false, error: 'Всички методи неуспешни', results });
+        console.log('[Smart] remote_no_dp_key empty fallback:', JSON.stringify(r2));
+        res.json({ ok: r2.success, result: r2, method: 'remote_no_dp_key_empty', first_error: data.msg });
       } else {
         // Lock — jtmspro locks auto-relock; arming_switch is the only writable boolean
         const data = await tuyaRequest('POST', `/v1.0/devices/${dev.tuya_device_id}/commands`, {
