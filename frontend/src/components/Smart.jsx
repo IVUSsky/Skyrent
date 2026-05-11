@@ -218,6 +218,211 @@ function AddDeviceModal({ API, properties, onClose, onSaved }) {
   )
 }
 
+const UNLOCK_LABELS = {
+  unlock_fingerprint: '👆 Пръстов отпечатък',
+  unlock_password:    '🔢 Парола',
+  unlock_card:        '💳 Карта',
+  unlock_app:         '📱 Приложение',
+  unlock_temp_pwd:    '⏱ Временна парола',
+  unlock_key:         '🔑 Ключ',
+  unlock_face:        '😊 Лице',
+  alarm_lock:         '🚨 Аларма',
+}
+
+function LockCard({ device, API, properties, onDelete }) {
+  const [tab, setTab]           = useState('records')
+  const [records, setRecords]   = useState([])
+  const [members, setMembers]   = useState([])
+  const [loadingRec, setLoadingRec] = useState(false)
+  const [loadingMem, setLoadingMem] = useState(false)
+  const [confirmUnlock, setConfirmUnlock] = useState(false)
+  const [unlocking, setUnlocking]         = useState(false)
+  const [tempForm, setTempForm] = useState({ name: '', hours: 24 })
+  const [tempResult, setTempResult] = useState(null)
+  const [generating, setGenerating] = useState(false)
+  const [confirmDel, setConfirmDel] = useState(false)
+
+  const prop = properties.find(p => p.id === device.property_id)
+
+  const loadRecords = useCallback(() => {
+    setLoadingRec(true)
+    apiFetch(`${API}/api/smart/devices/${device.id}/lock/records`)
+      .then(r => r.json()).then(d => { setRecords(d.records || []); setLoadingRec(false) })
+      .catch(() => setLoadingRec(false))
+  }, [API, device.id])
+
+  const loadMembers = useCallback(() => {
+    setLoadingMem(true)
+    apiFetch(`${API}/api/smart/devices/${device.id}/lock/members`)
+      .then(r => r.json()).then(d => { setMembers(d.members || []); setLoadingMem(false) })
+      .catch(() => setLoadingMem(false))
+  }, [API, device.id])
+
+  useEffect(() => { loadRecords() }, [loadRecords])
+  useEffect(() => { if (tab === 'members') loadMembers() }, [tab, loadMembers])
+
+  const unlock = async () => {
+    setUnlocking(true); setConfirmUnlock(false)
+    await apiFetch(`${API}/api/smart/devices/${device.id}/lock/control`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ unlock: true }),
+    })
+    setUnlocking(false)
+    setTimeout(loadRecords, 2000)
+  }
+
+  const generateTemp = async () => {
+    setGenerating(true); setTempResult(null)
+    const now = Math.floor(Date.now() / 1000)
+    const r = await apiFetch(`${API}/api/smart/devices/${device.id}/lock/temp-password`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: tempForm.name || 'Временен код',
+        effective_time: now,
+        invalid_time: now + parseInt(tempForm.hours) * 3600,
+      }),
+    }).then(r => r.json())
+    setGenerating(false)
+    setTempResult(r)
+  }
+
+  const fmtTime = ts => {
+    if (!ts) return '—'
+    const d = new Date(typeof ts === 'number' && ts < 9999999999 ? ts * 1000 : ts)
+    return d.toLocaleString('bg-BG')
+  }
+
+  return (
+    <div className="bg-white border border-gray-200 rounded-2xl shadow-sm p-5">
+      {/* Header */}
+      <div className="flex items-start justify-between mb-4">
+        <div>
+          <div className="font-bold text-gray-900 text-lg">🔐 {device.name}</div>
+          <div className="text-sm text-gray-500">{prop?.адрес || '— без имот —'}</div>
+        </div>
+        <div className="flex items-center gap-2">
+          {confirmDel ? (
+            <>
+              <button onClick={() => setConfirmDel(false)} className="text-xs px-2 py-1 bg-gray-100 rounded">Не</button>
+              <button onClick={() => onDelete(device.id)} className="text-xs px-2 py-1 bg-red-600 text-white rounded">Премахни</button>
+            </>
+          ) : (
+            <button onClick={() => setConfirmDel(true)} className="text-gray-300 hover:text-red-400 text-lg">×</button>
+          )}
+        </div>
+      </div>
+
+      {/* Unlock button */}
+      <div className="mb-4">
+        {confirmUnlock ? (
+          <div className="flex items-center gap-3">
+            <span className="text-sm text-red-600">Сигурен ли си?</span>
+            <button onClick={() => setConfirmUnlock(false)} className="px-3 py-1.5 text-sm bg-gray-100 rounded-lg">Не</button>
+            <button onClick={unlock} disabled={unlocking} className="px-4 py-1.5 text-sm font-bold bg-green-600 text-white rounded-lg">
+              {unlocking ? 'Отключва...' : 'Отключи'}
+            </button>
+          </div>
+        ) : (
+          <button onClick={() => setConfirmUnlock(true)}
+            className="w-full py-2.5 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-xl text-sm">
+            🔓 Отключи от разстояние
+          </button>
+        )}
+      </div>
+
+      {/* Tabs */}
+      <div className="flex gap-1 bg-gray-100 rounded-lg p-1 mb-4">
+        {[['records','📋 История'],['temp','⏱ Временна парола'],['members','👥 Членове']].map(([id,lbl]) => (
+          <button key={id} onClick={() => setTab(id)}
+            className={`flex-1 py-1.5 rounded-md text-xs font-medium transition-colors ${tab===id ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-600'}`}>
+            {lbl}
+          </button>
+        ))}
+      </div>
+
+      {/* Records tab */}
+      {tab === 'records' && (
+        <div>
+          <div className="flex justify-between items-center mb-2">
+            <span className="text-xs font-semibold text-gray-500 uppercase">Последни 30 дни</span>
+            <button onClick={loadRecords} className="text-xs text-blue-600 hover:underline">↻ Обнови</button>
+          </div>
+          {loadingRec ? <div className="text-sm text-gray-400 py-4 text-center">Зарежда...</div> :
+          records.length === 0 ? <div className="text-sm text-gray-400 py-4 text-center">Няма записи</div> :
+          <div className="space-y-1 max-h-64 overflow-y-auto">
+            {records.map((r, i) => (
+              <div key={i} className="flex items-center justify-between py-2 border-b border-gray-50 text-sm">
+                <span className="text-gray-700">{UNLOCK_LABELS[r.code] || r.code}</span>
+                <span className="text-xs text-gray-400">{fmtTime(r.event_time)}</span>
+              </div>
+            ))}
+          </div>}
+        </div>
+      )}
+
+      {/* Temp password tab */}
+      {tab === 'temp' && (
+        <div className="space-y-3">
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">Наименование</label>
+            <input value={tempForm.name} onChange={e => setTempForm(f => ({...f, name: e.target.value}))}
+              placeholder="Наемател / Техник / Гост"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400" />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">Валидност (часове)</label>
+            <select value={tempForm.hours} onChange={e => setTempForm(f => ({...f, hours: e.target.value}))}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400">
+              <option value="1">1 час</option>
+              <option value="4">4 часа</option>
+              <option value="8">8 часа</option>
+              <option value="24">24 часа</option>
+              <option value="72">3 дни</option>
+              <option value="168">7 дни</option>
+            </select>
+          </div>
+          <button onClick={generateTemp} disabled={generating}
+            className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl text-sm disabled:opacity-50">
+            {generating ? 'Генерира...' : '🔑 Генерирай временна парола'}
+          </button>
+          {tempResult && (
+            <div className={`p-3 rounded-lg text-sm ${tempResult.ok ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-700'}`}>
+              {tempResult.ok
+                ? <><strong>Код:</strong> {tempResult.result?.password || JSON.stringify(tempResult.result)}</>
+                : `Грешка: ${tempResult.error}`}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Members tab */}
+      {tab === 'members' && (
+        <div>
+          <div className="flex justify-between items-center mb-2">
+            <span className="text-xs font-semibold text-gray-500 uppercase">Потребители</span>
+            <button onClick={loadMembers} className="text-xs text-blue-600 hover:underline">↻ Обнови</button>
+          </div>
+          {loadingMem ? <div className="text-sm text-gray-400 py-4 text-center">Зарежда...</div> :
+          members.length === 0 ? <div className="text-sm text-gray-400 py-4 text-center">Няма регистрирани членове</div> :
+          <div className="space-y-1 max-h-64 overflow-y-auto">
+            {members.map((m, i) => (
+              <div key={i} className="flex items-center justify-between py-2 border-b border-gray-50 text-sm">
+                <div>
+                  <div className="font-medium text-gray-800">{m.name || m.user_name || `Потребител ${i+1}`}</div>
+                  <div className="text-xs text-gray-400">{m.type || m.unlock_type || ''}</div>
+                </div>
+                <span className={`text-xs px-2 py-0.5 rounded-full ${m.status === 1 || m.enable ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                  {m.status === 1 || m.enable ? 'Активен' : 'Неактивен'}
+                </span>
+              </div>
+            ))}
+          </div>}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function Smart({ API }) {
   const [devices, setDevices]     = useState([])
   const [properties, setProperties] = useState([])
@@ -260,8 +465,10 @@ export default function Smart({ API }) {
       ) : (
         <div className="grid gap-5 md:grid-cols-2">
           {devices.map(dev => (
-            <DeviceCard key={dev.id} device={dev} API={API} properties={properties}
-              onDelete={id => setConfirmDel(id)} />
+            {dev.type === 'lock'
+              ? <LockCard key={dev.id} device={dev} API={API} properties={properties} onDelete={id => setConfirmDel(id)} />
+              : <DeviceCard key={dev.id} device={dev} API={API} properties={properties} onDelete={id => setConfirmDel(id)} />
+            }
           ))}
         </div>
       )}

@@ -285,5 +285,72 @@ module.exports = function(db) {
     } catch(err) { console.error('[Smart] report error:', err.message); res.status(500).json({ error: err.message }); }
   });
 
+  // ── GET /api/smart/devices/:id/lock/records — unlock history ─
+  router.get('/devices/:id/lock/records', async (req, res) => {
+    try {
+      const dev = db.prepare('SELECT * FROM smart_devices WHERE id=?').get(req.params.id);
+      if (!dev) return res.status(404).json({ error: 'Device not found' });
+
+      const { size = 20 } = req.query;
+      const codes = 'unlock_fingerprint,unlock_password,unlock_card,unlock_app,unlock_temp_pwd,unlock_key,unlock_face,alarm_lock';
+      const now  = Date.now();
+      const from = now - 30 * 24 * 3600 * 1000; // last 30 days
+
+      const data = await tuyaRequest('GET',
+        `/v1.0/devices/${dev.tuya_device_id}/logs?codes=${codes}&start_time=${from}&end_time=${now}&size=${size}`
+      );
+      console.log('[Smart] lock records:', JSON.stringify(data));
+      res.json({ ok: data.success, records: data.result?.logs || data.result || [] });
+    } catch(err) { res.status(500).json({ error: err.message }); }
+  });
+
+  // ── POST /api/smart/devices/:id/lock/control — lock/unlock ───
+  router.post('/devices/:id/lock/control', async (req, res) => {
+    try {
+      const dev = db.prepare('SELECT * FROM smart_devices WHERE id=?').get(req.params.id);
+      if (!dev) return res.status(404).json({ error: 'Device not found' });
+
+      const { unlock } = req.body;
+      // Try common lock DP codes
+      const data = await tuyaRequest('POST', `/v1.0/devices/${dev.tuya_device_id}/commands`, {
+        commands: [{ code: 'unlock_app', value: unlock ? true : false }]
+      });
+      console.log('[Smart] lock control:', JSON.stringify(data));
+      res.json({ ok: data.success, result: data });
+    } catch(err) { res.status(500).json({ error: err.message }); }
+  });
+
+  // ── GET /api/smart/devices/:id/lock/members — password users ─
+  router.get('/devices/:id/lock/members', async (req, res) => {
+    try {
+      const dev = db.prepare('SELECT * FROM smart_devices WHERE id=?').get(req.params.id);
+      if (!dev) return res.status(404).json({ error: 'Device not found' });
+
+      const data = await tuyaRequest('GET', `/v1.0/devices/${dev.tuya_device_id}/door-lock/password-users`);
+      console.log('[Smart] lock members:', JSON.stringify(data));
+      res.json({ ok: data.success, members: data.result || [] });
+    } catch(err) { res.status(500).json({ error: err.message }); }
+  });
+
+  // ── POST /api/smart/devices/:id/lock/temp-password — temp pwd ─
+  router.post('/devices/:id/lock/temp-password', async (req, res) => {
+    try {
+      const dev = db.prepare('SELECT * FROM smart_devices WHERE id=?').get(req.params.id);
+      if (!dev) return res.status(404).json({ error: 'Device not found' });
+
+      const { name, effective_time, invalid_time } = req.body;
+      // effective_time and invalid_time are unix timestamps in seconds
+      const now = Math.floor(Date.now() / 1000);
+      const data = await tuyaRequest('POST', `/v1.0/devices/${dev.tuya_device_id}/door-lock/temp-passwords`, {
+        name:           name || 'Временен код',
+        effective_time: effective_time || now,
+        invalid_time:   invalid_time   || now + 24 * 3600, // 24h default
+        password_type:  'ticket',
+      });
+      console.log('[Smart] temp password:', JSON.stringify(data));
+      res.json({ ok: data.success, result: data.result });
+    } catch(err) { res.status(500).json({ error: err.message }); }
+  });
+
   return router;
 };
