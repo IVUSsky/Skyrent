@@ -21,32 +21,39 @@ module.exports = function(db) {
     const t     = Date.now().toString();
     const nonce = crypto.randomBytes(8).toString('hex');
 
-    // Get token first
-    const tokenSign = sign(method === 'GET' && path === '/v1.0/token?grant_type=1' ? 'GET' : 'GET',
-      '/v1.0/token?grant_type=1', '', '', t, nonce);
-    const tokenRes = await fetch(`${BASE_URL}/v1.0/token?grant_type=1`, {
+    // ── Step 1: Get access token ──────────────────────────────
+    const tokenPath = '/v1.0/token?grant_type=1';
+    const tokenStringToSign = ['GET', crypto.createHash('sha256').update('').digest('hex'), '', tokenPath].join('\n');
+    const tokenSignStr = ACCESS_ID + t + nonce + tokenStringToSign;
+    const tokenSign = crypto.createHmac('sha256', ACCESS_SECRET).update(tokenSignStr).digest('hex').toUpperCase();
+
+    const tokenRes = await fetch(`${BASE_URL}${tokenPath}`, {
       headers: {
-        'client_id': ACCESS_ID,
-        'sign': tokenSign,
-        't': t,
+        'client_id':   ACCESS_ID,
+        'sign':        tokenSign,
+        't':           t,
         'sign_method': 'HMAC-SHA256',
-        'nonce': nonce,
+        'nonce':       nonce,
       }
     });
     const tokenData = await tokenRes.json();
-    if (!tokenData.success) throw new Error('Tuya token error: ' + tokenData.msg);
+    console.log('[Tuya] token response:', JSON.stringify(tokenData));
+    if (!tokenData.success) throw new Error('Tuya token error: ' + (tokenData.msg || JSON.stringify(tokenData)));
     const token = tokenData.result.access_token;
 
-    // Make actual request
-    const t2     = Date.now().toString();
-    const nonce2 = crypto.randomBytes(8).toString('hex');
+    // ── Step 2: Make actual request ───────────────────────────
+    const t2      = Date.now().toString();
+    const nonce2  = crypto.randomBytes(8).toString('hex');
     const bodyStr = body ? JSON.stringify(body) : '';
-    const reqSign = sign(method, path, bodyStr, token, t2, nonce2);
+    const bodyHash = crypto.createHash('sha256').update(bodyStr).digest('hex');
+    const stringToSign = [method, bodyHash, '', path].join('\n');
+    const signStr = ACCESS_ID + token + t2 + nonce2 + stringToSign;
+    const reqSign = crypto.createHmac('sha256', ACCESS_SECRET).update(signStr).digest('hex').toUpperCase();
 
     const res = await fetch(`${BASE_URL}${path}`, {
       method,
       headers: {
-        'client_id':   ACCESS_ID,
+        'client_id':    ACCESS_ID,
         'access_token': token,
         'sign':         reqSign,
         't':            t2,
@@ -56,7 +63,9 @@ module.exports = function(db) {
       },
       body: body ? bodyStr : undefined,
     });
-    return res.json();
+    const result = await res.json();
+    console.log('[Tuya]', method, path, '->', JSON.stringify(result));
+    return result;
   }
 
   // ── DB migrations ───────────────────────────────────────────
