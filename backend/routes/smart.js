@@ -409,7 +409,7 @@ module.exports = function(db) {
         password_type:  'ticket',
       });
       console.log('[Smart] temp password:', JSON.stringify(data));
-      res.json({ ok: data.success, result: data.result });
+      res.json({ ok: data.success, result: data.result, error: data.msg, code: data.code });
     } catch(err) { res.status(500).json({ error: err.message }); }
   });
 
