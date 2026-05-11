@@ -130,9 +130,9 @@ module.exports = function(db) {
       res.json({
         online:      true,
         switch:      dps['switch'] ?? dps['switch_1'] ?? null,
-        power_w:     dps['cur_power']   != null ? dps['cur_power']   / 10 : null,
-        voltage_v:   dps['cur_voltage'] != null ? dps['cur_voltage'] / 10 : null,
-        current_ma:  dps['cur_current'] ?? null,
+        power_w:     dps['cur_power']   != null ? dps['cur_power']   / 10  : null,
+        voltage_v:   dps['cur_voltage'] != null ? dps['cur_voltage'] / 10  : null,
+        current_ma:  dps['cur_current'] != null ? dps['cur_current']       : null,
         energy_kwh:  dps['add_ele']     != null ? dps['add_ele']     / 100 : null,
         raw: dps,
       });
@@ -150,7 +150,7 @@ module.exports = function(db) {
 
       // Try switch_1 first, some devices use 'switch'
       const data = await tuyaRequest('POST', `/v1.0/devices/${dev.tuya_device_id}/commands`, {
-        commands: [{ code: 'switch_1', value: !!on }]
+        commands: [{ code: 'switch', value: !!on }]
       });
       console.log('[Smart] control result:', JSON.stringify(data));
 
