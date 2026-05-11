@@ -233,16 +233,22 @@ function LockCard({ device, API, properties, onDelete }) {
   const [tab, setTab]           = useState('records')
   const [records, setRecords]   = useState([])
   const [members, setMembers]   = useState([])
+  const [lockStatus, setLockStatus] = useState(null)
   const [loadingRec, setLoadingRec] = useState(false)
   const [loadingMem, setLoadingMem] = useState(false)
-  const [confirmUnlock, setConfirmUnlock] = useState(false)
-  const [unlocking, setUnlocking]         = useState(false)
+  const [confirmAction, setConfirmAction] = useState(null) // 'unlock' | 'lock'
+  const [controlling, setControlling]     = useState(false)
   const [tempForm, setTempForm] = useState({ name: '', hours: 24 })
   const [tempResult, setTempResult] = useState(null)
   const [generating, setGenerating] = useState(false)
   const [confirmDel, setConfirmDel] = useState(false)
 
   const prop = properties.find(p => p.id === device.property_id)
+
+  const loadStatus = useCallback(() => {
+    apiFetch(`${API}/api/smart/devices/${device.id}/lock/status`)
+      .then(r => r.json()).then(setLockStatus).catch(() => {})
+  }, [API, device.id])
 
   const loadRecords = useCallback(() => {
     setLoadingRec(true)
@@ -258,17 +264,17 @@ function LockCard({ device, API, properties, onDelete }) {
       .catch(() => setLoadingMem(false))
   }, [API, device.id])
 
-  useEffect(() => { loadRecords() }, [loadRecords])
+  useEffect(() => { loadRecords(); loadStatus() }, [loadRecords, loadStatus])
   useEffect(() => { if (tab === 'members') loadMembers() }, [tab, loadMembers])
 
-  const unlock = async () => {
-    setUnlocking(true); setConfirmUnlock(false)
+  const control = async (unlock) => {
+    setControlling(true); setConfirmAction(null)
     await apiFetch(`${API}/api/smart/devices/${device.id}/lock/control`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ unlock: true }),
+      body: JSON.stringify({ unlock }),
     })
-    setUnlocking(false)
-    setTimeout(loadRecords, 2000)
+    setControlling(false)
+    setTimeout(() => { loadStatus(); loadRecords() }, 2000)
   }
 
   const generateTemp = async () => {
@@ -312,21 +318,40 @@ function LockCard({ device, API, properties, onDelete }) {
         </div>
       </div>
 
-      {/* Unlock button */}
-      <div className="mb-4">
-        {confirmUnlock ? (
+      {/* Status + controls */}
+      <div className="mb-4 space-y-2">
+        <div className="flex items-center gap-2 mb-1">
+          <span className={`text-xs px-2 py-1 rounded-full font-medium ${
+            lockStatus == null ? 'bg-gray-100 text-gray-500' :
+            lockStatus.locked ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'
+          }`}>
+            {lockStatus == null ? '⏳ Зарежда...' : lockStatus.locked ? '🔒 Заключена' : '🔓 Отключена'}
+          </span>
+          <button onClick={loadStatus} className="text-xs text-gray-400 hover:text-gray-600">↻</button>
+        </div>
+
+        {confirmAction ? (
           <div className="flex items-center gap-3">
-            <span className="text-sm text-red-600">Сигурен ли си?</span>
-            <button onClick={() => setConfirmUnlock(false)} className="px-3 py-1.5 text-sm bg-gray-100 rounded-lg">Не</button>
-            <button onClick={unlock} disabled={unlocking} className="px-4 py-1.5 text-sm font-bold bg-green-600 text-white rounded-lg">
-              {unlocking ? 'Отключва...' : 'Отключи'}
+            <span className="text-sm text-amber-700 flex-1">
+              {confirmAction === 'unlock' ? 'Отключи бравата?' : 'Заключи бравата?'}
+            </span>
+            <button onClick={() => setConfirmAction(null)} className="px-3 py-1.5 text-sm bg-gray-100 rounded-lg">Не</button>
+            <button onClick={() => control(confirmAction === 'unlock')} disabled={controlling}
+              className={`px-4 py-1.5 text-sm font-bold text-white rounded-lg ${confirmAction === 'unlock' ? 'bg-green-600' : 'bg-red-600'}`}>
+              {controlling ? '...' : confirmAction === 'unlock' ? 'Отключи' : 'Заключи'}
             </button>
           </div>
         ) : (
-          <button onClick={() => setConfirmUnlock(true)}
-            className="w-full py-2.5 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-xl text-sm">
-            🔓 Отключи от разстояние
-          </button>
+          <div className="flex gap-2">
+            <button onClick={() => setConfirmAction('unlock')} disabled={controlling}
+              className="flex-1 py-2 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-xl text-sm">
+              🔓 Отключи
+            </button>
+            <button onClick={() => setConfirmAction('lock')} disabled={controlling}
+              className="flex-1 py-2 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-xl text-sm">
+              🔒 Заключи
+            </button>
+          </div>
         )}
       </div>
 

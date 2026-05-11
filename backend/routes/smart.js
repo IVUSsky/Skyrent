@@ -304,6 +304,22 @@ module.exports = function(db) {
     } catch(err) { res.status(500).json({ error: err.message }); }
   });
 
+  // ── GET /api/smart/devices/:id/lock/status — lock state ─────
+  router.get('/devices/:id/lock/status', async (req, res) => {
+    try {
+      const dev = db.prepare('SELECT * FROM smart_devices WHERE id=?').get(req.params.id);
+      if (!dev) return res.status(404).json({ error: 'Device not found' });
+      const data = await tuyaRequest('GET', `/v1.0/devices/${dev.tuya_device_id}/status`);
+      console.log('[Smart] lock status raw:', JSON.stringify(data));
+      const dps = {};
+      for (const dp of (data.result || [])) dps[dp.code] = dp.value;
+      // Common lock state DPs
+      const locked = dps['lock_motor_state'] === 'close' || dps['switch_1'] === true ||
+                     dps['lock'] === true || dps['closed'] === true;
+      res.json({ ok: data.success, locked, dps });
+    } catch(err) { res.status(500).json({ error: err.message }); }
+  });
+
   // ── POST /api/smart/devices/:id/lock/control — lock/unlock ───
   router.post('/devices/:id/lock/control', async (req, res) => {
     try {
@@ -311,12 +327,24 @@ module.exports = function(db) {
       if (!dev) return res.status(404).json({ error: 'Device not found' });
 
       const { unlock } = req.body;
-      // Try common lock DP codes
+      // Get current DPs to find the right control code
+      const statusData = await tuyaRequest('GET', `/v1.0/devices/${dev.tuya_device_id}/status`);
+      const dps = {};
+      for (const dp of (statusData.result || [])) dps[dp.code] = dp.value;
+
+      // Determine correct command based on available DPs
+      let command;
+      if ('switch_1' in dps)           command = { code: 'switch_1',         value: !unlock };
+      else if ('lock' in dps)          command = { code: 'lock',              value: !unlock };
+      else if ('lock_motor_state' in dps) command = { code: 'lock_motor_state', value: unlock ? 'open' : 'close' };
+      else                             command = { code: 'unlock_app',        value: unlock };
+
+      console.log('[Smart] lock control command:', JSON.stringify(command), 'available dps:', Object.keys(dps));
       const data = await tuyaRequest('POST', `/v1.0/devices/${dev.tuya_device_id}/commands`, {
-        commands: [{ code: 'unlock_app', value: unlock ? true : false }]
+        commands: [command]
       });
-      console.log('[Smart] lock control:', JSON.stringify(data));
-      res.json({ ok: data.success, result: data });
+      console.log('[Smart] lock control result:', JSON.stringify(data));
+      res.json({ ok: data.success, result: data, command });
     } catch(err) { res.status(500).json({ error: err.message }); }
   });
 
