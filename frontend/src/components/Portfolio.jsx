@@ -1,4 +1,4 @@
-import { apiFetch } from '../api'
+import { apiFetch, authUrl } from '../api'
 import React, { useState, useEffect, useRef } from 'react'
 
 const STATUS_COLORS = {
@@ -346,7 +346,7 @@ export default function Portfolio({ API }) {
                     {photos.map(ph => (
                       <div key={ph.id} className="group relative">
                         <img
-                          src={`${API}/api/properties/${photosProp.id}/photos/${ph.id}/file`}
+                          src={authUrl(`${API}/api/properties/${photosProp.id}/photos/${ph.id}/file`)}
                           alt={ph.caption || ''}
                           className="w-full h-36 object-cover rounded-lg border border-gray-200"
                           onError={e => { e.target.src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg"/>'; }}

@@ -1,4 +1,4 @@
-import { apiFetch } from '../api'
+import { apiFetch, authUrl } from '../api'
 import React, { useState, useEffect, useCallback } from 'react'
 
 const BG_MONTHS = ['Януари','Февруари','Март','Април','Май','Юни','Юли','Август','Септември','Октомври','Ноември','Декември']
@@ -192,7 +192,7 @@ export default function Invoices({ API, role }) {
     if (filterType) p.set('type', filterType)
     if (!useMonthFilter && dateFrom) p.set('from', dateFrom)
     if (!useMonthFilter && dateTo)   p.set('to', dateTo)
-    window.open(`${API}/api/invoices/export/csv?${p.toString()}`)
+    window.open(authUrl(`${API}/api/invoices/export/csv?${p.toString()}`))
   }
 
   // Summary totals
@@ -429,7 +429,7 @@ export default function Invoices({ API, role }) {
                       </td>
                       <td className="px-3 py-2 whitespace-nowrap">
                         <div className="flex gap-1">
-                          <a href={`${API}/api/invoices/${inv.id}/pdf`} target="_blank" rel="noreferrer"
+                          <a href={authUrl(`${API}/api/invoices/${inv.id}/pdf`)} target="_blank" rel="noreferrer"
                             className="px-2 py-1 text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 rounded" title="Отвори PDF">
                             📄
                           </a>

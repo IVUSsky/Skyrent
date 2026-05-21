@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { apiFetch } from '../api'
+import { apiFetch, authUrl } from '../api'
 
 const API = import.meta.env.VITE_API_URL || ''
 
@@ -185,17 +185,20 @@ function Photos({ property }) {
   if (photos.length === 0) return <Card><p className="text-slate-500 text-sm">Все още няма снимки на имота.</p></Card>
   return (
     <div className="grid grid-cols-2 gap-3">
-      {photos.map(p => (
-        <a key={p.id} href={`${API}/api/tenant/photos/${p.id}/file`} target="_blank" rel="noopener" className="block">
-          <img
-            src={`${API}/api/tenant/photos/${p.id}/file`}
-            alt={p.caption || ''}
-            className="w-full aspect-square object-cover rounded-lg shadow-sm bg-slate-200"
-            loading="lazy"
-          />
-          {p.caption && <div className="text-xs text-slate-500 mt-1 truncate">{p.caption}</div>}
-        </a>
-      ))}
+      {photos.map(p => {
+        const photoUrl = authUrl(`${API}/api/tenant/photos/${p.id}/file`)
+        return (
+          <a key={p.id} href={photoUrl} target="_blank" rel="noopener" className="block">
+            <img
+              src={photoUrl}
+              alt={p.caption || ''}
+              className="w-full aspect-square object-cover rounded-lg shadow-sm bg-slate-200"
+              loading="lazy"
+            />
+            {p.caption && <div className="text-xs text-slate-500 mt-1 truncate">{p.caption}</div>}
+          </a>
+        )
+      })}
     </div>
   )
 }
@@ -221,7 +224,7 @@ function Contract({ contracts }) {
           </div>
           {c.pdf_path && (
             <a
-              href={`${API}/api/tenant/contracts/${c.id}/pdf`}
+              href={authUrl(`${API}/api/tenant/contracts/${c.id}/pdf`)}
               target="_blank"
               rel="noopener"
               className="mt-3 inline-block bg-blue-600 hover:bg-blue-700 text-white text-sm px-4 py-2 rounded-lg"
@@ -311,7 +314,7 @@ function Invoices() {
                 )}
                 {inv.pdf_path && (
                   <a
-                    href={`${API}/api/tenant/invoices/${inv.id}/pdf`}
+                    href={authUrl(`${API}/api/tenant/invoices/${inv.id}/pdf`)}
                     target="_blank"
                     rel="noopener"
                     className="bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs px-3 py-2 rounded-lg text-center"
