@@ -5,7 +5,7 @@ const bcrypt  = require('bcryptjs');
 
 const DATA_DIR     = process.env.DATA_DIR || path.join(__dirname, '../data');
 const CONTRACTS_DIR = path.join(DATA_DIR, 'contracts');
-const INVOICES_DIR  = path.join(__dirname, '../data/invoices');
+const INVOICES_DIR  = path.join(DATA_DIR, 'invoices');
 const PHOTOS_DIR    = path.join(DATA_DIR, 'property_photos');
 
 module.exports = function(db) {

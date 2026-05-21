@@ -6,7 +6,10 @@ const nodemailer = require('nodemailer');
 
 const FONT_REGULAR = path.join(__dirname, '../fonts/arial.ttf');
 const FONT_BOLD    = path.join(__dirname, '../fonts/arialbd.ttf');
-const PDF_DIR      = path.join(__dirname, '../data/invoices');
+// Use DATA_DIR if set (Railway mounts persistent volume at /data) so PDFs
+// survive redeploys; fall back to local backend/data for dev.
+const DATA_DIR     = process.env.DATA_DIR || path.join(__dirname, '../data');
+const PDF_DIR      = path.join(DATA_DIR, 'invoices');
 const LOGO_PATH    = path.join(__dirname, '../data/logos/sky_capital_logo.png');
 if (!fs.existsSync(PDF_DIR)) fs.mkdirSync(PDF_DIR, { recursive: true });
 
