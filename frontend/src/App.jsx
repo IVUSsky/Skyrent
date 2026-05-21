@@ -13,6 +13,7 @@ import Contracts from './components/Contracts'
 import Settings from './components/Settings'
 import Expenses from './components/Expenses'
 import Smart from './components/Smart'
+import TenantApp from './components/TenantApp'
 
 const API = import.meta.env.VITE_API_URL || ''
 
@@ -46,12 +47,20 @@ export default function App() {
   const [authenticated, setAuthenticated] = useState(!!localStorage.getItem('skyrent_token'))
   const [role, setRole]                 = useState(parseRole)
   const [userName, setUserName]         = useState(localStorage.getItem('skyrent_name') || '')
+  const [mustChangePwd, setMustChangePwd] = useState(localStorage.getItem('skyrent_must_change_pwd') === '1')
 
   const handleLogin = (data) => {
     if (data?.role) {
       setRole(data.role)
       localStorage.setItem('skyrent_name', data.name || '')
       setUserName(data.name || '')
+    }
+    if (data?.must_change_password) {
+      localStorage.setItem('skyrent_must_change_pwd', '1')
+      setMustChangePwd(true)
+    } else {
+      localStorage.removeItem('skyrent_must_change_pwd')
+      setMustChangePwd(false)
     }
     setAuthenticated(true)
     setActiveTab(data?.role === 'admin' ? 'dashboard' : 'invoices')
@@ -60,12 +69,18 @@ export default function App() {
   const handleLogout = () => {
     localStorage.removeItem('skyrent_token')
     localStorage.removeItem('skyrent_name')
+    localStorage.removeItem('skyrent_must_change_pwd')
     setAuthenticated(false)
     setRole(null)
+    setMustChangePwd(false)
   }
 
   if (!authenticated) {
     return <Login API={API} onLogin={handleLogin} />
+  }
+
+  if (role === 'tenant') {
+    return <TenantApp userName={userName} onLogout={handleLogout} mustChangePassword={mustChangePwd} />
   }
 
   const tabs = ALL_TABS.filter(t => t.roles.includes(role))

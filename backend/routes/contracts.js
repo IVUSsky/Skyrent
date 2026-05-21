@@ -4,6 +4,7 @@ const path = require('path');
 const fs = require('fs');
 const multer = require('multer');
 const nodemailer = require('nodemailer');
+const { ensureTenantUser, sendWelcomeEmail } = require('../lib/tenantOnboarding');
 
 const FONT_REGULAR = path.join(__dirname, '../fonts/arial.ttf');
 const FONT_BOLD    = path.join(__dirname, '../fonts/arialbd.ttf');
@@ -797,8 +798,8 @@ module.exports = function(db) {
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
 
-  // Activate contract → update property
-  router.post('/:id/activate', (req, res) => {
+  // Activate contract → update property + provision tenant account
+  router.post('/:id/activate', async (req, res) => {
     try {
       const contract = db.prepare('SELECT * FROM contracts WHERE id=?').get(req.params.id);
       if (!contract) return res.status(404).json({ error: 'Not found' });
@@ -824,7 +825,54 @@ module.exports = function(db) {
         );
       }
 
-      res.json({ ok: true });
+      // Provision tenant portal account (idempotent — won't recreate if already linked)
+      let tenantInfo = { user: null, isNew: false, tempPassword: null };
+      let emailResult = { sent: false };
+      try {
+        const freshContract = db.prepare('SELECT * FROM contracts WHERE id=?').get(contract.id);
+        tenantInfo = ensureTenantUser(db, freshContract);
+        if (tenantInfo.user && tenantInfo.isNew) {
+          emailResult = await sendWelcomeEmail(db, {
+            user: tenantInfo.user,
+            contract: freshContract,
+            tempPassword: tenantInfo.tempPassword,
+          });
+        }
+      } catch (e) {
+        console.error('Tenant provisioning failed:', e.message);
+      }
+
+      res.json({
+        ok: true,
+        tenant_account: tenantInfo.user
+          ? { id: tenantInfo.user.id, username: tenantInfo.user.username, email: tenantInfo.user.email, created: tenantInfo.isNew, email_sent: emailResult.sent }
+          : null,
+      });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  // Admin: manually (re)send tenant invite + reset password
+  router.post('/:id/invite-tenant', async (req, res) => {
+    try {
+      const contract = db.prepare('SELECT * FROM contracts WHERE id=?').get(req.params.id);
+      if (!contract) return res.status(404).json({ error: 'Not found' });
+      if (!contract.tenant_email) return res.status(400).json({ error: 'Договорът няма tenant_email' });
+
+      // Force-reset password (always send fresh creds)
+      const bcrypt = require('bcryptjs');
+      const crypto = require('crypto');
+      const tempPassword = crypto.randomBytes(6).toString('base64').replace(/[+/=]/g, '').slice(0, 10);
+
+      let info = ensureTenantUser(db, contract);
+      if (!info.user) return res.status(500).json({ error: 'Не успях да създам акаунт' });
+      db.prepare("UPDATE users SET password_hash=?, must_change_password=1 WHERE id=?")
+        .run(bcrypt.hashSync(tempPassword, 10), info.user.id);
+
+      const result = await sendWelcomeEmail(db, {
+        user: info.user, contract, tempPassword,
+      });
+      if (!result.sent) return res.status(500).json({ error: 'Email грешка: ' + (result.reason || 'неизвестна') });
+      res.json({ ok: true, username: info.user.username });
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
 

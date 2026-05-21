@@ -20,7 +20,7 @@ export default function Login({ API, onLogin }) {
         setLoading(false)
         if (data.token) {
           localStorage.setItem('skyrent_token', data.token)
-          onLogin({ role: data.role, name: data.name })
+          onLogin({ role: data.role, name: data.name, must_change_password: data.must_change_password })
         } else {
           setError(data.error || 'Грешка при вход')
         }
@@ -39,7 +39,7 @@ export default function Login({ API, onLogin }) {
         <h2 className="text-xl font-bold text-gray-800 text-center mb-6">Вход в системата</h2>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Потребителско име</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Потребителско име или имейл</label>
             <input
               type="text"
               value={username}

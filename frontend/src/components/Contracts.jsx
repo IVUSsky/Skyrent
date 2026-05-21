@@ -376,10 +376,23 @@ export default function Contracts({ API }) {
   }
 
   const activateContract = (c) => {
-    if (!window.confirm(`Активиране ще обнови портфолиото с данните на наемателя. Продължи?`)) return
+    if (!window.confirm(`Активиране ще обнови портфолиото и ще създаде онлайн профил за наемателя. Продължи?`)) return
     apiFetch(`${API}/api/contracts/${c.id}/activate`, { method: 'POST' })
       .then(r => r.json())
-      .then(d => { d.ok ? (showToast('Договорът е активен — портфолиото е обновено'), load()) : showToast('Грешка: ' + d.error, 'error') })
+      .then(d => {
+        if (!d.ok) return showToast('Грешка: ' + d.error, 'error')
+        let msg = 'Договорът е активен — портфолиото е обновено'
+        if (d.tenant_account?.created) msg += d.tenant_account.email_sent ? ' • покана изпратена на наемателя' : ' • профил създаден (email не е изпратен)'
+        showToast(msg)
+        load()
+      })
+  }
+
+  const inviteTenant = (c) => {
+    if (!window.confirm(`Изпращане на нова покана с временна парола до ${c.tenant_email}?`)) return
+    apiFetch(`${API}/api/contracts/${c.id}/invite-tenant`, { method: 'POST' })
+      .then(r => r.json())
+      .then(d => d.ok ? showToast(`Покана изпратена — потребител ${d.username}`) : showToast('Грешка: ' + d.error, 'error'))
   }
 
   const sendContract = (c) => {
@@ -559,6 +572,12 @@ export default function Contracts({ API }) {
                               <button onClick={() => { setTermModal(c); setTermDate(new Date().toISOString().slice(0,10)) }}
                                 className="px-2 py-1 text-xs bg-red-50 border border-red-200 text-red-600 hover:bg-red-100 rounded" title="Прекрати">
                                 ⛔
+                              </button>
+                            )}
+                            {c.status === 'active' && c.tenant_email && (
+                              <button onClick={() => inviteTenant(c)}
+                                className="px-2 py-1 text-xs bg-blue-50 border border-blue-200 text-blue-700 hover:bg-blue-100 rounded" title="Изпрати покана за tenant портал (нова парола)">
+                                🔑
                               </button>
                             )}
                             <button onClick={() => openAnnex(c)}

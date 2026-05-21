@@ -16,6 +16,18 @@ const allowedOrigins = process.env.FRONTEND_URL
 app.use(cors({
   origin: (origin, cb) => cb(null, true) // permissive; tighten via FRONTEND_URL in prod
 }));
+
+// Stripe webhook must be registered BEFORE express.json() — needs raw body
+// for signature verification. The handler itself is mounted later (after DB init).
+let stripeWebhookHandler = null;
+app.post('/api/stripe/webhook',
+  express.raw({ type: 'application/json' }),
+  (req, res, next) => {
+    if (!stripeWebhookHandler) return res.status(503).send('Server starting');
+    return stripeWebhookHandler(req, res, next);
+  }
+);
+
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
@@ -110,7 +122,9 @@ async function main() {
   ['landlord_type TEXT DEFAULT \'физическо\'','landlord_lk TEXT','landlord_lk_date TEXT',
    'tenant_doc TEXT','tenant_doc_date TEXT','tenant_doc_country TEXT','tenant_dob TEXT','delivery_date DATE',
    'tenant_mol TEXT',
-   'абонат_ток TEXT','абонат_вода TEXT','абонат_тец TEXT','абонат_вход TEXT'
+   'абонат_ток TEXT','абонат_вода TEXT','абонат_тец TEXT','абонат_вход TEXT',
+   'tenant_user_id INTEGER REFERENCES users(id)',
+   'renewal_notice_sent_at DATETIME'
   ].forEach(col => { try { db.exec(`ALTER TABLE contracts ADD COLUMN ${col}`); } catch(_) {} });
   console.log('contracts tables ready');
   seedContractTemplate(db);
@@ -149,7 +163,25 @@ async function main() {
   try { db.exec("ALTER TABLE rent_invoices ADD COLUMN recipient_mol TEXT"); } catch(_) {}
   try { db.exec("ALTER TABLE rent_invoices ADD COLUMN tax_event_date DATE"); } catch(_) {}
   try { db.exec("ALTER TABLE rent_invoices ADD COLUMN due_date DATE"); } catch(_) {}
+  try { db.exec("ALTER TABLE rent_invoices ADD COLUMN paid_at DATETIME"); console.log('Migration: added rent_invoices.paid_at'); } catch(_) {}
+  try { db.exec("ALTER TABLE rent_invoices ADD COLUMN payment_method TEXT"); console.log('Migration: added rent_invoices.payment_method'); } catch(_) {}
   console.log('rent_invoices table ready');
+
+  // Stripe payment records
+  db.exec(`CREATE TABLE IF NOT EXISTS stripe_payments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    invoice_id INTEGER REFERENCES rent_invoices(id),
+    session_id TEXT UNIQUE,
+    payment_intent_id TEXT,
+    status TEXT DEFAULT 'pending',
+    amount REAL,
+    currency TEXT DEFAULT 'eur',
+    customer_email TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    paid_at DATETIME
+  )`);
+  try { db.exec("CREATE INDEX IF NOT EXISTS idx_stripe_payments_invoice ON stripe_payments(invoice_id)"); } catch(_) {}
+  console.log('stripe_payments table ready');
 
   // Manual rent payments (cash / other bank account)
   db.exec(`CREATE TABLE IF NOT EXISTS manual_rent_payments (
@@ -214,6 +246,9 @@ async function main() {
     email TEXT DEFAULT '',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`);
+  try { db.exec("ALTER TABLE users ADD COLUMN phone TEXT DEFAULT ''");          console.log('Migration: added users.phone'); }          catch(_) {}
+  try { db.exec("ALTER TABLE users ADD COLUMN must_change_password INTEGER DEFAULT 0"); console.log('Migration: added users.must_change_password'); } catch(_) {}
+  try { db.exec("ALTER TABLE users ADD COLUMN last_login_at DATETIME");          console.log('Migration: added users.last_login_at'); }  catch(_) {}
   // Seed first admin from env vars if no users exist
   const userCount = db.prepare('SELECT COUNT(*) as c FROM users').get().c;
   if (userCount === 0) {
@@ -265,6 +300,48 @@ async function main() {
   app.use('/api/counterparties', cpRouter);
 
   app.use('/api/smart', require('./routes/smart')(db));
+  app.use('/api/tenant', require('./routes/tenant')(db));
+
+  // Stripe payments — tenant-facing endpoints mounted under /api/tenant (auth + tenant guard inside)
+  const { tenantPaymentsRouter, webhookHandler } = require('./routes/payments');
+  app.use('/api/tenant', tenantPaymentsRouter(db));
+  // Wire up the pre-registered webhook handler (was placeholder before DB init)
+  stripeWebhookHandler = webhookHandler(db);
+
+  // Contract expiry notifications — runs on startup + once per 24h
+  const { sendRenewalNotice } = require('./lib/tenantOnboarding');
+  async function runExpiryCheck() {
+    try {
+      const rows = db.prepare(`
+        SELECT c.*, u.email AS user_email, u.id AS user_id
+        FROM contracts c
+        LEFT JOIN users u ON u.id = c.tenant_user_id
+        WHERE c.status='active'
+          AND c.end_date IS NOT NULL
+          AND c.renewal_notice_sent_at IS NULL
+          AND date(c.end_date) >= date('now', '+27 days')
+          AND date(c.end_date) <= date('now', '+33 days')
+      `).all();
+      for (const c of rows) {
+        if (!c.user_id || !c.user_email) continue;
+        const daysLeft = Math.round((new Date(c.end_date) - new Date()) / (1000 * 60 * 60 * 24));
+        const result = await sendRenewalNotice(db, {
+          user: { id: c.user_id, email: c.user_email },
+          contract: c,
+          daysLeft,
+        });
+        if (result.sent) {
+          db.prepare("UPDATE contracts SET renewal_notice_sent_at=datetime('now') WHERE id=?").run(c.id);
+          console.log(`Renewal notice sent for contract ${c.contract_number} (${daysLeft}d left)`);
+        }
+      }
+    } catch (e) {
+      console.error('Expiry check failed:', e.message);
+    }
+  }
+  // Run shortly after startup so port-bind isn't delayed
+  setTimeout(runExpiryCheck, 30 * 1000);
+  setInterval(runExpiryCheck, 24 * 60 * 60 * 1000);
 
   app.listen(PORT, () => console.log(`Backend running on port ${PORT}`));
 }
