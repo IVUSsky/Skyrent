@@ -428,7 +428,7 @@ module.exports = function(db) {
     res.send(csv);
   });
 
-  // Send invoice by email
+  // Send invoice by email (via Resend — Railway blocks SMTP ports)
   router.post('/:id/send', async (req, res) => {
     const inv = db.prepare('SELECT * FROM rent_invoices WHERE id = ?').get(req.params.id);
     if (!inv) return res.status(404).json({ error: 'Not found' });
@@ -437,41 +437,43 @@ module.exports = function(db) {
     const toEmail = req.body.email || prop?.email;
     if (!toEmail) return res.status(400).json({ error: 'Няма email адрес' });
 
-    const smtp = getSmtp(db);
-    if (!smtp) return res.status(400).json({ error: 'SMTP не е конфигуриран' });
+    const resendKey = process.env.RESEND_API_KEY;
+    if (!resendKey) return res.status(400).json({ error: 'RESEND_API_KEY не е конфигуриран' });
 
     const filepath = path.join(PDF_DIR, inv.pdf_path);
     if (!fs.existsSync(filepath)) return res.status(404).json({ error: 'PDF не е намерен' });
 
-    const issuer = getIssuer(db);
-    const isCN = inv.type === 'credit_note';
-    const docLabel = isCN ? `Кредитно известие № ${inv.invoice_number}` : `Фактура № ${inv.invoice_number}`;
+    const issuer    = getIssuer(db);
+    const fromEmail = process.env.RESEND_FROM_EMAIL || 'info@skycapital.pro';
+    const isCN      = inv.type === 'credit_note';
+    const docLabel  = isCN ? `Кредитно известие № ${inv.invoice_number}` : `Фактура № ${inv.invoice_number}`;
+    const recipientName = inv.recipient_name || inv.tenant_name || '';
+
+    const bodyHtml = `
+      <p>Уважаеми/а <strong>${recipientName}</strong>,</p>
+      <p>Прилагаме <strong>${docLabel.toLowerCase()}</strong> за наем за
+      <strong>${monthLabel(inv.month)}</strong> на стойност <strong>${fmtMoney(inv.total)} €</strong>.</p>
+      <p>Моля прегледайте приложения документ.</p>
+      <p style="margin-top:24px;">С уважение,<br><strong>${issuer.name || 'Sky Capital'}</strong></p>`;
 
     try {
-      const transporter = nodemailer.createTransport({
-        host: smtp.host, port: Number(smtp.port) || 587,
-        secure: smtp.port == 465,
-        auth: { user: smtp.user, pass: smtp.pass },
-        tls: { rejectUnauthorized: false },
+      const pdfBase64 = fs.readFileSync(filepath).toString('base64');
+      const response  = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          from: `${issuer.name || 'Sky Capital'} <${fromEmail}>`,
+          to: [toEmail],
+          subject: `${docLabel} — наем ${monthLabel(inv.month)}`,
+          html: buildEmailHtml(bodyHtml, issuer.name),
+          attachments: [
+            { filename: `${docLabel.replace(/\s/g,'_')}.pdf`, content: pdfBase64 },
+          ],
+        }),
       });
-      const recipientName = inv.recipient_name || inv.tenant_name || '';
-      const bodyHtml = `
-        <p>Уважаеми/а <strong>${recipientName}</strong>,</p>
-        <p>Прилагаме <strong>${docLabel.toLowerCase()}</strong> за наем за
-        <strong>${monthLabel(inv.month)}</strong> на стойност <strong>${fmtMoney(inv.total)} €</strong>.</p>
-        <p>Моля прегледайте приложения документ.</p>
-        <p style="margin-top:24px;">С уважение,<br><strong>${issuer.name || 'Sky Capital'}</strong></p>`;
-      await transporter.sendMail({
-        from: `"${issuer.name || 'Sky Capital'}" <${smtp.user}>`,
-        to: toEmail,
-        subject: `${docLabel} — наем ${monthLabel(inv.month)}`,
-        text: `Уважаеми/а ${recipientName},\n\nПрилагаме ${docLabel.toLowerCase()} за наем за ${monthLabel(inv.month)} на стойност ${fmtMoney(inv.total)} €\n\nС уважение,\n${issuer.name || 'Sky Capital'}`,
-        html: buildEmailHtml(bodyHtml, issuer.name),
-        attachments: [
-          ...logoAttachment(),
-          { filename: `${docLabel.replace(/\s/g,'_')}.pdf`, path: filepath },
-        ],
-      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) return res.status(500).json({ error: result.message || 'Грешка при изпращане' });
+
       db.prepare("UPDATE rent_invoices SET sent_at = datetime('now') WHERE id = ?").run(inv.id);
       res.json({ ok: true });
     } catch (err) {
