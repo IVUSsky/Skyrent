@@ -12,7 +12,7 @@ export default function Settings({ API }) {
   const [error, setError] = useState(null)
   const [smtp, setSmtp] = useState({ host: '', port: '587', user: '', pass: '', from_name: 'Sky Capital' })
   const [testingSmtp, setTestingSmtp] = useState(false)
-  const [issuer, setIssuer] = useState({ name: '', address: '', eik: '', mol: '', vat_number: '', iban: '', vat_rate: '0' })
+  const [issuer, setIssuer] = useState({ name: '', address: '', eik: '', mol: '', vat_number: '', iban: '', bic: '', place: '', vat_rate: '0' })
   const [kontrolisiEmail, setKontrolisiEmail] = useState('')
   const [users, setUsers] = useState([])
   const [newUser, setNewUser] = useState({ username: '', password: '', role: 'broker', name: '', email: '' })
@@ -307,8 +307,10 @@ export default function Settings({ API }) {
             { key: 'eik',        label: 'ЕИК / ЕГН',             placeholder: '123456789' },
             { key: 'mol',        label: 'МОЛ',                    placeholder: 'Иво Лазаров' },
             { key: 'address',    label: 'Адрес',                  placeholder: 'София, ул. ...' },
+            { key: 'place',      label: 'Място на издаване',     placeholder: 'София' },
             { key: 'vat_number', label: 'ДДС номер (ако има)',    placeholder: 'BG123456789' },
             { key: 'iban',       label: 'IBAN',                   placeholder: 'BG80BNBG96611020345678' },
+            { key: 'bic',        label: 'BIC',                    placeholder: 'BNBGBGSF' },
           ].map(({ key, label, placeholder }) => (
             <div key={key}>
               <label className="block text-xs font-medium text-gray-600 mb-1">{label}</label>

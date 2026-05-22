@@ -53,6 +53,11 @@ function fmtDate(d) {
   return `${String(dt.getDate()).padStart(2,'0')}.${String(dt.getMonth()+1).padStart(2,'0')}.${dt.getFullYear()}`;
 }
 
+// EUR ↔ BGN fixed conversion rate (Bulgaria adopted EUR on 2026-01-01;
+// dual-currency display required by law during the transition year).
+const EUR_BGN_RATE = 1.95583;
+const eurToBgn = (eur) => Math.round(Number(eur || 0) * EUR_BGN_RATE * 100) / 100;
+
 // Invoice number: 10-digit sequential per year, e.g. 2026000001
 function nextInvoiceNumber(db) {
   const year = new Date().getFullYear();
@@ -103,9 +108,10 @@ function generatePDF(inv, issuer) {
     doc.text(`Дата на данъчното събитие: ${fmtDate(inv.tax_event_date || inv.issued_at)}`, 220, y);
     if (inv.due_date) doc.text(`Падеж: ${fmtDate(inv.due_date)}`, 430, y);
     y += 14;
+    if (issuer.place) doc.text(`Място на издаване: ${issuer.place}`, 50, y);
     if (inv.payment_type) {
       const ptLabel = inv.payment_type === 'брой' ? 'в брой' : 'банков превод';
-      doc.text(`Начин на плащане: ${ptLabel}`, 50, y);
+      doc.text(`Начин на плащане: ${ptLabel}`, issuer.place ? 220 : 50, y);
     }
     if (isCreditNote && inv.related_invoice_number) {
       doc.font('B').fillColor('#7c3aed');
@@ -168,9 +174,9 @@ function generatePDF(inv, issuer) {
     const desc = `Наем за ${monthLabel(inv.month)}${inv.property_address ? ' — ' + inv.property_address : ''}`;
     doc.text(desc, cols.desc + 4, y + 7, { width: 270 });
     doc.text('1', cols.qty, y + 7, { width: 35, align: 'center' });
-    doc.text(`${fmtMoney(sign * inv.amount)} €`, cols.unit, y + 7, { width: 55, align: 'right' });
-    doc.text(`${fmtMoney(sign * inv.amount)} €`, cols.base, y + 7, { width: 55, align: 'right' });
-    doc.text(`${fmtMoney(sign * inv.total)} €`,  cols.total, y + 7, { width: 58, align: 'right' });
+    doc.text(`${fmtMoney(sign * inv.amount)} EUR`, cols.unit, y + 7, { width: 55, align: 'right' });
+    doc.text(`${fmtMoney(sign * inv.amount)} EUR`, cols.base, y + 7, { width: 55, align: 'right' });
+    doc.text(`${fmtMoney(sign * inv.total)} EUR`,  cols.total, y + 7, { width: 58, align: 'right' });
     y += rowH;
     doc.moveTo(50, y).lineTo(50 + PW, y).stroke('#e5e7eb');
     y += 12;
@@ -183,18 +189,31 @@ function generatePDF(inv, issuer) {
       doc.text(value, tX + 100, y, { width: tW - 100, align: 'right' });
       y += bold ? 14 : 13;
     };
-    addRow('Данъчна основа:', `${fmtMoney(sign * inv.amount)} €`);
+    addRow('Данъчна основа:', `${fmtMoney(sign * inv.amount)} EUR`);
     if (inv.vat_rate > 0) {
-      addRow(`ДДС ${inv.vat_rate}%:`, `${fmtMoney(sign * inv.vat_amount)} €`);
+      addRow(`ДДС ${inv.vat_rate}%:`, `${fmtMoney(sign * inv.vat_amount)} EUR`);
     } else {
-      addRow('ДДС:', '0,00 €');
+      addRow('ДДС:', '0,00 EUR');
       doc.font('R').fontSize(7.5).fillColor('#6b7280');
       doc.text('Освободена доставка по чл.45 ЗДДС', tX, y);
       y += 11;
     }
     doc.moveTo(tX, y).lineTo(tX + tW, y).stroke('#374151');
     y += 5;
-    addRow('ОБЩО ЗА ПЛАЩАНЕ:', `${fmtMoney(sign * inv.total)} €`, true);
+    addRow('ОБЩО ЗА ПЛАЩАНЕ:', `${fmtMoney(sign * inv.total)} EUR`, true);
+    // BGN equivalent (legally required during 2026 EUR-transition year)
+    doc.font('R').fontSize(8.5).fillColor('#6b7280');
+    doc.text(
+      `(${fmtMoney(sign * eurToBgn(inv.total))} лв.)`,
+      tX, y, { width: tW, align: 'right' }
+    );
+    y += 12;
+    doc.font('R').fontSize(7).fillColor('#9ca3af');
+    doc.text(
+      `Превалутиране при официален фиксиран курс 1 EUR = 1,95583 BGN`,
+      tX - 60, y, { width: tW + 60, align: 'right' }
+    );
+    y += 10;
 
     // ── Notes
     if (inv.notes) {
