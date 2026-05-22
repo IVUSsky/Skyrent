@@ -278,6 +278,53 @@ const CSV_HEADER = [
 module.exports = function(db) {
   const router = express.Router();
 
+  // GET /api/invoices/counter — preview the next invoice number that will be issued
+  router.get('/counter', (req, res) => {
+    const year = Number(req.query.year) || new Date().getFullYear();
+    const key  = `invoice_counter_${year}`;
+    const row  = db.prepare('SELECT value FROM settings WHERE key=?').get(key);
+    const current = row ? parseInt(String(row.value).replace(/"/g, '')) : 0;
+    const next    = current + 1;
+    res.json({
+      year,
+      counter: current,
+      next_number: `${year}${String(next).padStart(6, '0')}`,
+      next_sequential: next,
+    });
+  });
+
+  // PUT /api/invoices/counter — set the counter so the NEXT invoice gets a specific number
+  // body: { year?: number, next_sequential: number }
+  router.put('/counter', (req, res) => {
+    const year = Number(req.body.year) || new Date().getFullYear();
+    const next = Number(req.body.next_sequential);
+    if (!Number.isInteger(next) || next < 1) {
+      return res.status(400).json({ error: 'next_sequential трябва да е положително цяло число' });
+    }
+    if (next > 999999) {
+      return res.status(400).json({ error: 'Максимум 6 цифри (до 999999)' });
+    }
+
+    // Refuse if existing invoices in this year already have a higher number — would create a duplicate
+    const maxRow = db.prepare(
+      "SELECT MAX(CAST(SUBSTR(invoice_number, 5) AS INTEGER)) AS max_seq FROM rent_invoices WHERE SUBSTR(invoice_number,1,4)=?"
+    ).get(String(year));
+    const maxExisting = maxRow?.max_seq || 0;
+    if (next <= maxExisting) {
+      return res.status(400).json({
+        error: `Вече съществува фактура с номер ${year}${String(maxExisting).padStart(6,'0')}. Следващият номер трябва да е поне ${maxExisting + 1}.`,
+      });
+    }
+
+    // Store counter as (next - 1) so nextInvoiceNumber() will return `next`
+    const key = `invoice_counter_${year}`;
+    db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(key, String(next - 1));
+    res.json({
+      ok: true,
+      next_number: `${year}${String(next).padStart(6,'0')}`,
+    });
+  });
+
   // GET list with search/sort/filter
   router.get('/', (req, res) => {
     const { month, type, q, sort = 'created_at', dir = 'desc', from, to } = req.query;

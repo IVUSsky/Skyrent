@@ -14,6 +14,9 @@ export default function Settings({ API }) {
   const [testingSmtp, setTestingSmtp] = useState(false)
   const [issuer, setIssuer] = useState({ name: '', address: '', eik: '', mol: '', vat_number: '', iban: '', bic: '', place: '', vat_rate: '0' })
   const [kontrolisiEmail, setKontrolisiEmail] = useState('')
+  const [counter, setCounter] = useState(null)
+  const [nextSeq, setNextSeq] = useState('')
+  const [savingCounter, setSavingCounter] = useState(false)
   const [users, setUsers] = useState([])
   const [newUser, setNewUser] = useState({ username: '', password: '', role: 'broker', name: '', email: '' })
   const [savingUser, setSavingUser] = useState(false)
@@ -23,8 +26,16 @@ export default function Settings({ API }) {
     setTimeout(() => setToast(null), 3500)
   }
 
+  const loadCounter = () => {
+    apiFetch(`${API}/api/invoices/counter`).then(r => r.json()).then(d => {
+      setCounter(d)
+      setNextSeq(String(d.next_sequential))
+    }).catch(() => {})
+  }
+
   useEffect(() => {
     apiFetch(`${API}/api/users`).then(r => r.json()).then(d => { if (Array.isArray(d)) setUsers(d) }).catch(() => {})
+    loadCounter()
     apiFetch(`${API}/api/settings`)
       .then(r => r.json())
       .then(data => {
@@ -330,6 +341,69 @@ export default function Settings({ API }) {
             </select>
           </div>
         </div>
+      </div>
+
+      {/* Invoice number counter */}
+      <div className="bg-white rounded-xl shadow border border-gray-100 p-5 mb-6">
+        <h3 className="text-base font-bold text-gray-800 mb-1">🔢 Пореден номер на фактурите</h3>
+        <p className="text-sm text-gray-500 mb-4">
+          Формат: <code className="bg-gray-100 px-1.5 py-0.5 rounded text-xs">YYYYNNNNNN</code> (година + 6-цифрен пореден номер).
+          Полезно ако продължаваш номерация от стара система.
+        </p>
+        {counter && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 items-end">
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+              <div className="text-xs font-semibold text-blue-700 uppercase">Текущ статус ({counter.year})</div>
+              <div className="text-sm text-blue-900 mt-1">
+                Издадени до момента: <strong>{counter.counter}</strong> бр.
+              </div>
+              <div className="text-sm text-blue-900">
+                Следваща фактура ще е: <strong className="font-mono">{counter.next_number}</strong>
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">
+                Следваща фактура — пореден номер (6 цифри)
+              </label>
+              <div className="flex gap-2">
+                <div className="flex items-center bg-gray-100 border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-500 font-mono">
+                  {counter.year}
+                </div>
+                <input
+                  type="number"
+                  min="1"
+                  max="999999"
+                  value={nextSeq}
+                  onChange={e => setNextSeq(e.target.value)}
+                  className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <button
+                  onClick={() => {
+                    setSavingCounter(true)
+                    apiFetch(`${API}/api/invoices/counter`, {
+                      method: 'PUT',
+                      body: JSON.stringify({ year: counter.year, next_sequential: Number(nextSeq) }),
+                    })
+                      .then(r => r.json())
+                      .then(d => {
+                        setSavingCounter(false)
+                        if (d.ok) { showToast(`Следваща фактура: ${d.next_number}`); loadCounter() }
+                        else showToast(d.error || 'Грешка', 'error')
+                      })
+                      .catch(() => { setSavingCounter(false); showToast('Грешка при запис', 'error') })
+                  }}
+                  disabled={savingCounter || !nextSeq || Number(nextSeq) === counter.next_sequential}
+                  className="px-4 py-2 text-sm font-medium bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white rounded-lg whitespace-nowrap"
+                >
+                  {savingCounter ? '...' : 'Запази'}
+                </button>
+              </div>
+              <p className="text-xs text-gray-400 mt-1">
+                Не може да е по-малък от съществуващи фактури. Скок напред е разрешен.
+              </p>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Email Settings — Resend */}
