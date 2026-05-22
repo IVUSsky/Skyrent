@@ -108,6 +108,13 @@ export default function Invoices({ API, role }) {
     }).then(() => load())
   }
 
+  const toggleVatExempt = (propId, exempt) => {
+    apiFetch(`${API}/api/properties/${propId}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ vat_exempt: exempt ? 1 : 0 }),
+    }).then(() => load())
+  }
+
   const openRecipient = (prop) => {
     let rec = {}
     try { rec = JSON.parse(prop.invoice_recipient || '{}') } catch {}
@@ -165,7 +172,7 @@ export default function Invoices({ API, role }) {
 
   const openEdit = (inv) => {
     setEditModal(inv)
-    setEditForm({ amount: inv.amount, vat_rate: inv.vat_rate || 0, notes: inv.notes || '', payment_type: inv.payment_type || '', recipient_name: inv.recipient_name || '', recipient_address: inv.recipient_address || '', recipient_eik: inv.recipient_eik || '', recipient_mol: inv.recipient_mol || '' })
+    setEditForm({ total: inv.total, vat_rate: inv.vat_rate || 0, notes: inv.notes || '', payment_type: inv.payment_type || '', recipient_name: inv.recipient_name || '', recipient_address: inv.recipient_address || '', recipient_eik: inv.recipient_eik || '', recipient_mol: inv.recipient_mol || '' })
   }
 
   const saveEdit = () => {
@@ -176,6 +183,21 @@ export default function Invoices({ API, role }) {
       if (d.ok) { setEditModal(null); showToast('Фактурата е обновена'); load() }
       else showToast('Грешка: ' + d.error, 'error')
     })
+  }
+
+  const refundInvoice = (inv) => {
+    if (!window.confirm(`Възстановяване на плащане за фактура ${inv.invoice_number}?\n\nЩе се извика Stripe refund + автоматично ще се издаде кредитно известие.`)) return
+    const reason = window.prompt('Причина за refund:', 'Поискан от клиента') || 'Поискан от клиента'
+    apiFetch(`${API}/api/invoices/${inv.id}/refund`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason }),
+    })
+      .then(r => r.json())
+      .then(d => {
+        if (d.ok) { showToast(`Refund OK · КИ ${d.credit_note_number}`); load() }
+        else showToast('Грешка: ' + (d.error || ''), 'error')
+      })
+      .catch(e => showToast(e.message, 'error'))
   }
 
   const sendKontrolisi = (inv) => {
@@ -241,6 +263,14 @@ export default function Invoices({ API, role }) {
                       <span className="text-blue-600 text-xs ml-2">→ {rec.name}{rec.eik ? ` (ЕИК: ${rec.eik})` : ''}</span>
                     )}
                   </div>
+                  {prop.invoice_enabled && (
+                    <label className="text-xs flex items-center gap-1 cursor-pointer select-none" title="Освободена доставка по чл. 45 ЗДДС (напр. наем на жилище за физическо лице)">
+                      <input type="checkbox" checked={!!prop.vat_exempt}
+                        onChange={e => toggleVatExempt(prop.id, e.target.checked)}
+                        className="w-3 h-3 accent-green-600 cursor-pointer" />
+                      <span className="text-gray-600">Без ДДС</span>
+                    </label>
+                  )}
                   {prop.invoice_enabled && (
                     <button onClick={() => openRecipient(prop)}
                       className="text-xs px-2 py-1 bg-gray-100 hover:bg-blue-50 text-gray-600 hover:text-blue-700 rounded border border-gray-200">
@@ -455,6 +485,12 @@ export default function Invoices({ API, role }) {
                               КИ
                             </button>
                           )}
+                          {!isCN && inv.paid_at && inv.payment_method === 'stripe' && role !== 'broker' && (
+                            <button onClick={() => refundInvoice(inv)}
+                              className="px-2 py-1 text-xs bg-orange-50 border border-orange-200 text-orange-700 hover:bg-orange-100 rounded" title="Refund на Stripe плащане + КИ">
+                              ↩️
+                            </button>
+                          )}
                           {role !== 'broker' && (
                             <button onClick={() => deleteInvoice(inv)}
                               className="px-2 py-1 text-xs bg-red-50 border border-red-200 text-red-600 hover:bg-red-100 rounded" title="Изтрий">
@@ -550,16 +586,16 @@ export default function Invoices({ API, role }) {
             <div className="px-6 py-4 space-y-3">
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Сума (без ДДС)</label>
-                  <input type="number" value={editForm.amount} min="0" step="0.01"
-                    onChange={e => setEditForm(f => ({ ...f, amount: e.target.value }))}
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Сума с ДДС (EUR)</label>
+                  <input type="number" value={editForm.total} min="0" step="0.01"
+                    onChange={e => setEditForm(f => ({ ...f, total: e.target.value }))}
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">ДДС %</label>
                   <select value={editForm.vat_rate} onChange={e => setEditForm(f => ({ ...f, vat_rate: e.target.value }))}
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                    <option value="0">0%</option>
+                    <option value="0">0% (освободена)</option>
                     <option value="20">20%</option>
                   </select>
                 </div>
@@ -572,7 +608,13 @@ export default function Invoices({ API, role }) {
                 </div>
               ))}
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-700">
-                Новата сума: <strong>{fmtMoney(Number(editForm.amount) * (1 + Number(editForm.vat_rate) / 100))} €</strong> (с ДДС)
+                {(() => {
+                  const total = Number(editForm.total) || 0
+                  const rate  = Number(editForm.vat_rate) || 0
+                  const base  = rate > 0 ? total / (1 + rate/100) : total
+                  const vat   = total - base
+                  return <>Данъчна основа: <strong>{fmtMoney(base)} €</strong> · ДДС: <strong>{fmtMoney(vat)} €</strong> · Общо: <strong>{fmtMoney(total)} €</strong></>
+                })()}
               </div>
             </div>
             <div className="px-6 py-4 border-t flex justify-end gap-2">

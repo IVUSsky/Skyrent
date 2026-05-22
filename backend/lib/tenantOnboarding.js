@@ -29,10 +29,20 @@ function ensureTenantUser(db, contract) {
 
   let user = db.prepare("SELECT * FROM users WHERE LOWER(email)=? OR LOWER(username)=?").get(email, email);
   let tempPassword = null;
+  let roleConflict = null;
 
   if (user) {
-    if (user.role === 'admin' || user.role === 'broker') return { user, isNew: false, tempPassword: null };
-    if (user.role !== 'tenant') {
+    if (user.role === 'admin') {
+      // Refuse to link admin to a contract as tenant — too risky a downgrade.
+      // Admin must manually create a separate user for this tenant.
+      return { user, isNew: false, tempPassword: null, roleConflict: 'admin' };
+    }
+    if (user.role === 'broker') {
+      // Existing broker — link the contract but do NOT auto-downgrade the role.
+      // Admin can change role manually from Settings → Users if this user should
+      // actually be a tenant. Until then they cannot use the tenant portal.
+      roleConflict = 'broker';
+    } else if (user.role !== 'tenant') {
       db.prepare("UPDATE users SET role='tenant' WHERE id=?").run(user.id);
       user.role = 'tenant';
     }
@@ -47,7 +57,7 @@ function ensureTenantUser(db, contract) {
   }
 
   db.prepare("UPDATE contracts SET tenant_user_id=? WHERE id=? AND tenant_user_id IS NULL").run(user.id, contract.id);
-  return { user, isNew: !!tempPassword, tempPassword };
+  return { user, isNew: !!tempPassword, tempPassword, roleConflict };
 }
 
 async function sendWelcomeEmail(db, { user, contract, tempPassword }) {

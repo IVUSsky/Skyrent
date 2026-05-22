@@ -18,6 +18,66 @@ function monthLabel(ym) {
   return `${BG_MONTHS[parseInt(m) - 1]} ${y}`;
 }
 
+function fmtMoney(n) {
+  return Number(n || 0).toLocaleString('bg-BG', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function getIssuerSetting(db) {
+  const row = db.prepare("SELECT value FROM settings WHERE key='issuer'").get();
+  if (!row) return {};
+  try { return JSON.parse(row.value); } catch { return {}; }
+}
+
+// Fire-and-forget Resend send. Logs errors but doesn't throw — webhook
+// MUST respond 200 to Stripe even if email fails (we'll retry/recover via
+// admin-visible status badges).
+async function sendPaymentEmail({ to, subject, html }) {
+  const key = process.env.RESEND_API_KEY;
+  if (!key || !to) return { sent: false, reason: 'no_key_or_to' };
+  const fromName  = 'Sky Capital';
+  const fromEmail = process.env.RESEND_FROM_EMAIL || 'info@skycapital.pro';
+  try {
+    const r = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ from: `${fromName} <${fromEmail}>`, to: [to], subject, html }),
+    });
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      console.warn('Resend payment email failed:', err.message || r.status);
+      return { sent: false, reason: err.message || r.status };
+    }
+    return { sent: true };
+  } catch (e) {
+    console.warn('Resend payment email exception:', e.message);
+    return { sent: false, reason: e.message };
+  }
+}
+
+function paymentEmailShell(bodyHtml) {
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"></head>
+<body style="margin:0;padding:0;background:#f0f2f8;font-family:Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f0f2f8;padding:30px 0;">
+    <tr><td align="center">
+      <table width="600" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:10px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.10);">
+        <tr><td style="background:#1a1a2e;padding:18px 32px;font-size:18px;font-weight:bold;color:#fff;letter-spacing:2px;">SKY CAPITAL</td></tr>
+        <tr><td style="padding:32px 32px 24px;color:#1a1a2e;font-size:14px;line-height:1.7;">
+          ${bodyHtml}
+        </td></tr>
+        <tr><td style="background:#e8eaf2;padding:14px 32px;text-align:center;font-size:11px;color:#6b7280;border-top:1px solid #d1d5db;">
+          <strong>Sky Capital OOD</strong> · info@skycapital.pro
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body></html>`;
+}
+
+function getAdminEmails(db) {
+  // Notify all admins by email (excludes empty emails)
+  return db.prepare("SELECT email FROM users WHERE role='admin' AND email IS NOT NULL AND email != ''").all().map(u => u.email);
+}
+
 // ─── Tenant-facing: create Checkout Session ────────────────────────────────
 function tenantPaymentsRouter(db) {
   const router = express.Router();
@@ -140,13 +200,11 @@ function webhookHandler(db) {
             console.warn('checkout.session.completed without invoice_id metadata:', session.id);
             break;
           }
-          // Mark stripe_payment as succeeded
           db.prepare(`
             UPDATE stripe_payments
             SET status='succeeded', payment_intent_id=?, paid_at=datetime('now')
             WHERE session_id=?
           `).run(session.payment_intent || null, session.id);
-          // Mark invoice as paid (only if not already paid)
           db.prepare(`
             UPDATE rent_invoices
             SET paid_at=COALESCE(paid_at, datetime('now')),
@@ -154,12 +212,81 @@ function webhookHandler(db) {
             WHERE id=?
           `).run(invoiceId);
           console.log(`Stripe: invoice ${invoiceId} marked as paid (session ${session.id})`);
+
+          // Email notifications (fire-and-forget, don't block webhook response)
+          const inv = db.prepare(`
+            SELECT i.*, p.адрес AS property_address
+            FROM rent_invoices i LEFT JOIN properties p ON p.id=i.property_id
+            WHERE i.id=?
+          `).get(invoiceId);
+          if (inv) {
+            const tenantBody = `
+              <p>Уважаеми/а <strong>${inv.tenant_name || ''}</strong>,</p>
+              <p>Получихме плащането Ви за <strong>${monthLabel(inv.month)}</strong>.</p>
+              <table cellpadding="0" cellspacing="0" style="margin:18px 0;border-collapse:collapse;border:1px solid #d1d5db;border-radius:6px;overflow:hidden;width:100%;">
+                <tr><td style="background:#f9fafb;padding:8px 14px;border-bottom:1px solid #d1d5db;color:#6b7280;font-size:12px;">Фактура</td>
+                    <td style="padding:8px 14px;border-bottom:1px solid #d1d5db;font-weight:bold;">№ ${inv.invoice_number}</td></tr>
+                <tr><td style="background:#f9fafb;padding:8px 14px;border-bottom:1px solid #d1d5db;color:#6b7280;font-size:12px;">Имот</td>
+                    <td style="padding:8px 14px;border-bottom:1px solid #d1d5db;">${inv.property_address || ''}</td></tr>
+                <tr><td style="background:#f9fafb;padding:8px 14px;color:#6b7280;font-size:12px;">Сума</td>
+                    <td style="padding:8px 14px;font-weight:bold;color:#166534;">${fmtMoney(inv.total)} EUR</td></tr>
+              </table>
+              <p>Благодарим Ви!</p>`;
+            const customerEmail = session.customer_email || session.customer_details?.email;
+            if (customerEmail) {
+              sendPaymentEmail({
+                to: customerEmail,
+                subject: `Плащане потвърдено — фактура № ${inv.invoice_number}`,
+                html: paymentEmailShell(tenantBody),
+              });
+            }
+
+            // Admin alert
+            const adminBody = `
+              <p>Получено плащане:</p>
+              <ul>
+                <li>Фактура: <strong>№ ${inv.invoice_number}</strong></li>
+                <li>Сума: <strong>${fmtMoney(inv.total)} EUR</strong></li>
+                <li>Наемател: ${inv.tenant_name || '—'} (${customerEmail || '—'})</li>
+                <li>Имот: ${inv.property_address || '—'}</li>
+                <li>Stripe session: ${session.id}</li>
+              </ul>`;
+            for (const adminEmail of getAdminEmails(db)) {
+              sendPaymentEmail({
+                to: adminEmail,
+                subject: `Skyrent: получено плащане ${fmtMoney(inv.total)} EUR (№ ${inv.invoice_number})`,
+                html: paymentEmailShell(adminBody),
+              });
+            }
+          }
           break;
         }
         case 'payment_intent.payment_failed': {
           const pi = event.data.object;
           db.prepare(`UPDATE stripe_payments SET status='failed' WHERE payment_intent_id=?`).run(pi.id);
           console.log(`Stripe: payment failed for intent ${pi.id}`);
+
+          // Find associated invoice via stripe_payments
+          const sp = db.prepare('SELECT * FROM stripe_payments WHERE payment_intent_id=?').get(pi.id);
+          const inv = sp ? db.prepare('SELECT * FROM rent_invoices WHERE id=?').get(sp.invoice_id) : null;
+          const failureMsg = pi.last_payment_error?.message || 'unknown';
+          const adminBody = `
+            <p style="color:#991b1b;"><strong>⚠️ Неуспешно плащане</strong></p>
+            <ul>
+              <li>Фактура: <strong>№ ${inv?.invoice_number || '—'}</strong></li>
+              <li>Сума: <strong>${fmtMoney(inv?.total || pi.amount / 100)} EUR</strong></li>
+              <li>Наемател: ${inv?.tenant_name || '—'} (${sp?.customer_email || '—'})</li>
+              <li>Причина: ${failureMsg}</li>
+              <li>PaymentIntent: ${pi.id}</li>
+            </ul>
+            <p>Наемателят може да опита отново от tenant портала.</p>`;
+          for (const adminEmail of getAdminEmails(db)) {
+            sendPaymentEmail({
+              to: adminEmail,
+              subject: `Skyrent: неуспешно плащане (№ ${inv?.invoice_number || pi.id})`,
+              html: paymentEmailShell(adminBody),
+            });
+          }
           break;
         }
         case 'charge.refunded': {
@@ -182,4 +309,4 @@ function webhookHandler(db) {
   };
 }
 
-module.exports = { tenantPaymentsRouter, webhookHandler };
+module.exports = { tenantPaymentsRouter, webhookHandler, getStripe };

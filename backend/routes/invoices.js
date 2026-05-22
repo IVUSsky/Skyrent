@@ -364,7 +364,9 @@ module.exports = function(db) {
 
       const issuer = getIssuer(db);
       const invoice_number = nextInvoiceNumber(db);
-      const vat_rate  = issuer.vat_rate ? Number(issuer.vat_rate) : 0;
+      // Per-property vat_exempt overrides issuer's VAT rate (e.g. residential
+      // rentals are exempt under чл. 45 ЗДДС even if issuer is VAT-registered).
+      const vat_rate  = prop.vat_exempt ? 0 : (issuer.vat_rate ? Number(issuer.vat_rate) : 0);
       const total     = Number(prop['наем'] || 0);
       const amount    = vat_rate > 0 ? Math.round(total / (1 + vat_rate / 100) * 100) / 100 : total;
       const vat_amount = Math.round((total - amount) * 100) / 100;
@@ -454,6 +456,86 @@ module.exports = function(db) {
 
       res.json({ ok: true, id: r.lastInsertRowid, invoice_number });
     } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Refund a Stripe payment + auto-generate credit note
+  // Admin-only (existing /api route guard already checks JWT; we add role check)
+  router.post('/:id/refund', async (req, res) => {
+    if (req.user?.role !== 'admin') {
+      return res.status(403).json({ error: 'Само администратор може да издава refund' });
+    }
+    try {
+      const inv = db.prepare('SELECT * FROM rent_invoices WHERE id=?').get(req.params.id);
+      if (!inv) return res.status(404).json({ error: 'Фактурата не е намерена' });
+      if (inv.type !== 'invoice') return res.status(400).json({ error: 'Refund може само на фактура' });
+      if (!inv.paid_at) return res.status(400).json({ error: 'Фактурата не е платена' });
+
+      const sp = db.prepare("SELECT * FROM stripe_payments WHERE invoice_id=? AND status='succeeded' ORDER BY id DESC LIMIT 1").get(inv.id);
+      if (!sp || !sp.payment_intent_id) {
+        return res.status(400).json({ error: 'Няма Stripe плащане свързано с тази фактура (може да е платена в брой/банков превод)' });
+      }
+      if (sp.status === 'refunded') return res.status(400).json({ error: 'Плащането вече е възстановено' });
+
+      const { getStripe } = require('./payments');
+      const stripe = getStripe();
+      if (!stripe) return res.status(500).json({ error: 'Stripe не е конфигуриран' });
+
+      const refund = await stripe.refunds.create({
+        payment_intent: sp.payment_intent_id,
+        reason: 'requested_by_customer',
+        metadata: { invoice_id: String(inv.id), invoice_number: inv.invoice_number },
+      });
+
+      // Mark stripe_payment as refunded (charge.refunded webhook will also do this)
+      db.prepare("UPDATE stripe_payments SET status='refunded' WHERE id=?").run(sp.id);
+
+      // Auto-generate credit note for the full invoice
+      const issuer = getIssuer(db);
+      const cn_number = nextInvoiceNumber(db);
+      const issued_at = new Date().toISOString().slice(0, 10);
+      const prop = db.prepare('SELECT адрес FROM properties WHERE id=?').get(inv.property_id);
+      const reason = req.body?.reason || `Stripe refund (${refund.id})`;
+
+      const cn = {
+        ...inv,
+        invoice_number: cn_number,
+        type: 'credit_note',
+        related_invoice_id:     inv.id,
+        related_invoice_number: inv.invoice_number,
+        related_invoice_date:   inv.issued_at,
+        credit_note_reason:     reason,
+        property_address: prop?.['адрес'] || '',
+        issued_at, tax_event_date: issued_at,
+        notes: req.body?.notes || null,
+      };
+      const { filename } = await generatePDF(cn, issuer);
+      const r = db.prepare(`
+        INSERT INTO rent_invoices
+          (invoice_number, type, related_invoice_id, credit_note_reason,
+           property_id, month, tenant_name, recipient_name, recipient_address,
+           recipient_eik, recipient_mol, amount, vat_rate, vat_amount, total,
+           payment_type, tax_event_date, issued_at, pdf_path, notes)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      `).run(
+        cn_number, 'credit_note', inv.id, reason,
+        inv.property_id, inv.month, inv.tenant_name,
+        inv.recipient_name, inv.recipient_address,
+        inv.recipient_eik, inv.recipient_mol,
+        inv.amount, inv.vat_rate, inv.vat_amount, inv.total,
+        inv.payment_type, issued_at, issued_at, filename, cn.notes
+      );
+
+      res.json({
+        ok: true,
+        refund_id: refund.id,
+        amount: refund.amount / 100,
+        credit_note_id: r.lastInsertRowid,
+        credit_note_number: cn_number,
+      });
+    } catch (err) {
+      console.error('Refund error:', err.message);
       res.status(500).json({ error: err.message });
     }
   });
@@ -550,16 +632,20 @@ module.exports = function(db) {
     }
   });
 
-  // Update invoice (regenerates PDF)
+  // Update invoice (regenerates PDF). Accepts total (с ДДС) + vat_rate and
+  // derives base/vat — consistent with generate() so VAT-rate changes don't
+  // distort the gross amount.
   router.put('/:id', async (req, res) => {
     try {
       const inv = db.prepare('SELECT * FROM rent_invoices WHERE id=?').get(req.params.id);
       if (!inv) return res.status(404).json({ error: 'Not found' });
-      const { amount, vat_rate, notes, payment_type, tax_event_date, due_date, recipient_name, recipient_address, recipient_eik, recipient_mol } = req.body;
-      const newAmount   = amount  !== undefined ? Number(amount)   : inv.amount;
+      const { total, vat_rate, notes, payment_type, tax_event_date, due_date, recipient_name, recipient_address, recipient_eik, recipient_mol } = req.body;
+      const newTotal    = total    !== undefined ? Number(total)    : inv.total;
       const newVatRate  = vat_rate !== undefined ? Number(vat_rate) : (inv.vat_rate || 0);
-      const newVatAmt   = Math.round(newAmount * newVatRate) / 100;
-      const newTotal    = newAmount + newVatAmt;
+      const newAmount   = newVatRate > 0
+        ? Math.round(newTotal / (1 + newVatRate / 100) * 100) / 100
+        : newTotal;
+      const newVatAmt   = Math.round((newTotal - newAmount) * 100) / 100;
       db.prepare(`UPDATE rent_invoices SET
         amount=?, vat_rate=?, vat_amount=?, total=?,
         notes=?, payment_type=?, tax_event_date=?, due_date=?,
