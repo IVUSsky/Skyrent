@@ -119,24 +119,50 @@ export default function Settings({ API }) {
       <div className="bg-white rounded-xl shadow border border-gray-100 p-5 mb-6">
         <h3 className="text-base font-bold text-gray-800 mb-3">👥 Потребители и достъп</h3>
         <div className="space-y-2 mb-4">
-          {users.map(u => (
-            <div key={u.id} className="flex items-center gap-3 bg-gray-50 rounded-lg px-3 py-2">
-              <div className="flex-1">
-                <span className="font-medium text-sm text-gray-800">{u.name || u.username}</span>
-                <span className="text-xs text-gray-500 ml-2">@{u.username}</span>
+          {users.map(u => {
+            const roleStyles = {
+              admin:   { bg: 'bg-purple-100', fg: 'text-purple-700', label: 'Администратор' },
+              broker:  { bg: 'bg-blue-100',   fg: 'text-blue-700',   label: 'Брокер' },
+              tenant:  { bg: 'bg-green-100',  fg: 'text-green-700',  label: 'Наемател' },
+            }[u.role] || { bg: 'bg-gray-100', fg: 'text-gray-700', label: u.role || '—' }
+            const changeRole = (newRole) => {
+              if (newRole === u.role) return
+              apiFetch(`${API}/api/users/${u.id}`, {
+                method: 'PUT',
+                body: JSON.stringify({ role: newRole, name: u.name || '', email: u.email || '' }),
+              }).then(r => r.json()).then(() => {
+                setUsers(us => us.map(x => x.id === u.id ? { ...x, role: newRole } : x))
+                showToast(`Ролята е променена на "${{admin:'Администратор',broker:'Брокер',tenant:'Наемател'}[newRole] || newRole}"`)
+              })
+            }
+            return (
+              <div key={u.id} className="flex items-center gap-3 bg-gray-50 rounded-lg px-3 py-2">
+                <div className="flex-1">
+                  <span className="font-medium text-sm text-gray-800">{u.name || u.username}</span>
+                  <span className="text-xs text-gray-500 ml-2">@{u.username}</span>
+                  {u.email && <span className="text-xs text-gray-400 ml-2">{u.email}</span>}
+                </div>
+                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${roleStyles.bg} ${roleStyles.fg}`}>
+                  {roleStyles.label}
+                </span>
+                <select value={u.role} onChange={e => changeRole(e.target.value)}
+                  disabled={u.role === 'admin' && users.filter(x => x.role === 'admin').length <= 1}
+                  className="text-xs border border-gray-300 rounded px-1.5 py-0.5 bg-white focus:outline-none focus:ring-2 focus:ring-blue-400"
+                  title="Смени роля">
+                  <option value="admin">Администратор</option>
+                  <option value="broker">Брокер</option>
+                  <option value="tenant">Наемател</option>
+                </select>
+                {u.role !== 'admin' && (
+                  <button onClick={() => {
+                    if (!window.confirm(`Изтриване на ${u.username}?`)) return
+                    apiFetch(`${API}/api/users/${u.id}`, { method: 'DELETE' })
+                      .then(r => r.json()).then(() => setUsers(us => us.filter(x => x.id !== u.id)))
+                  }} className="text-red-400 hover:text-red-600 text-xs">🗑️</button>
+                )}
               </div>
-              <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${u.role === 'admin' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>
-                {u.role === 'admin' ? 'Администратор' : 'Брокер'}
-              </span>
-              {u.role !== 'admin' && (
-                <button onClick={() => {
-                  if (!window.confirm(`Изтриване на ${u.username}?`)) return
-                  apiFetch(`${API}/api/users/${u.id}`, { method: 'DELETE' })
-                    .then(r => r.json()).then(() => setUsers(us => us.filter(x => x.id !== u.id)))
-                }} className="text-red-400 hover:text-red-600 text-xs">🗑️</button>
-              )}
-            </div>
-          ))}
+            )
+          })}
         </div>
         <div className="border-t pt-4">
           <div className="text-sm font-semibold text-gray-700 mb-2">Добави потребител</div>
@@ -154,6 +180,7 @@ export default function Settings({ API }) {
             <select value={newUser.role} onChange={e => setNewUser(u => ({...u,role:e.target.value}))}
               className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
               <option value="broker">Брокер</option>
+              <option value="tenant">Наемател</option>
               <option value="admin">Администратор</option>
             </select>
             <button disabled={savingUser || !newUser.username || !newUser.password}
