@@ -212,12 +212,10 @@ function tenantPaymentsRouter(db) {
       } catch (err) {
         const msg = String(err.message || '');
         if (msg.includes('sepa_debit') && msg.includes('invalid')) {
-          console.warn('Explicit sepa_debit rejected, falling back to automatic_payment_methods:', msg);
-          session = await s.checkout.sessions.create({
-            ...baseSession,
-            automatic_payment_methods: { enabled: true },
-            currency: 'eur',
-          });
+          // Fallback: omit payment_method_types so Stripe picks whatever is
+          // enabled in the dashboard PaymentMethodConfiguration.
+          console.warn('Explicit sepa_debit rejected, falling back to dashboard config:', msg);
+          session = await s.checkout.sessions.create(baseSession);
         } else {
           throw err;
         }
