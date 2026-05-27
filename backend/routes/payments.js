@@ -213,9 +213,13 @@ function tenantPaymentsRouter(db) {
         const msg = String(err.message || '');
         if (msg.includes('sepa_debit') && msg.includes('invalid')) {
           // Fallback: omit payment_method_types so Stripe picks whatever is
-          // enabled in the dashboard PaymentMethodConfiguration.
+          // enabled in the dashboard PaymentMethodConfiguration. Currency is
+          // required when payment_method_types is omitted in setup mode.
           console.warn('Explicit sepa_debit rejected, falling back to dashboard config:', msg);
-          session = await s.checkout.sessions.create(baseSession);
+          session = await s.checkout.sessions.create({
+            ...baseSession,
+            currency: 'eur',
+          });
         } else {
           throw err;
         }
