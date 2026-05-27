@@ -99,31 +99,36 @@ function ensureInvoiceForMonth(db, property, month, generatePDF) {
   return db.prepare('SELECT * FROM rent_invoices WHERE id=?').get(r.lastInsertRowid);
 }
 
-async function runAutopayCharges(db) {
+async function runAutopayCharges(db, options = {}) {
   const stripe = getStripe();
   if (!stripe) {
     console.log('Autopay cron: STRIPE_SECRET_KEY not set, skipping');
-    return;
+    return { processed: 0, error: 'Stripe not configured' };
   }
 
   const today = new Date();
   const todayDay = today.getDate(); // 1-31
   const currentMonth = today.toISOString().slice(0, 7); // YYYY-MM
 
-  // Find users due today
-  const users = db.prepare(`
-    SELECT * FROM users
-    WHERE autopay_enabled=1
-      AND sepa_payment_method_id IS NOT NULL
-      AND COALESCE(autopay_day, 5) = ?
-  `).all(todayDay);
+  // Find users due today (or all enabled if forceAll for manual testing)
+  const users = options.forceAll
+    ? db.prepare(`SELECT * FROM users WHERE autopay_enabled=1 AND sepa_payment_method_id IS NOT NULL`).all()
+    : db.prepare(`
+        SELECT * FROM users
+        WHERE autopay_enabled=1
+          AND sepa_payment_method_id IS NOT NULL
+          AND COALESCE(autopay_day, 5) = ?
+      `).all(todayDay);
 
   if (users.length === 0) {
     console.log(`Autopay cron: no users due on day ${todayDay}`);
-    return;
+    return { processed: 0, charged: 0, errors: 0 };
   }
 
-  console.log(`Autopay cron: processing ${users.length} user(s) due on day ${todayDay} (${currentMonth})`);
+  console.log(`Autopay cron: processing ${users.length} user(s) ${options.forceAll ? '(FORCE-ALL)' : `due on day ${todayDay}`} for ${currentMonth}`);
+  let charged = 0;
+  let errors  = 0;
+  const results = [];
 
   for (const user of users) {
     try {
@@ -191,11 +196,17 @@ async function runAutopayCharges(db) {
       }
 
       console.log(`Autopay: charged ${inv.total} EUR for invoice ${inv.invoice_number} (user ${user.id}, status=${pi.status})`);
+      charged++;
+      results.push({ user_id: user.id, invoice_number: inv.invoice_number, amount: inv.total, status: pi.status });
     } catch (err) {
       console.error(`Autopay error for user ${user.id}:`, err.message);
+      errors++;
+      results.push({ user_id: user.id, error: err.message });
       // TODO: email admin alert; mark a retry counter on the user
     }
   }
+
+  return { processed: users.length, charged, errors, results };
 }
 
 module.exports = { runAutopayCharges };

@@ -460,6 +460,21 @@ module.exports = function(db) {
     }
   });
 
+  // Manually trigger the autopay cron (admin-only) — for testing without
+  // waiting for the next scheduled day or restarting the server.
+  router.post('/run-autopay-now', async (req, res) => {
+    if (req.user?.role !== 'admin') {
+      return res.status(403).json({ error: 'Само администратор' });
+    }
+    try {
+      const { runAutopayCharges } = require('../lib/autopayCron');
+      const result = await runAutopayCharges(db, { forceAll: true });
+      res.json({ ok: true, ...result });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // Refund a Stripe payment + auto-generate credit note
   // Admin-only (existing /api route guard already checks JWT; we add role check)
   router.post('/:id/refund', async (req, res) => {
