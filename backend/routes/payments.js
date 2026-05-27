@@ -186,19 +186,42 @@ function tenantPaymentsRouter(db) {
         db.prepare('UPDATE users SET stripe_customer_id=? WHERE id=?').run(customerId, user.id);
       }
 
-      // Stripe Checkout in setup mode collects the SEPA mandate without charging
+      // Stripe Checkout in setup mode collects the SEPA mandate without charging.
+      // Try explicit sepa_debit first; on "invalid payment method type" errors,
+      // fall back to automatic_payment_methods which uses the dashboard config.
       const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-      const session = await s.checkout.sessions.create({
+      const successUrl = `${frontendUrl}/?autopay_success=1&session_id={CHECKOUT_SESSION_ID}`;
+      const cancelUrl  = `${frontendUrl}/?autopay_cancel=1`;
+      const baseSession = {
         mode: 'setup',
-        payment_method_types: ['sepa_debit'],
         customer: customerId,
-        success_url: `${frontendUrl}/?autopay_success=1&session_id={CHECKOUT_SESSION_ID}`,
-        cancel_url:  `${frontendUrl}/?autopay_cancel=1`,
+        success_url: successUrl,
+        cancel_url:  cancelUrl,
         metadata: {
           skyrent_user_id: String(user.id),
           purpose: 'sepa_autopay_setup',
         },
-      });
+      };
+
+      let session;
+      try {
+        session = await s.checkout.sessions.create({
+          ...baseSession,
+          payment_method_types: ['sepa_debit'],
+        });
+      } catch (err) {
+        const msg = String(err.message || '');
+        if (msg.includes('sepa_debit') && msg.includes('invalid')) {
+          console.warn('Explicit sepa_debit rejected, falling back to automatic_payment_methods:', msg);
+          session = await s.checkout.sessions.create({
+            ...baseSession,
+            automatic_payment_methods: { enabled: true },
+            currency: 'eur',
+          });
+        } else {
+          throw err;
+        }
+      }
 
       res.json({ url: session.url, session_id: session.id });
     } catch (err) {
