@@ -149,6 +149,87 @@ function tenantPaymentsRouter(db) {
     }
   });
 
+  // ─── SEPA Direct Debit autopay (Phase 2) ────────────────────────────────
+
+  // GET /api/tenant/autopay-status
+  router.get('/autopay-status', (req, res) => {
+    const user = db.prepare(
+      'SELECT id, autopay_enabled, autopay_activated_at, autopay_day, sepa_iban_last4 FROM users WHERE id=?'
+    ).get(req.user.id);
+    if (!user) return res.status(404).json({ error: 'Not found' });
+    res.json({
+      enabled: !!user.autopay_enabled,
+      iban_last4: user.sepa_iban_last4 || null,
+      activated_at: user.autopay_activated_at,
+      autopay_day: user.autopay_day || 5,
+    });
+  });
+
+  // POST /api/tenant/setup-autopay → starts the SEPA mandate flow
+  router.post('/setup-autopay', async (req, res) => {
+    const s = getStripe();
+    if (!s) return res.status(500).json({ error: 'Stripe не е конфигуриран' });
+
+    const user = db.prepare('SELECT * FROM users WHERE id=?').get(req.user.id);
+    if (!user || !user.email) return res.status(400).json({ error: 'Профилът няма email — admin трябва да го добави' });
+
+    try {
+      // Lazy: create Stripe Customer if user doesn't have one yet
+      let customerId = user.stripe_customer_id;
+      if (!customerId) {
+        const customer = await s.customers.create({
+          email: user.email,
+          name: user.name || user.username,
+          metadata: { skyrent_user_id: String(user.id) },
+        });
+        customerId = customer.id;
+        db.prepare('UPDATE users SET stripe_customer_id=? WHERE id=?').run(customerId, user.id);
+      }
+
+      // Stripe Checkout in setup mode collects the SEPA mandate without charging
+      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+      const session = await s.checkout.sessions.create({
+        mode: 'setup',
+        payment_method_types: ['sepa_debit'],
+        customer: customerId,
+        success_url: `${frontendUrl}/?autopay_success=1&session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url:  `${frontendUrl}/?autopay_cancel=1`,
+        metadata: {
+          skyrent_user_id: String(user.id),
+          purpose: 'sepa_autopay_setup',
+        },
+      });
+
+      res.json({ url: session.url, session_id: session.id });
+    } catch (err) {
+      console.error('SEPA setup error:', err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST /api/tenant/disable-autopay → removes the saved payment method
+  router.post('/disable-autopay', async (req, res) => {
+    const s = getStripe();
+    const user = db.prepare('SELECT * FROM users WHERE id=?').get(req.user.id);
+    if (!user) return res.status(404).json({ error: 'Not found' });
+
+    try {
+      // Detach the payment method on Stripe (best-effort)
+      if (s && user.sepa_payment_method_id) {
+        try { await s.paymentMethods.detach(user.sepa_payment_method_id); }
+        catch (e) { console.warn('Detach SEPA pm failed (continuing):', e.message); }
+      }
+      db.prepare(`
+        UPDATE users
+        SET autopay_enabled=0, sepa_payment_method_id=NULL, sepa_iban_last4=NULL
+        WHERE id=?
+      `).run(user.id);
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // GET /api/tenant/invoices/:id/payment-status — frontend polls after redirect
   router.get('/invoices/:id/payment-status', (req, res) => {
     const inv = db.prepare(`
@@ -172,7 +253,7 @@ function tenantPaymentsRouter(db) {
 
 // ─── Webhook handler (public, raw body, Stripe signature verified) ─────────
 function webhookHandler(db) {
-  return (req, res) => {
+  return async (req, res) => {
     const s = getStripe();
     if (!s) return res.status(500).send('Stripe not configured');
 
@@ -261,6 +342,27 @@ function webhookHandler(db) {
           }
           break;
         }
+        case 'payment_intent.succeeded': {
+          // For SEPA DD autopay: PaymentIntent starts 'processing' and turns
+          // 'succeeded' 3-5 days later when the debit clears. Mark invoice paid.
+          const pi = event.data.object;
+          const invoiceId = pi.metadata?.invoice_id;
+          if (invoiceId) {
+            db.prepare(`
+              UPDATE stripe_payments
+              SET status='succeeded', paid_at=COALESCE(paid_at, datetime('now'))
+              WHERE payment_intent_id=?
+            `).run(pi.id);
+            db.prepare(`
+              UPDATE rent_invoices
+              SET paid_at=COALESCE(paid_at, datetime('now')),
+                  payment_method=COALESCE(payment_method, ?)
+              WHERE id=?
+            `).run(pi.metadata?.autopay === 'true' ? 'stripe_sepa' : 'stripe', invoiceId);
+            console.log(`Stripe: payment_intent.succeeded → invoice ${invoiceId} marked paid (pi ${pi.id})`);
+          }
+          break;
+        }
         case 'payment_intent.payment_failed': {
           const pi = event.data.object;
           db.prepare(`UPDATE stripe_payments SET status='failed' WHERE payment_intent_id=?`).run(pi.id);
@@ -294,6 +396,72 @@ function webhookHandler(db) {
           if (charge.payment_intent) {
             db.prepare(`UPDATE stripe_payments SET status='refunded' WHERE payment_intent_id=?`).run(charge.payment_intent);
             console.log(`Stripe: charge refunded for intent ${charge.payment_intent}`);
+          }
+          break;
+        }
+        case 'setup_intent.succeeded': {
+          // SEPA mandate accepted — save the payment_method on the user
+          const si = event.data.object;
+          if (!si.customer || !si.payment_method) {
+            console.warn('setup_intent.succeeded missing customer or payment_method:', si.id);
+            break;
+          }
+          // Look up user by stripe_customer_id
+          const user = db.prepare('SELECT * FROM users WHERE stripe_customer_id=?').get(si.customer);
+          if (!user) {
+            console.warn('setup_intent.succeeded: no Skyrent user for customer', si.customer);
+            break;
+          }
+          // Fetch payment method to get IBAN last4 for display
+          let iban_last4 = null;
+          try {
+            const pm = await getStripe().paymentMethods.retrieve(si.payment_method);
+            iban_last4 = pm?.sepa_debit?.last4 || null;
+          } catch (e) {
+            console.warn('Could not retrieve payment method:', e.message);
+          }
+          db.prepare(`
+            UPDATE users
+            SET sepa_payment_method_id=?, sepa_iban_last4=?, autopay_enabled=1,
+                autopay_activated_at=datetime('now')
+            WHERE id=?
+          `).run(si.payment_method, iban_last4, user.id);
+          console.log(`SEPA autopay activated for user ${user.id} (IBAN •••${iban_last4 || '????'})`);
+          break;
+        }
+        case 'mandate.updated': {
+          // Mandate state changes (e.g. tenant revoked it on their bank's side)
+          const mandate = event.data.object;
+          if (mandate.status === 'inactive' && mandate.payment_method) {
+            const user = db.prepare('SELECT id FROM users WHERE sepa_payment_method_id=?').get(mandate.payment_method);
+            if (user) {
+              db.prepare('UPDATE users SET autopay_enabled=0 WHERE id=?').run(user.id);
+              console.log(`SEPA mandate revoked for user ${user.id} — autopay disabled`);
+              // TODO: email admin + tenant
+            }
+          }
+          break;
+        }
+        case 'charge.dispute.created': {
+          // 8-week SEPA chargeback window — high-impact event, alert admin
+          const dispute = event.data.object;
+          console.warn(`⚠️ SEPA dispute created: ${dispute.id}, amount ${dispute.amount/100}, reason ${dispute.reason}`);
+          const adminBody = `
+            <p style="color:#991b1b;"><strong>⚠️ Оспорване на плащане (chargeback)</strong></p>
+            <ul>
+              <li>Dispute ID: ${dispute.id}</li>
+              <li>Сума: <strong>${fmtMoney(dispute.amount / 100)} EUR</strong></li>
+              <li>Причина: ${dispute.reason}</li>
+              <li>Charge: ${dispute.charge}</li>
+              <li>Status: ${dispute.status}</li>
+            </ul>
+            <p>Прегледай в Stripe Dashboard → Disputes за документация.</p>`;
+          for (const adminEmail of getAdminEmails(db)) {
+            sendPaymentEmail({
+              to: adminEmail,
+              subject: `Skyrent ⚠️ Chargeback ${fmtMoney(dispute.amount / 100)} EUR`,
+              html: paymentEmailShell(adminBody),
+            });
           }
           break;
         }

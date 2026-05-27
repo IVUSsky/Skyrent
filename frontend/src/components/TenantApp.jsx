@@ -28,7 +28,7 @@ export default function TenantApp({ userName, onLogout, mustChangePassword }) {
 
   useEffect(() => { loadMe() }, [])
 
-  // Handle Stripe redirect back (?stripe_success=1 or ?stripe_cancel=1)
+  // Handle Stripe redirect back (?stripe_success=1 or ?stripe_cancel=1, ?autopay_*=1)
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     if (params.get('stripe_success') === '1') {
@@ -38,6 +38,14 @@ export default function TenantApp({ userName, onLogout, mustChangePassword }) {
     } else if (params.get('stripe_cancel') === '1') {
       setTab('invoices')
       setToast({ type: 'error', text: 'Плащането беше прекратено. Можеш да опиташ отново.' })
+      window.history.replaceState({}, '', window.location.pathname)
+    } else if (params.get('autopay_success') === '1') {
+      setTab('profile')
+      setToast({ type: 'success', text: '✅ Автоплащането е активирано! От следващия месец наемът ще се тегли автоматично.' })
+      window.history.replaceState({}, '', window.location.pathname)
+    } else if (params.get('autopay_cancel') === '1') {
+      setTab('profile')
+      setToast({ type: 'error', text: 'Активирането беше прекратено.' })
       window.history.replaceState({}, '', window.location.pathname)
     }
   }, [])
@@ -349,7 +357,111 @@ function Profile({ me, onChangePassword }) {
           🔑 Смяна на парола
         </button>
       </Card>
+
+      <AutopayCard />
     </div>
+  )
+}
+
+function AutopayCard() {
+  const [status, setStatus] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [err, setErr] = useState(null)
+  const [showConfirmDisable, setShowConfirmDisable] = useState(false)
+
+  const load = () => {
+    apiFetch(`${API}/api/tenant/autopay-status`)
+      .then(r => r.json())
+      .then(setStatus)
+      .catch(() => setStatus({ enabled: false }))
+  }
+  useEffect(load, [])
+
+  const setup = async () => {
+    setLoading(true); setErr(null)
+    try {
+      const r = await apiFetch(`${API}/api/tenant/setup-autopay`, { method: 'POST' })
+      const d = await r.json()
+      if (!r.ok || !d.url) {
+        setErr(d.error || 'Грешка при стартиране на настройката')
+        setLoading(false)
+        return
+      }
+      window.location.href = d.url
+    } catch {
+      setErr('Сървърна грешка'); setLoading(false)
+    }
+  }
+
+  const disable = async () => {
+    setLoading(true); setErr(null)
+    try {
+      const r = await apiFetch(`${API}/api/tenant/disable-autopay`, { method: 'POST' })
+      const d = await r.json()
+      setLoading(false); setShowConfirmDisable(false)
+      if (d.ok) load()
+      else setErr(d.error || 'Грешка')
+    } catch {
+      setLoading(false); setErr('Сървърна грешка')
+    }
+  }
+
+  if (!status) return <Card title="💳 Автоплащане"><p className="text-slate-500 text-sm">Зареждане...</p></Card>
+
+  return (
+    <Card title="💳 Автоплащане (SEPA Direct Debit)">
+      {status.enabled ? (
+        <>
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: '#dcfce7', color: '#166534' }}>
+              ✓ Активно
+            </span>
+            <span className="text-xs text-slate-500">от {fmtDate(status.activated_at)}</span>
+          </div>
+          <div className="text-sm text-slate-700 space-y-1 mb-3">
+            <div>IBAN завършващ на: <strong className="font-mono">•••• {status.iban_last4 || '????'}</strong></div>
+            <div>Месечно теглене на: <strong>{status.autopay_day || 5}-то число</strong></div>
+          </div>
+          <p className="text-xs text-slate-500 mb-3">
+            Наемът ще се тегли автоматично от Вашата банкова сметка всеки месец. Можете да деактивирате по всяко време.
+          </p>
+          {showConfirmDisable ? (
+            <div className="flex gap-2">
+              <button onClick={disable} disabled={loading}
+                className="flex-1 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-sm px-3 py-2 rounded-lg">
+                {loading ? '...' : 'Да, деактивирай'}
+              </button>
+              <button onClick={() => setShowConfirmDisable(false)}
+                className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm px-3 py-2 rounded-lg">
+                Отказ
+              </button>
+            </div>
+          ) : (
+            <button onClick={() => setShowConfirmDisable(true)}
+              className="text-sm bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg">
+              🚫 Деактивирай автоплащане
+            </button>
+          )}
+        </>
+      ) : (
+        <>
+          <p className="text-sm text-slate-700 mb-3">
+            Спестете време — оставете наемът да се тегли автоматично от Вашата банкова сметка всеки месец.
+          </p>
+          <ul className="text-xs text-slate-600 mb-4 space-y-1">
+            <li>✓ Няма повече забравяне на падежи</li>
+            <li>✓ Подписвате SEPA mandate веднъж</li>
+            <li>✓ Можете да деактивирате по всяко време</li>
+            <li>✓ Имате 8 седмици да оспорите всяко теглене</li>
+          </ul>
+          <button onClick={setup} disabled={loading}
+            className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-semibold px-4 py-2 rounded-lg">
+            {loading ? 'Стартиране...' : '🏦 Активирай SEPA автоплащане'}
+          </button>
+        </>
+      )}
+      {err && <p className="text-sm text-red-600 mt-3">{err}</p>}
+    </Card>
   )
 }
 

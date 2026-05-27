@@ -250,6 +250,13 @@ async function main() {
   try { db.exec("ALTER TABLE users ADD COLUMN phone TEXT DEFAULT ''");          console.log('Migration: added users.phone'); }          catch(_) {}
   try { db.exec("ALTER TABLE users ADD COLUMN must_change_password INTEGER DEFAULT 0"); console.log('Migration: added users.must_change_password'); } catch(_) {}
   try { db.exec("ALTER TABLE users ADD COLUMN last_login_at DATETIME");          console.log('Migration: added users.last_login_at'); }  catch(_) {}
+  // Phase 2 SEPA DD autopay fields
+  try { db.exec("ALTER TABLE users ADD COLUMN stripe_customer_id TEXT");         console.log('Migration: added users.stripe_customer_id'); }       catch(_) {}
+  try { db.exec("ALTER TABLE users ADD COLUMN sepa_payment_method_id TEXT");     console.log('Migration: added users.sepa_payment_method_id'); }   catch(_) {}
+  try { db.exec("ALTER TABLE users ADD COLUMN sepa_iban_last4 TEXT");            console.log('Migration: added users.sepa_iban_last4'); }          catch(_) {}
+  try { db.exec("ALTER TABLE users ADD COLUMN autopay_enabled INTEGER DEFAULT 0"); console.log('Migration: added users.autopay_enabled'); }        catch(_) {}
+  try { db.exec("ALTER TABLE users ADD COLUMN autopay_activated_at DATETIME");   console.log('Migration: added users.autopay_activated_at'); }    catch(_) {}
+  try { db.exec("ALTER TABLE users ADD COLUMN autopay_day INTEGER DEFAULT 5");   console.log('Migration: added users.autopay_day'); }              catch(_) {}
   // Seed first admin from env vars if no users exist
   const userCount = db.prepare('SELECT COUNT(*) as c FROM users').get().c;
   if (userCount === 0) {
@@ -343,6 +350,12 @@ async function main() {
   // Run shortly after startup so port-bind isn't delayed
   setTimeout(runExpiryCheck, 30 * 1000);
   setInterval(runExpiryCheck, 24 * 60 * 60 * 1000);
+
+  // ─── SEPA Autopay daily cron ──────────────────────────────────────────────
+  // Each day at boot + every 24h, charge users whose autopay_day matches today.
+  const { runAutopayCharges } = require('./lib/autopayCron');
+  setTimeout(() => runAutopayCharges(db).catch(e => console.error('Autopay cron failed:', e.message)), 60 * 1000);
+  setInterval(() => runAutopayCharges(db).catch(e => console.error('Autopay cron failed:', e.message)), 24 * 60 * 60 * 1000);
 
   app.listen(PORT, () => console.log(`Backend running on port ${PORT}`));
 }
