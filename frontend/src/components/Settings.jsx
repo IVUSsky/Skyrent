@@ -17,6 +17,8 @@ export default function Settings({ API }) {
   const [counter, setCounter] = useState(null)
   const [nextSeq, setNextSeq] = useState('')
   const [savingCounter, setSavingCounter] = useState(false)
+  const [autopayResult, setAutopayResult] = useState(null)
+  const [autopayLoading, setAutopayLoading] = useState(false)
   const [users, setUsers] = useState([])
   const [newUser, setNewUser] = useState({ username: '', password: '', role: 'broker', name: '', email: '' })
   const [savingUser, setSavingUser] = useState(false)
@@ -368,6 +370,34 @@ export default function Settings({ API }) {
             </select>
           </div>
         </div>
+      </div>
+
+      {/* SEPA Autopay manual trigger */}
+      <div className="bg-white rounded-xl shadow border border-gray-100 p-5 mb-6">
+        <h3 className="text-base font-bold text-gray-800 mb-1">🏦 SEPA Автоплащане — тест</h3>
+        <p className="text-sm text-gray-500 mb-4">
+          Натисни за да стартираш autopay cron веднага (без да чакаш конкретно число от месеца).
+          Ще charge-ва всички tenants с активирано автоплащане.
+        </p>
+        <button
+          onClick={() => {
+            setAutopayLoading(true); setAutopayResult(null)
+            apiFetch(`${API}/api/invoices/run-autopay-now`, { method: 'POST' })
+              .then(r => r.json())
+              .then(d => { setAutopayLoading(false); setAutopayResult(d) })
+              .catch(e => { setAutopayLoading(false); setAutopayResult({ error: e.message }) })
+          }}
+          disabled={autopayLoading}
+          className="px-4 py-2 text-sm font-medium bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg"
+        >
+          {autopayLoading ? 'Стартира...' : '▶️ Стартирай autopay сега'}
+        </button>
+        {autopayResult && (
+          <div className="mt-4 bg-gray-50 border border-gray-200 rounded-lg p-3">
+            <div className="text-xs font-semibold text-gray-600 mb-2">Резултат:</div>
+            <pre className="text-xs text-gray-800 overflow-x-auto">{JSON.stringify(autopayResult, null, 2)}</pre>
+          </div>
+        )}
       </div>
 
       {/* Invoice number counter */}
