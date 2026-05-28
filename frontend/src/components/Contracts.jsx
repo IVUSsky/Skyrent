@@ -557,7 +557,9 @@ export default function Contracts({ API }) {
                         <td className="px-3 py-2 whitespace-nowrap">
                           <div className="flex gap-1 flex-wrap">
                             <button onClick={() => apiFetch(`${API}/api/contracts/${c.id}/pdf`).then(r => r.blob()).then(b => window.open(URL.createObjectURL(b), '_blank'))}
-                              className="px-2 py-1 text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 rounded" title="PDF">📄</button>
+                              className="px-2 py-1 text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 rounded" title="Договор PDF">📄</button>
+                            <button onClick={() => apiFetch(`${API}/api/contracts/${c.id}/protocol/pdf`).then(r => r.blob()).then(b => window.open(URL.createObjectURL(b), '_blank'))}
+                              className="px-2 py-1 text-xs bg-amber-50 border border-amber-200 text-amber-700 hover:bg-amber-100 rounded" title="Приемо-предавателен протокол PDF">📋</button>
                             <button onClick={() => sendContract(c)} disabled={sending===c.id}
                               className="px-2 py-1 text-xs bg-orange-50 border border-orange-200 text-orange-700 hover:bg-orange-100 rounded disabled:opacity-50" title="Изпрати по мейл">
                               {sending===c.id ? '...' : '📧'}

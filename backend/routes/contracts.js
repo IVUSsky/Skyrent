@@ -119,6 +119,34 @@ function buildFields(contract, issuer) {
     'ПАДЕЖ_ДЕН':              String(contract.payment_day || 5),
     'УСЛОВИЯ':                contract.conditions || '',
     'БЕЛЕЖКИ':                contract.notes || '',
+    // ─── Payment method (cash vs bank transfer) ────────────────────
+    'НАЧИН_ПЛАЩАНЕ':          contract.payment_method === 'в брой'
+                                ? 'в брой'
+                                : (contract.payment_method === 'карта (Stripe)' ? 'с картово плащане през онлайн портала на Sky Capital' : `по банков път на IBAN: ${issuer.iban || ''}`),
+    // ─── Срок в месеци ─────────────────────────────────────────────
+    'СРОК_МЕСЕЦИ':            (() => {
+      if (!contract.start_date || !contract.end_date) return '12';
+      const s = new Date(contract.start_date), e = new Date(contract.end_date);
+      const m = Math.max(1, Math.round((e - s) / (1000*60*60*24*30.44)));
+      return String(m);
+    })(),
+    'СРОК_МЕСЕЦИ_ДУМИ':       (() => {
+      if (!contract.start_date || !contract.end_date) return 'дванадесет';
+      const s = new Date(contract.start_date), e = new Date(contract.end_date);
+      const m = Math.max(1, Math.round((e - s) / (1000*60*60*24*30.44)));
+      return amountToWords(m);
+    })(),
+    // ─── Pro-rata за частичен първи месец ──────────────────────────
+    'ПРОПОРЦИОНАЛЕН_НАЕМ':    contract.pro_rata_amount
+                                ? Number(contract.pro_rata_amount).toLocaleString('bg-BG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                                : '',
+    'ПРОПОРЦИОНАЛЕН_НАЕМ_ДУМИ': contract.pro_rata_amount ? amountToWords(contract.pro_rata_amount) : '',
+    'ПРОПОРЦИОНАЛЕН_ДО':      contract.pro_rata_end_date ? fmtDate(contract.pro_rata_end_date) : '',
+    // ─── Протокол fields ───────────────────────────────────────────
+    'БРОЙ_КЛЮЧОВЕ_ВРАТА':     String(contract.keys_door || 1),
+    'БРОЙ_КЛЮЧОВЕ_ЧИП':       String(contract.keys_chip || 1),
+    'СЪСТОЯНИЕ_ИМОТА':        contract.property_state || 'След направен ремонт с напълно изправни и функциониращи уреди',
+    'ИНВЕНТАР':               contract.inventory || '',
   };
 }
 
@@ -141,9 +169,15 @@ function amountToWords(n) {
 }
 
 // Generate PDF from template text
-function generateContractPDF(contract, template, issuer, photos = []) {
+// opts.appendProtocol — append the bundled handover protocol after signatures (default true for contracts)
+// opts.includeSignatures — render the two-column signature block at the bottom (default true)
+// opts.filenamePrefix — file prefix (default "contract"; use "protocol" for standalone)
+function generateContractPDF(contract, template, issuer, photos = [], opts = {}) {
+  const appendProtocol     = opts.appendProtocol     !== false;
+  const includeSignatures  = opts.includeSignatures  !== false;
+  const filenamePrefix     = opts.filenamePrefix     || 'contract';
   return new Promise((resolve, reject) => {
-    const filename = `contract_${contract.contract_number.replace(/[^a-zA-Z0-9]/g,'-')}.pdf`;
+    const filename = `${filenamePrefix}_${contract.contract_number.replace(/[^a-zA-Z0-9]/g,'-')}.pdf`;
     const filepath = path.join(PDF_DIR, filename);
 
     const fields  = buildFields(contract, issuer);
@@ -296,28 +330,32 @@ function generateContractPDF(contract, template, issuer, photos = []) {
       renderLine(line);
     }
 
-    // Signature block
-    doc.moveDown(2);
-    if (doc.y > PH - FOOTER_H - 80) { doc.addPage(); }
-    const sigY = doc.y;
-    const col  = PW / 2 - 15;
+    // Signature block (optional)
+    if (includeSignatures) {
+      doc.moveDown(2);
+      if (doc.y > PH - FOOTER_H - 80) { doc.addPage(); }
+      const sigY = doc.y;
+      const col  = PW / 2 - 15;
 
-    doc.font('B').fontSize(9).fillColor('#111827')
-       .text('НАЕМОДАТЕЛ / LANDLORD:', ML, sigY, { width: col, lineBreak: false });
-    doc.font('B').fontSize(9).fillColor('#111827')
-       .text('НАЕМАТЕЛ / TENANT:', ML + PW / 2, sigY, { width: col, lineBreak: false });
+      doc.font('B').fontSize(9).fillColor('#111827')
+         .text('НАЕМОДАТЕЛ:', ML, sigY, { width: col, lineBreak: false });
+      doc.font('B').fontSize(9).fillColor('#111827')
+         .text('НАЕМАТЕЛ:', ML + PW / 2, sigY, { width: col, lineBreak: false });
 
-    const lineY = sigY + 45;
-    doc.moveTo(ML,           lineY).lineTo(ML + col,       lineY).lineWidth(0.7).strokeColor('#374151').stroke();
-    doc.moveTo(ML + PW / 2, lineY).lineTo(ML + PW,         lineY).lineWidth(0.7).strokeColor('#374151').stroke();
+      const lineY = sigY + 45;
+      doc.moveTo(ML,           lineY).lineTo(ML + col,       lineY).lineWidth(0.7).strokeColor('#374151').stroke();
+      doc.moveTo(ML + PW / 2, lineY).lineTo(ML + PW,         lineY).lineWidth(0.7).strokeColor('#374151').stroke();
 
-    doc.font('R').fontSize(8).fillColor('#6b7280')
-       .text(contract.landlord_name || issuer.name || '', ML, lineY + 5, { width: col, align: 'center', lineBreak: false });
-    doc.font('R').fontSize(8).fillColor('#6b7280')
-       .text(contract.tenant_name || '', ML + PW / 2, lineY + 5, { width: col, align: 'center', lineBreak: false });
+      doc.font('R').fontSize(8).fillColor('#6b7280')
+         .text(contract.landlord_name || issuer.name || '', ML, lineY + 5, { width: col, align: 'center', lineBreak: false });
+      doc.font('R').fontSize(8).fillColor('#6b7280')
+         .text(contract.tenant_name || '', ML + PW / 2, lineY + 5, { width: col, align: 'center', lineBreak: false });
+    }
 
-    // ── Appendix: Приемо-предавателен протокол ──────────────────
-    appendHandoverProtocol(doc, contract, issuer, photos, ML, MR, PW, HEADER_H);
+    // ── Appendix: Приемо-предавателен протокол (опционално) ─────
+    if (appendProtocol) {
+      appendHandoverProtocol(doc, contract, issuer, photos, ML, MR, PW, HEADER_H);
+    }
 
     doc.end();
     ws.on('finish', () => resolve({ filepath, filename }));
@@ -957,6 +995,34 @@ module.exports = function(db) {
     if (!fs.existsSync(filepath)) return res.status(404).json({ error: 'PDF не е намерен' });
     res.setHeader('Content-Type', 'application/pdf');
     fs.createReadStream(filepath).pipe(res);
+  });
+
+  // Generate standalone Приемо-предавателен протокол PDF (template-driven)
+  router.get('/:id/protocol/pdf', async (req, res) => {
+    try {
+      const contract = db.prepare('SELECT * FROM contracts WHERE id=?').get(req.params.id);
+      if (!contract) return res.status(404).json({ error: 'Not found' });
+
+      const template = db.prepare("SELECT * FROM contract_templates WHERE name='Приемо-предавателен протокол'").get();
+      if (!template) return res.status(404).json({ error: 'Шаблон "Приемо-предавателен протокол" липсва. Restart сървъра за seed.' });
+
+      const issuer = getIssuer(db);
+      const photos = contract.property_id
+        ? db.prepare('SELECT * FROM property_photos WHERE property_id=? ORDER BY created_at').all(contract.property_id)
+        : [];
+
+      const { filepath } = await generateContractPDF(contract, template, issuer, photos, {
+        appendProtocol: false,
+        includeSignatures: true,
+        filenamePrefix: 'protocol',
+      });
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `inline; filename="protocol_${contract.contract_number}.pdf"`);
+      fs.createReadStream(filepath).pipe(res);
+    } catch (err) {
+      console.error('Protocol PDF error:', err.message);
+      res.status(500).json({ error: err.message });
+    }
   });
 
   // ── Annexes ────────────────────────────────────────────────────────────────

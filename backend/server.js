@@ -4,7 +4,7 @@ const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
 const { initDb } = require('./db/db');
-const { seed, patchMarketVal, seedContractTemplate } = require('./db/seed');
+const { seed, patchMarketVal, seedContractTemplate, seedBgContractTemplate, seedProtocolTemplate } = require('./db/seed');
 
 const app = express();
 const PORT = process.env.PORT || 3002;
@@ -125,10 +125,19 @@ async function main() {
    'tenant_mol TEXT',
    'абонат_ток TEXT','абонат_вода TEXT','абонат_тец TEXT','абонат_вход TEXT',
    'tenant_user_id INTEGER REFERENCES users(id)',
-   'renewal_notice_sent_at DATETIME'
+   'renewal_notice_sent_at DATETIME',
+   "payment_method TEXT DEFAULT 'банков превод'",
+   'pro_rata_amount REAL',
+   'pro_rata_end_date DATE',
+   'keys_door INTEGER DEFAULT 1',
+   'keys_chip INTEGER DEFAULT 1',
+   'property_state TEXT',
+   'inventory TEXT'
   ].forEach(col => { try { db.exec(`ALTER TABLE contracts ADD COLUMN ${col}`); } catch(_) {} });
   console.log('contracts tables ready');
   seedContractTemplate(db);
+  seedBgContractTemplate(db);
+  seedProtocolTemplate(db);
 
   // Rent invoices
   db.exec(`CREATE TABLE IF NOT EXISTS rent_invoices (
