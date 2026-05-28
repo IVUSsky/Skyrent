@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { apiFetch, authUrl } from '../api'
+import InventoryImport from './InventoryImport'
 
 const CATEGORIES = [
   { id: 'мебели',          icon: '🛋️', label: 'Мебели' },
@@ -24,6 +25,7 @@ export default function Inventory({ API, property, onClose }) {
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(true)
   const [editing, setEditing] = useState(null)  // null | item | 'new'
+  const [importing, setImporting] = useState(false)
   const [toast, setToast] = useState(null)
 
   const showToast = (msg, type = 'success') => {
@@ -64,6 +66,10 @@ export default function Inventory({ API, property, onClose }) {
             <p className="text-sm text-gray-500">{property['адрес']}</p>
           </div>
           <div className="flex gap-2">
+            <button onClick={() => setImporting(true)}
+              className="px-3 py-1.5 text-sm font-medium bg-purple-600 hover:bg-purple-700 text-white rounded-lg">
+              🤖 Импорт от фактура
+            </button>
             <button onClick={() => setEditing('new')}
               className="px-3 py-1.5 text-sm font-medium bg-blue-600 hover:bg-blue-700 text-white rounded-lg">
               + Добави
@@ -133,6 +139,14 @@ export default function Inventory({ API, property, onClose }) {
         <ItemEditor API={API} property={property} item={editing === 'new' ? null : editing}
           onClose={() => setEditing(null)}
           onSaved={() => { setEditing(null); load(); showToast('Запазено') }}
+        />
+      )}
+
+      {/* Import from invoice wizard */}
+      {importing && (
+        <InventoryImport API={API} currentPropertyId={property.id}
+          onClose={() => setImporting(false)}
+          onImported={() => { load(); showToast('Импортирано от фактура') }}
         />
       )}
     </div>
