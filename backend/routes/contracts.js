@@ -11,7 +11,8 @@ const FONT_BOLD    = path.join(__dirname, '../fonts/arialbd.ttf');
 const DATA_DIR     = process.env.DATA_DIR || path.join(__dirname, '../data');
 const PDF_DIR      = path.join(DATA_DIR, 'contracts');
 const LOGO_DIR     = path.join(DATA_DIR, 'logos');
-const DEFAULT_LOGO = path.join(LOGO_DIR, 'sky_capital_logo.png');
+const USER_DEFAULT_LOGO = path.join(LOGO_DIR, 'sky_capital_logo.png'); // uploaded via Settings
+const BUNDLED_LOGO      = path.join(__dirname, '../lib/sky_capital_logo.png'); // shipped with code
 [PDF_DIR, LOGO_DIR].forEach(d => { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); });
 
 const storage = multer.diskStorage({
@@ -203,13 +204,14 @@ function generateContractPDF(contract, template, issuer, photos = [], opts = {})
     const PW = doc.page.width - ML - MR;       // printable width
     const PH = doc.page.height;
 
-    // Resolve logo
+    // Resolve logo: template-specific upload → admin-uploaded default → bundled
     const resolvedLogo = (() => {
       if (template.logo_path) {
         const p = path.join(LOGO_DIR, template.logo_path);
         if (fs.existsSync(p)) return p;
       }
-      if (fs.existsSync(DEFAULT_LOGO)) return DEFAULT_LOGO;
+      if (fs.existsSync(USER_DEFAULT_LOGO)) return USER_DEFAULT_LOGO;
+      if (fs.existsSync(BUNDLED_LOGO))      return BUNDLED_LOGO;
       return null;
     })();
 
@@ -789,6 +791,21 @@ module.exports = function(db) {
       const { filepath, filename } = await generateContractPDF(contract, template, issuer, photos);
       contract.pdf_path = filename;
 
+      // Auto-generate standalone Приемо-предавателен протокол PDF
+      let protocolFilename = null;
+      const protocolTmpl = db.prepare("SELECT * FROM contract_templates WHERE name='Приемо-предавателен протокол'").get();
+      if (protocolTmpl) {
+        try {
+          const res = await generateContractPDF(contract, protocolTmpl, issuer, photos, {
+            appendProtocol: false, includeSignatures: true, filenamePrefix: 'protocol',
+          });
+          protocolFilename = res.filename;
+        } catch (e) {
+          console.warn('Protocol auto-gen failed (continuing):', e.message);
+        }
+      }
+      contract.protocol_pdf_path = protocolFilename;
+
       const r = db.prepare(`
         INSERT INTO contracts (template_id, property_id, contract_number, status,
           landlord_type, landlord_name, landlord_address, landlord_egn, landlord_phone, landlord_lk, landlord_lk_date,
@@ -798,8 +815,8 @@ module.exports = function(db) {
           monthly_rent, currency, deposit, payment_day,
           start_date, end_date, delivery_date, conditions, notes,
           абонат_ток, абонат_вода, абонат_тец, абонат_вход,
-          pdf_path)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+          pdf_path, protocol_pdf_path)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       `).run(
         contract.template_id, contract.property_id, contract.contract_number, contract.status,
         contract.landlord_type, contract.landlord_name, contract.landlord_address, contract.landlord_egn,
@@ -810,16 +827,16 @@ module.exports = function(db) {
         contract.monthly_rent, contract.currency, contract.deposit, contract.payment_day,
         contract.start_date, contract.end_date, contract.delivery_date, contract.conditions, contract.notes,
         contract.абонат_ток, contract.абонат_вода, contract.абонат_тец, contract.абонат_вход,
-        filename
+        filename, protocolFilename
       );
 
-      res.status(201).json({ ok: true, id: r.lastInsertRowid, contract_number, filename });
+      res.status(201).json({ ok: true, id: r.lastInsertRowid, contract_number, filename, protocol_filename: protocolFilename });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
   });
 
-  // Regenerate PDF for existing contract
+  // Regenerate PDF for existing contract — also regenerates the standalone protocol
   router.post('/:id/regenerate', async (req, res) => {
     try {
       const contract = db.prepare('SELECT * FROM contracts WHERE id=?').get(req.params.id);
@@ -831,8 +848,21 @@ module.exports = function(db) {
         ? db.prepare('SELECT * FROM property_photos WHERE property_id=? ORDER BY created_at').all(contract.property_id)
         : [];
       const { filename } = await generateContractPDF(contract, template, issuer, photos);
-      db.prepare('UPDATE contracts SET pdf_path=? WHERE id=?').run(filename, contract.id);
-      res.json({ ok: true, filename });
+
+      // Regenerate standalone protocol
+      let protocolFilename = null;
+      const protocolTmpl = db.prepare("SELECT * FROM contract_templates WHERE name='Приемо-предавателен протокол'").get();
+      if (protocolTmpl) {
+        try {
+          const r = await generateContractPDF(contract, protocolTmpl, issuer, photos, {
+            appendProtocol: false, includeSignatures: true, filenamePrefix: 'protocol',
+          });
+          protocolFilename = r.filename;
+        } catch (e) { console.warn('Protocol regenerate failed:', e.message); }
+      }
+
+      db.prepare('UPDATE contracts SET pdf_path=?, protocol_pdf_path=? WHERE id=?').run(filename, protocolFilename, contract.id);
+      res.json({ ok: true, filename, protocol_filename: protocolFilename });
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
 
@@ -997,25 +1027,34 @@ module.exports = function(db) {
     fs.createReadStream(filepath).pipe(res);
   });
 
-  // Generate standalone Приемо-предавателен протокол PDF (template-driven)
+  // Serve standalone Приемо-предавателен протокол PDF.
+  // Reads the stored file (created together with the contract). If missing
+  // (e.g. contract was created before this feature shipped), regenerates on
+  // demand from the template.
   router.get('/:id/protocol/pdf', async (req, res) => {
     try {
       const contract = db.prepare('SELECT * FROM contracts WHERE id=?').get(req.params.id);
       if (!contract) return res.status(404).json({ error: 'Not found' });
 
-      const template = db.prepare("SELECT * FROM contract_templates WHERE name='Приемо-предавателен протокол'").get();
-      if (!template) return res.status(404).json({ error: 'Шаблон "Приемо-предавателен протокол" липсва. Restart сървъра за seed.' });
+      let filename = contract.protocol_pdf_path;
+      let filepath = filename ? path.join(PDF_DIR, filename) : null;
 
-      const issuer = getIssuer(db);
-      const photos = contract.property_id
-        ? db.prepare('SELECT * FROM property_photos WHERE property_id=? ORDER BY created_at').all(contract.property_id)
-        : [];
+      if (!filepath || !fs.existsSync(filepath)) {
+        // Lazy-regenerate for old contracts
+        const template = db.prepare("SELECT * FROM contract_templates WHERE name='Приемо-предавателен протокол'").get();
+        if (!template) return res.status(404).json({ error: 'Шаблон "Приемо-предавателен протокол" липсва.' });
+        const issuer = getIssuer(db);
+        const photos = contract.property_id
+          ? db.prepare('SELECT * FROM property_photos WHERE property_id=? ORDER BY created_at').all(contract.property_id)
+          : [];
+        const r = await generateContractPDF(contract, template, issuer, photos, {
+          appendProtocol: false, includeSignatures: true, filenamePrefix: 'protocol',
+        });
+        filename = r.filename;
+        filepath = r.filepath;
+        db.prepare('UPDATE contracts SET protocol_pdf_path=? WHERE id=?').run(filename, contract.id);
+      }
 
-      const { filepath } = await generateContractPDF(contract, template, issuer, photos, {
-        appendProtocol: false,
-        includeSignatures: true,
-        filenamePrefix: 'protocol',
-      });
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `inline; filename="protocol_${contract.contract_number}.pdf"`);
       fs.createReadStream(filepath).pipe(res);

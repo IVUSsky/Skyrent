@@ -132,7 +132,8 @@ async function main() {
    'keys_door INTEGER DEFAULT 1',
    'keys_chip INTEGER DEFAULT 1',
    'property_state TEXT',
-   'inventory TEXT'
+   'inventory TEXT',
+   'protocol_pdf_path TEXT'
   ].forEach(col => { try { db.exec(`ALTER TABLE contracts ADD COLUMN ${col}`); } catch(_) {} });
   console.log('contracts tables ready');
   seedContractTemplate(db);
