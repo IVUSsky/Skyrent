@@ -217,7 +217,7 @@ module.exports = function(db) {
 Ако quantity > 1, повтори артикула N пъти като отделни items (за да може admin да ги припише на различни апартаменти).`;
 
       const response = await client.messages.create({
-        model: 'claude-sonnet-4-6-20251001',
+        model: 'claude-sonnet-4-6',
         max_tokens: 8000,
         messages: [{
           role: 'user',
