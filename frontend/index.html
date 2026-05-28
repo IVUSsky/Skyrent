@@ -2,11 +2,35 @@
 <html lang="bg">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Портфолио Имоти</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>Sky Rent</title>
+
+    <!-- PWA: manifest + theme -->
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="theme-color" content="#1a1a2e" />
+    <meta name="description" content="Sky Capital — портал за наематели" />
+
+    <!-- iOS PWA support -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Sky Rent" />
+    <link rel="apple-touch-icon" href="/sky_capital_logo.png" />
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/png" href="/sky_capital_logo.png" />
   </head>
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
+    <script>
+      // Register service worker (PWA install + offline cache)
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js').catch((err) => {
+            console.warn('SW registration failed:', err);
+          });
+        });
+      }
+    </script>
   </body>
 </html>

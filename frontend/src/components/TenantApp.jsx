@@ -17,6 +17,48 @@ export default function TenantApp({ userName, onLogout, mustChangePassword }) {
   const [loading, setLoading] = useState(true)
   const [showPwd, setShowPwd] = useState(!!mustChangePassword)
   const [toast, setToast] = useState(null)
+  const [installPrompt, setInstallPrompt] = useState(null)
+  const [showInstallBanner, setShowInstallBanner] = useState(false)
+
+  // PWA install — capture beforeinstallprompt for Android/Chrome
+  useEffect(() => {
+    const handler = (e) => {
+      e.preventDefault()
+      setInstallPrompt(e)
+      // Only show banner if user hasn't dismissed it before
+      if (!localStorage.getItem('skyrent_install_dismissed')) {
+        setShowInstallBanner(true)
+      }
+    }
+    window.addEventListener('beforeinstallprompt', handler)
+    return () => window.removeEventListener('beforeinstallprompt', handler)
+  }, [])
+
+  // iOS install hint — Safari doesn't fire beforeinstallprompt
+  useEffect(() => {
+    const isIos = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream
+    const isInStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone
+    if (isIos && !isInStandalone && !localStorage.getItem('skyrent_install_dismissed')) {
+      setShowInstallBanner(true)
+    }
+  }, [])
+
+  const isIos = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream
+
+  const triggerInstall = async () => {
+    if (installPrompt) {
+      installPrompt.prompt()
+      const { outcome } = await installPrompt.userChoice
+      setInstallPrompt(null)
+      setShowInstallBanner(false)
+      if (outcome === 'accepted') localStorage.setItem('skyrent_install_dismissed', '1')
+    }
+  }
+
+  const dismissInstall = () => {
+    setShowInstallBanner(false)
+    localStorage.setItem('skyrent_install_dismissed', '1')
+  }
 
   const loadMe = () => {
     setLoading(true)
@@ -74,6 +116,39 @@ export default function TenantApp({ userName, onLogout, mustChangePassword }) {
 
   return (
     <div className="min-h-screen pb-20" style={{ background: '#f0f2f8' }}>
+      {/* PWA install banner */}
+      {showInstallBanner && (
+        <div className="bg-blue-600 text-white px-4 py-3 text-sm">
+          <div className="max-w-2xl mx-auto flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2 flex-1 min-w-0">
+              <span className="text-xl">📱</span>
+              <div className="min-w-0">
+                <div className="font-semibold">Инсталирай приложението</div>
+                {isIos ? (
+                  <div className="text-xs opacity-90">
+                    В Safari натисни <strong>Share</strong> → <strong>Add to Home Screen</strong>
+                  </div>
+                ) : (
+                  <div className="text-xs opacity-90">Бърз достъп от началния екран на телефона</div>
+                )}
+              </div>
+            </div>
+            <div className="flex gap-2 shrink-0">
+              {installPrompt && !isIos && (
+                <button onClick={triggerInstall}
+                  className="bg-white text-blue-700 text-xs font-semibold px-3 py-1.5 rounded-lg">
+                  Инсталирай
+                </button>
+              )}
+              <button onClick={dismissInstall}
+                className="text-white text-xs opacity-80 hover:opacity-100 px-2">
+                ✕
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Toast notifications */}
       {toast && (
         <div
