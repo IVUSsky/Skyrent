@@ -173,10 +173,14 @@ function amountToWords(n) {
 // opts.appendProtocol — append the bundled handover protocol after signatures (default true for contracts)
 // opts.includeSignatures — render the two-column signature block at the bottom (default true)
 // opts.filenamePrefix — file prefix (default "contract"; use "protocol" for standalone)
+// opts.appendInventory — append the property inventory list (grouped by category) (default false; true for protocols)
+// opts.inventory — pre-fetched property_inventory items (with photos array per item)
 function generateContractPDF(contract, template, issuer, photos = [], opts = {}) {
   const appendProtocol     = opts.appendProtocol     !== false;
   const includeSignatures  = opts.includeSignatures  !== false;
   const filenamePrefix     = opts.filenamePrefix     || 'contract';
+  const appendInventory    = opts.appendInventory    === true;
+  const inventoryItems     = opts.inventory          || [];
   return new Promise((resolve, reject) => {
     const filename = `${filenamePrefix}_${contract.contract_number.replace(/[^a-zA-Z0-9]/g,'-')}.pdf`;
     const filepath = path.join(PDF_DIR, filename);
@@ -354,6 +358,11 @@ function generateContractPDF(contract, template, issuer, photos = [], opts = {})
          .text(contract.tenant_name || '', ML + PW / 2, lineY + 5, { width: col, align: 'center', lineBreak: false });
     }
 
+    // ── Inventory + photos (auto-appended for protocol PDFs) ──────
+    if (appendInventory) {
+      appendInventoryAndPhotos(doc, inventoryItems, photos, ML, PW, HEADER_H, PH, FOOTER_H);
+    }
+
     // ── Appendix: Приемо-предавателен протокол (опционално) ─────
     if (appendProtocol) {
       appendHandoverProtocol(doc, contract, issuer, photos, ML, MR, PW, HEADER_H);
@@ -365,7 +374,156 @@ function generateContractPDF(contract, template, issuer, photos = [], opts = {})
   });
 }
 
-const PHOTOS_DIR = path.join(DATA_DIR, 'property_photos');
+const PHOTOS_DIR    = path.join(DATA_DIR, 'property_photos');
+const INVENTORY_DIR = path.join(DATA_DIR, 'inventory_files');
+
+const CAT_LABELS = {
+  'мебели':       '🛋️ Мебели',
+  'бяла техника': '🧊 Бяла техника',
+  'малки уреди':  '☕ Малки уреди',
+  'вик':          '🚿 ВиК',
+  'електро':      '⚡ Електро',
+  'друго':        '📦 Друго',
+};
+
+function fmtItemDate(s) {
+  if (!s) return '';
+  try {
+    const d = new Date(s);
+    return `${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}.${d.getFullYear()}`;
+  } catch { return s; }
+}
+
+// Append the property inventory list (grouped by category, with thumbnails)
+// and the property photos grid to the current PDF document. Used by the
+// standalone protocol generator. Sky logo header is drawn automatically via
+// the pageAdded listener registered by generateContractPDF.
+function appendInventoryAndPhotos(doc, inventory, photos, ML, PW, HEADER_H, PH, FOOTER_H) {
+  // Always start the inventory section on a fresh page so layout is predictable
+  if (inventory && inventory.length > 0) {
+    doc.addPage();
+    let y = HEADER_H + 10;
+
+    doc.font('B').fontSize(13).fillColor('#0e3d52')
+       .text('ОПИС НА ОБЗАВЕЖДАНЕТО', ML, y, { width: PW, align: 'center' });
+    y += 20;
+    doc.moveTo(ML, y).lineTo(ML + PW, y).lineWidth(0.5).strokeColor('#4AABCC').stroke();
+    y += 12;
+
+    // Group items by category preserving the canonical order
+    const order = Object.keys(CAT_LABELS);
+    const seen = new Set();
+    const groups = [];
+    for (const cat of order) {
+      const items = inventory.filter(i => i.category === cat);
+      if (items.length > 0) {
+        groups.push({ category: cat, items });
+        seen.add(cat);
+      }
+    }
+    // Fallback: any items with categories not in our list go under "Друго"
+    const orphan = inventory.filter(i => !seen.has(i.category));
+    if (orphan.length > 0) groups.push({ category: 'друго', items: orphan });
+
+    for (const group of groups) {
+      // Section header
+      if (y > PH - FOOTER_H - 60) { doc.addPage(); y = HEADER_H + 10; }
+      doc.font('B').fontSize(10.5).fillColor('#374151')
+         .text(CAT_LABELS[group.category] || group.category, ML, y, { width: PW });
+      y = doc.y + 4;
+      doc.moveTo(ML, y).lineTo(ML + PW, y).lineWidth(0.3).strokeColor('#d1d5db').stroke();
+      y += 6;
+
+      for (const item of group.items) {
+        const rowH = 56;
+        if (y > PH - FOOTER_H - rowH - 10) { doc.addPage(); y = HEADER_H + 10; }
+
+        // Thumbnail (first photo if any)
+        const firstPhoto = (item.photos || []).find(f => f.type === 'photo');
+        const thumbX = ML;
+        const thumbW = 56;
+        const thumbH = 48;
+        if (firstPhoto) {
+          const fp = path.join(INVENTORY_DIR, firstPhoto.filename);
+          if (fs.existsSync(fp)) {
+            try { doc.image(fp, thumbX, y, { fit: [thumbW, thumbH] }); } catch(_) {}
+          }
+        } else {
+          doc.rect(thumbX, y, thumbW, thumbH).lineWidth(0.3).strokeColor('#e5e7eb').stroke();
+          doc.font('R').fontSize(7).fillColor('#9ca3af')
+             .text('без снимка', thumbX, y + thumbH/2 - 4, { width: thumbW, align: 'center', lineBreak: false });
+        }
+
+        // Item details to the right
+        const textX = thumbX + thumbW + 10;
+        const textW = PW - thumbW - 10;
+        doc.font('B').fontSize(10).fillColor('#111827')
+           .text(item.name, textX, y, { width: textW, lineBreak: false });
+
+        const subParts = [];
+        if (item.brand)         subParts.push(item.brand);
+        if (item.model)         subParts.push(item.model);
+        if (item.serial_number) subParts.push(`S/N: ${item.serial_number}`);
+        doc.font('R').fontSize(8.5).fillColor('#6b7280')
+           .text(subParts.join(' · ') || '—', textX, y + 13, { width: textW, lineBreak: false });
+
+        const dateParts = [];
+        if (item.purchase_date) dateParts.push(`Купено: ${fmtItemDate(item.purchase_date)}`);
+        if (item.warranty_end)  dateParts.push(`🛡️ Гаранция до: ${fmtItemDate(item.warranty_end)}`);
+        if (item.purchase_price) dateParts.push(`${Number(item.purchase_price).toFixed(2)} EUR`);
+        if (dateParts.length) {
+          doc.font('R').fontSize(8).fillColor('#9ca3af')
+             .text(dateParts.join(' · '), textX, y + 26, { width: textW, lineBreak: false });
+        }
+        if (item.notes) {
+          doc.font('R').fontSize(8).fillColor('#4b5563')
+             .text(item.notes, textX, y + 38, { width: textW, lineBreak: false, ellipsis: true });
+        }
+
+        y += rowH;
+        doc.moveTo(ML, y - 2).lineTo(ML + PW, y - 2).lineWidth(0.2).strokeColor('#f3f4f6').stroke();
+      }
+      y += 8;
+    }
+
+    // Inventory summary
+    if (y > PH - FOOTER_H - 30) { doc.addPage(); y = HEADER_H + 10; }
+    doc.font('R').fontSize(8).fillColor('#374151')
+       .text(`Общо артикули: ${inventory.length}`, ML, y, { width: PW });
+    y += 14;
+    doc.font('R').fontSize(7.5).fillColor('#6b7280')
+       .text(
+         'С полагането на подписите страните декларират, че всички артикули са в добро състояние и без видими забележки, освен описаните по-горе.',
+         ML, y, { width: PW, align: 'justify' }
+       );
+  }
+
+  // Property photos grid
+  if (photos && photos.length > 0) {
+    doc.addPage();
+    let y = HEADER_H + 10;
+
+    doc.font('B').fontSize(13).fillColor('#0e3d52')
+       .text('СНИМКОВ МАТЕРИАЛ НА ИМОТА', ML, y, { width: PW, align: 'center' });
+    y += 20;
+    doc.moveTo(ML, y).lineTo(ML + PW, y).lineWidth(0.5).strokeColor('#4AABCC').stroke();
+    y += 12;
+
+    const IMG_W = (PW - 10) / 2;
+    const IMG_H = IMG_W * 0.67;
+    let col = 0;
+
+    for (const photo of photos) {
+      const fp = path.join(PHOTOS_DIR, photo.filename);
+      if (!fs.existsSync(fp)) continue;
+      if (col === 0 && y + IMG_H > PH - FOOTER_H - 10) { doc.addPage(); y = HEADER_H + 10; }
+      const x = ML + col * (IMG_W + 10);
+      try { doc.image(fp, x, y, { fit: [IMG_W, IMG_H] }); } catch(_) {}
+      col++;
+      if (col === 2) { col = 0; y += IMG_H + 10; }
+    }
+  }
+}
 
 function appendHandoverProtocol(doc, contract, issuer, photos, ML, MR, PW, HEADER_H) {
   doc.addPage();
@@ -796,8 +954,16 @@ module.exports = function(db) {
       const protocolTmpl = db.prepare("SELECT * FROM contract_templates WHERE name='Приемо-предавателен протокол'").get();
       if (protocolTmpl) {
         try {
+          // Load inventory + files for the property so we can append items
+          const invItems = property_id
+            ? db.prepare(`SELECT * FROM property_inventory WHERE property_id=? ORDER BY category, sort_order, name`).all(property_id)
+            : [];
+          for (const it of invItems) {
+            it.photos = db.prepare(`SELECT id, type, filename, original_name FROM inventory_files WHERE inventory_id=? AND type='photo'`).all(it.id);
+          }
           const res = await generateContractPDF(contract, protocolTmpl, issuer, photos, {
             appendProtocol: false, includeSignatures: true, filenamePrefix: 'protocol',
+            appendInventory: true, inventory: invItems,
           });
           protocolFilename = res.filename;
         } catch (e) {
@@ -849,13 +1015,20 @@ module.exports = function(db) {
         : [];
       const { filename } = await generateContractPDF(contract, template, issuer, photos);
 
-      // Regenerate standalone protocol
+      // Regenerate standalone protocol (with inventory + photos)
       let protocolFilename = null;
       const protocolTmpl = db.prepare("SELECT * FROM contract_templates WHERE name='Приемо-предавателен протокол'").get();
       if (protocolTmpl) {
         try {
+          const invItems = contract.property_id
+            ? db.prepare(`SELECT * FROM property_inventory WHERE property_id=? ORDER BY category, sort_order, name`).all(contract.property_id)
+            : [];
+          for (const it of invItems) {
+            it.photos = db.prepare(`SELECT id, type, filename, original_name FROM inventory_files WHERE inventory_id=? AND type='photo'`).all(it.id);
+          }
           const r = await generateContractPDF(contract, protocolTmpl, issuer, photos, {
             appendProtocol: false, includeSignatures: true, filenamePrefix: 'protocol',
+            appendInventory: true, inventory: invItems,
           });
           protocolFilename = r.filename;
         } catch (e) { console.warn('Protocol regenerate failed:', e.message); }
@@ -1047,8 +1220,15 @@ module.exports = function(db) {
         const photos = contract.property_id
           ? db.prepare('SELECT * FROM property_photos WHERE property_id=? ORDER BY created_at').all(contract.property_id)
           : [];
+        const invItems = contract.property_id
+          ? db.prepare(`SELECT * FROM property_inventory WHERE property_id=? ORDER BY category, sort_order, name`).all(contract.property_id)
+          : [];
+        for (const it of invItems) {
+          it.photos = db.prepare(`SELECT id, type, filename, original_name FROM inventory_files WHERE inventory_id=? AND type='photo'`).all(it.id);
+        }
         const r = await generateContractPDF(contract, template, issuer, photos, {
           appendProtocol: false, includeSignatures: true, filenamePrefix: 'protocol',
+          appendInventory: true, inventory: invItems,
         });
         filename = r.filename;
         filepath = r.filepath;
