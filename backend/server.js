@@ -221,6 +221,37 @@ async function main() {
   )`);
   console.log('tenant_history table ready');
 
+  // Property inventory (furniture, appliances) + files (photos, manuals)
+  db.exec(`CREATE TABLE IF NOT EXISTS property_inventory (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    property_id INTEGER NOT NULL REFERENCES properties(id),
+    category TEXT NOT NULL,
+    name TEXT NOT NULL,
+    brand TEXT DEFAULT '',
+    model TEXT DEFAULT '',
+    serial_number TEXT DEFAULT '',
+    purchase_date DATE,
+    purchase_price REAL,
+    warranty_end DATE,
+    notes TEXT DEFAULT '',
+    common_problems TEXT DEFAULT '',
+    sort_order INTEGER DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+  db.exec(`CREATE TABLE IF NOT EXISTS inventory_files (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    inventory_id INTEGER NOT NULL REFERENCES property_inventory(id),
+    type TEXT NOT NULL,
+    filename TEXT NOT NULL,
+    original_name TEXT DEFAULT '',
+    size INTEGER DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+  try { db.exec("CREATE INDEX IF NOT EXISTS idx_inventory_property ON property_inventory(property_id)"); } catch(_) {}
+  try { db.exec("CREATE INDEX IF NOT EXISTS idx_inventory_files_inv ON inventory_files(inventory_id)"); } catch(_) {}
+  console.log('property_inventory + inventory_files tables ready');
+
   // Property photos
   db.exec(`CREATE TABLE IF NOT EXISTS property_photos (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -317,6 +348,7 @@ async function main() {
   app.use('/api/counterparties', cpRouter);
 
   app.use('/api/smart', require('./routes/smart')(db));
+  app.use('/api/inventory', require('./routes/inventory')(db));
   app.use('/api/tenant', require('./routes/tenant')(db));
 
   // Stripe payments — tenant-facing endpoints mounted under /api/tenant (auth + tenant guard inside)

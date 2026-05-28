@@ -1,5 +1,6 @@
 import { apiFetch, authUrl } from '../api'
 import React, { useState, useEffect, useRef } from 'react'
+import Inventory from './Inventory'
 
 const STATUS_COLORS = {
   '✅': 'bg-green-100 text-green-800',
@@ -25,6 +26,7 @@ export default function Portfolio({ API }) {
   const [tableWidth, setTableWidth] = useState(0)
 
   const [photosProp, setPhotosProp] = useState(null)
+  const [inventoryProp, setInventoryProp] = useState(null)
   const [photos, setPhotos] = useState([])
   const [uploading, setUploading] = useState(false)
   const photoInputRef = React.useRef()
@@ -227,6 +229,11 @@ export default function Portfolio({ API }) {
                           className="text-green-500 hover:text-green-700 hover:bg-green-50 p-1 rounded transition-colors"
                           title="Снимки"
                         >📷</button>
+                        <button
+                          onClick={() => setInventoryProp(p)}
+                          className="text-amber-600 hover:text-amber-800 hover:bg-amber-50 p-1 rounded transition-colors"
+                          title="Обзавеждане / инвентар"
+                        >🛋️</button>
                       </div>
                     </td>
                   </tr>
@@ -549,6 +556,11 @@ export default function Portfolio({ API }) {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Inventory modal */}
+      {inventoryProp && (
+        <Inventory API={API} property={inventoryProp} onClose={() => setInventoryProp(null)} />
       )}
     </div>
   )
