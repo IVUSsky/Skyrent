@@ -109,6 +109,198 @@ function makeStorage() {
   });
 }
 
+// ── Shared AI extract helper ─────────────────────────────────
+// Returns array of result objects (mirrors original /extract-ai response.results)
+async function runAiExtract(db, ids) {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) throw new Error('ANTHROPIC_API_KEY not set');
+
+  let Anthropic;
+  try { Anthropic = require('@anthropic-ai/sdk'); }
+  catch(e) { throw new Error('@anthropic-ai/sdk not installed: ' + e.message); }
+
+  const client = new Anthropic.default({ apiKey });
+  const results = [];
+
+  for (const id of ids) {
+    const inv = db.prepare('SELECT * FROM expense_invoices WHERE id = ?').get(id);
+    if (!inv) { results.push({ id, error: 'Not found' }); continue; }
+    if (inv.status === 'done') { results.push({ id, status: 'skipped' }); continue; }
+
+    db.prepare("UPDATE expense_invoices SET status = 'processing' WHERE id = ?").run(id);
+
+    try {
+      const fp = inv.filepath;
+      if (!fp || !fs.existsSync(fp)) throw new Error('File missing: ' + fp);
+
+      const base64 = fs.readFileSync(fp).toString('base64');
+      const isPdf  = fp.toLowerCase().endsWith('.pdf');
+      const media  = isPdf ? 'application/pdf'
+        : fp.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg';
+
+      const response = await client.messages.create({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 1000,
+        messages: [{
+          role: 'user',
+          content: [
+            { type: isPdf ? 'document' : 'image', source: { type: 'base64', media_type: media, data: base64 } },
+            { type: 'text', text: `Analyze this Bulgarian invoice carefully. Return ONLY a JSON object, nothing else, no markdown.
+
+Extract these fields:
+{
+  "supplier_name": "Company name of the SELLER/supplier (latin letters, max 70 chars)",
+  "supplier_eik": "EIK/Булстат number of supplier if visible",
+  "supplier_iban": "IBAN for payment - copy EXACTLY digit by digit, no spaces",
+  "supplier_bic": "BIC/SWIFT code or empty string",
+  "invoice_number": "Invoice/фактура number",
+  "invoice_date": "Date in YYYY-MM-DD format",
+  "due_date": "Payment due date in YYYY-MM-DD format or empty",
+  "amount_no_vat": numeric value without VAT (данъчна основа),
+  "vat_amount": numeric VAT amount (стойност на ДДС),
+  "amount_total": numeric total amount (сума за плащане) - THIS IS THE MOST IMPORTANT,
+  "currency": "BGN or EUR",
+  "description": "Service/product description in latin max 90 chars",
+  "payment_method": "cash/bank transfer etc"
+}
+
+IMPORTANT RULES:
+- The BUYER is Скай Кепитъл ООД or similar — supplier is the OTHER company
+- For Bulgarian invoices: "Сума за плащане" = total amount to pay
+- Copy IBAN digit by digit very carefully
+- amount_total must be a NUMBER not a string
+- If currency shows EUR but amount shows in лв — use BGN
+- "Словом" field confirms the amount in words — use it to verify
+
+IBAN EXTRACTION RULES - very important:
+- Look for 'IBAN:' label on the invoice
+- Copy EVERY digit and letter exactly, one by one
+- Bulgarian IBANs start with BG and are exactly 22 characters
+- After extracting, count the characters - must be exactly 22
+- Common OCR errors: 0 vs O, 1 vs I, 3 vs 8, 4 vs 9
+- Double-check by re-reading the IBAN from the image` }
+          ]
+        }]
+      });
+
+      let raw = response.content.map(c => c.text||'').join('').trim();
+      const s = raw.indexOf('{'), e = raw.lastIndexOf('}');
+      if (s === -1 || e === -1) throw new Error('No JSON in response');
+      const raw_data = JSON.parse(raw.slice(s, e+1));
+
+      const data = {
+        supplier_name: raw_data.supplier_name || '',
+        supplier_iban: raw_data.supplier_iban || '',
+        supplier_bic:  raw_data.supplier_bic  || '',
+        amount:   raw_data.amount_total ?? raw_data.amount ?? 0,
+        currency: raw_data.currency || 'BGN',
+        reason: [raw_data.description, raw_data.invoice_number]
+          .filter(Boolean).join(' | ').slice(0, 90) || 'PAYMENT',
+        _extra: {
+          eik:          raw_data.supplier_eik    || '',
+          invoice_no:   raw_data.invoice_number  || '',
+          invoice_date: raw_data.invoice_date    || '',
+          due_date:     raw_data.due_date        || '',
+          amount_no_vat:raw_data.amount_no_vat   ?? null,
+          vat_amount:   raw_data.vat_amount      ?? null,
+        },
+      };
+
+      let iban = (data.supplier_iban||'').replace(/\s/g,'').toUpperCase();
+      let bic  = (data.supplier_bic||'').replace(/\s/g,'').toUpperCase();
+      let note = '';
+
+      if (data.supplier_name) {
+        const cp = db.prepare(
+          "SELECT * FROM counterparties WHERE LOWER(name) LIKE ?"
+        ).get('%' + data.supplier_name.toLowerCase().slice(0,10) + '%');
+        if (cp) {
+          const ocrIban = iban;
+          iban = cp.iban || iban;
+          bic  = cp.bic  || bic;
+          note = ocrIban && ocrIban !== cp.iban
+            ? `Контрагент от база (OCR IBAN: ${ocrIban})`
+            : 'Контрагент от база';
+        }
+      }
+
+      if (!validateIBAN(iban) && iban) note = (note ? note+'; ' : '') + '⚠ IBAN невалиден';
+
+      if (validateIBAN(iban) && data.supplier_name && iban) {
+        const ex = db.prepare('SELECT id FROM counterparties WHERE iban = ?').get(iban);
+        if (!ex) db.prepare('INSERT OR IGNORE INTO counterparties (name, iban, bic, currency) VALUES (?, ?, ?, ?)').run(
+          data.supplier_name, iban, bic, data.currency || 'BGN'
+        );
+      }
+
+      // Auto-categorize from tx_rules
+      let autoCategory = null;
+      let autoPropertyId = null;
+      if (data.supplier_name) {
+        const supplierLower = data.supplier_name.toLowerCase();
+        const allRules = db.prepare('SELECT * FROM tx_rules').all();
+        for (const rule of allRules) {
+          if (rule.pattern && supplierLower.includes(rule.pattern.toLowerCase())) {
+            autoCategory = rule.категория;
+            autoPropertyId = rule.property_id;
+            note = (note ? note + '; ' : '') + `Авто-категория от правило: ${rule.категория}`;
+            break;
+          }
+        }
+      }
+
+      let detectedМесец = null;
+      if (data._extra.invoice_date && /^\d{4}-\d{2}/.test(data._extra.invoice_date)) {
+        detectedМесец = data._extra.invoice_date.slice(0, 7);
+      }
+
+      const extraNote = [
+        note,
+        data._extra.invoice_no   ? `Фактура: ${data._extra.invoice_no}`     : '',
+        data._extra.invoice_date ? `Дата: ${data._extra.invoice_date}`       : '',
+        data._extra.due_date     ? `Падеж: ${data._extra.due_date}`          : '',
+        data._extra.eik          ? `ЕИК: ${data._extra.eik}`                 : '',
+        data._extra.amount_no_vat != null ? `Основа: ${data._extra.amount_no_vat}` : '',
+        data._extra.vat_amount   != null  ? `ДДС: ${data._extra.vat_amount}`       : '',
+      ].filter(Boolean).join(' | ').slice(0, 500) || null;
+
+      const updates = [
+        "status='done'", 'supplier_name=?', 'supplier_iban=?', 'supplier_bic=?',
+        'amount=?', 'currency=?', 'reason=?', 'ai_notes=?',
+        'invoice_number=?', 'invoice_date=?', 'supplier_eik=?', 'amount_no_vat=?', 'vat_amount=?'
+      ];
+      const params = [
+        data.supplier_name, iban, bic,
+        data.amount, data.currency||'BGN', data.reason, extraNote,
+        data._extra.invoice_no   || null,
+        data._extra.invoice_date || null,
+        data._extra.eik          || null,
+        data._extra.amount_no_vat ?? null,
+        data._extra.vat_amount    ?? null,
+      ];
+      if (detectedМесец) { updates.push('месец=?'); params.push(detectedМесец); }
+      if (autoCategory)  { updates.push('expense_category=?'); params.push(autoCategory); }
+      if (autoPropertyId){ updates.push('property_id=?');      params.push(autoPropertyId); }
+      params.push(id);
+
+      db.prepare(`UPDATE expense_invoices SET ${updates.join(', ')} WHERE id=?`).run(...params);
+
+      results.push({
+        id, status: 'done',
+        supplier_name: data.supplier_name,
+        amount: data.amount,
+        auto_category: autoCategory,
+        месец: detectedМесец,
+      });
+    } catch(err) {
+      db.prepare("UPDATE expense_invoices SET status='error', ai_notes=? WHERE id=?")
+        .run(String(err.message).slice(0, 500), id);
+      results.push({ id, status: 'error', error: err.message });
+    }
+  }
+  return results;
+}
+
 // ── Module export ─────────────────────────────────────────────
 module.exports = function(db) {
   const expRouter  = express.Router();
@@ -117,20 +309,49 @@ module.exports = function(db) {
 
   // ═══ EXPENSES ═══════════════════════════════════════════════
 
-  // POST /upload
+  // POST /upload?source=e-invoice (default 'manual')
   expRouter.post('/upload', upload.array('files'), (req, res) => {
     if (!req.files?.length) return res.status(400).json({ error: 'No files' });
+    const source = (req.query.source || req.body.source || 'manual').slice(0, 30);
     const now = new Date();
     const месец = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
     const inserted = req.files.map(f => {
       let orig;
       try { orig = Buffer.from(f.originalname, 'latin1').toString('utf8'); } catch(_) { orig = f.originalname; }
       const r = db.prepare(
-        'INSERT INTO expense_invoices (filename, filepath, status, месец) VALUES (?, ?, ?, ?)'
-      ).run(orig, f.path, 'pending', месец);
-      return { id: r.lastInsertRowid, filename: orig, status: 'pending', месец };
+        'INSERT INTO expense_invoices (filename, filepath, status, месец, source) VALUES (?, ?, ?, ?, ?)'
+      ).run(orig, f.path, 'pending', месец, source);
+      return { id: r.lastInsertRowid, filename: orig, status: 'pending', месец, source };
     });
     res.json({ uploaded: inserted });
+  });
+
+  // POST /bulk-import — upload + immediately trigger AI extract (for Playwright/e-invoice automation)
+  // Returns { uploaded: [...], extracted: [...] }
+  expRouter.post('/bulk-import', upload.array('files'), async (req, res) => {
+    if (!req.files?.length) return res.status(400).json({ error: 'No files' });
+    const source = (req.query.source || req.body.source || 'e-invoice').slice(0, 30);
+    const now = new Date();
+    const месец = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+
+    const uploaded = req.files.map(f => {
+      let orig;
+      try { orig = Buffer.from(f.originalname, 'latin1').toString('utf8'); } catch(_) { orig = f.originalname; }
+      const r = db.prepare(
+        'INSERT INTO expense_invoices (filename, filepath, status, месец, source) VALUES (?, ?, ?, ?, ?)'
+      ).run(orig, f.path, 'pending', месец, source);
+      return { id: r.lastInsertRowid, filename: orig };
+    });
+
+    // Auto-trigger AI extract for all uploaded files
+    const ids = uploaded.map(u => u.id);
+    try {
+      const ext = await runAiExtract(db, ids);
+      res.json({ uploaded, extracted: ext, source });
+    } catch (err) {
+      // If AI fails, still return uploaded so files are not lost
+      res.json({ uploaded, extracted: [], error: err.message, source });
+    }
   });
 
   // POST /manual — ръчен разход (в брой / касова бележка)
@@ -167,168 +388,12 @@ module.exports = function(db) {
   expRouter.post('/extract-ai', async (req, res) => {
     const { ids } = req.body || {};
     if (!ids?.length) return res.status(400).json({ error: 'ids required' });
-
-    const apiKey = process.env.ANTHROPIC_API_KEY;
-    if (!apiKey) return res.status(400).json({ error: 'ANTHROPIC_API_KEY not set' });
-
-    let Anthropic;
-    try { Anthropic = require('@anthropic-ai/sdk'); }
-    catch(e) { return res.status(500).json({ error: '@anthropic-ai/sdk not installed: ' + e.message }); }
-
-    const client = new Anthropic.default({ apiKey });
-    const results = [];
-
-    for (const id of ids) {
-      const inv = db.prepare('SELECT * FROM expense_invoices WHERE id = ?').get(id);
-      if (!inv) { results.push({ id, error: 'Not found' }); continue; }
-      if (inv.status === 'done') { results.push({ id, status: 'skipped' }); continue; }
-
-      db.prepare("UPDATE expense_invoices SET status = 'processing' WHERE id = ?").run(id);
-
-      try {
-        const fp = inv.filepath;
-        if (!fp || !fs.existsSync(fp)) throw new Error('File missing: ' + fp);
-
-        const base64 = fs.readFileSync(fp).toString('base64');
-        const isPdf  = fp.toLowerCase().endsWith('.pdf');
-        const media  = isPdf ? 'application/pdf'
-          : fp.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg';
-
-        const response = await client.messages.create({
-          model: 'claude-sonnet-4-20250514',
-          max_tokens: 1000,
-          messages: [{
-            role: 'user',
-            content: [
-              { type: isPdf ? 'document' : 'image', source: { type: 'base64', media_type: media, data: base64 } },
-              { type: 'text', text: `Analyze this Bulgarian invoice carefully. Return ONLY a JSON object, nothing else, no markdown.
-
-Extract these fields:
-{
-  "supplier_name": "Company name of the SELLER/supplier (latin letters, max 70 chars)",
-  "supplier_eik": "EIK/Булстат number of supplier if visible",
-  "supplier_iban": "IBAN for payment - copy EXACTLY digit by digit, no spaces",
-  "supplier_bic": "BIC/SWIFT code or empty string",
-  "invoice_number": "Invoice/фактура number",
-  "invoice_date": "Date in YYYY-MM-DD format",
-  "due_date": "Payment due date in YYYY-MM-DD format or empty",
-  "amount_no_vat": numeric value without VAT (данъчна основа),
-  "vat_amount": numeric VAT amount (стойност на ДДС),
-  "amount_total": numeric total amount (сума за плащане) - THIS IS THE MOST IMPORTANT,
-  "currency": "BGN or EUR",
-  "description": "Service/product description in latin max 90 chars",
-  "payment_method": "cash/bank transfer etc"
-}
-
-IMPORTANT RULES:
-- The BUYER is Скай Кепитъл ООД or similar — supplier is the OTHER company
-- For Bulgarian invoices: "Сума за плащане" = total amount to pay
-- Copy IBAN digit by digit very carefully
-- amount_total must be a NUMBER not a string
-- If currency shows EUR but amount shows in лв — use BGN
-- "Словом" field confirms the amount in words — use it to verify
-
-IBAN EXTRACTION RULES - very important:
-- Look for 'IBAN:' label on the invoice
-- Copy EVERY digit and letter exactly, one by one
-- Bulgarian IBANs start with BG and are exactly 22 characters
-- After extracting, count the characters - must be exactly 22
-- Common OCR errors: 0 vs O, 1 vs I, 3 vs 8, 4 vs 9
-- Double-check by re-reading the IBAN from the image` }
-            ]
-          }]
-        });
-
-        let raw = response.content.map(c => c.text||'').join('').trim();
-        const s = raw.indexOf('{'), e = raw.lastIndexOf('}');
-        if (s === -1 || e === -1) throw new Error('No JSON in response');
-        const raw_data = JSON.parse(raw.slice(s, e+1));
-
-        // Normalize: map new fields to internal schema
-        const data = {
-          supplier_name: raw_data.supplier_name || '',
-          supplier_iban: raw_data.supplier_iban || '',
-          supplier_bic:  raw_data.supplier_bic  || '',
-          // amount_total takes priority over amount
-          amount:   raw_data.amount_total ?? raw_data.amount ?? 0,
-          currency: raw_data.currency || 'BGN',
-          // build reason from description + invoice_number
-          reason: [raw_data.description, raw_data.invoice_number]
-            .filter(Boolean).join(' | ').slice(0, 90) || 'PAYMENT',
-          // extra fields stored in ai_notes
-          _extra: {
-            eik:          raw_data.supplier_eik    || '',
-            invoice_no:   raw_data.invoice_number  || '',
-            invoice_date: raw_data.invoice_date    || '',
-            due_date:     raw_data.due_date        || '',
-            amount_no_vat:raw_data.amount_no_vat   ?? null,
-            vat_amount:   raw_data.vat_amount      ?? null,
-          },
-        };
-
-        let iban = (data.supplier_iban||'').replace(/\s/g,'').toUpperCase();
-        let bic  = (data.supplier_bic||'').replace(/\s/g,'').toUpperCase();
-        let note = '';
-
-        // Match counterparties
-        if (data.supplier_name) {
-          const cp = db.prepare(
-            "SELECT * FROM counterparties WHERE LOWER(name) LIKE ?"
-          ).get('%' + data.supplier_name.toLowerCase().slice(0,10) + '%');
-          if (cp) {
-            const ocrIban = iban;
-            iban = cp.iban || iban;
-            bic  = cp.bic  || bic;
-            note = ocrIban && ocrIban !== cp.iban
-              ? `Контрагент от база (OCR IBAN: ${ocrIban})`
-              : 'Контрагент от база';
-          }
-        }
-
-        if (!validateIBAN(iban) && iban) note = (note ? note+'; ' : '') + '⚠ IBAN невалиден';
-
-        // Auto-save new valid counterparty
-        if (validateIBAN(iban) && data.supplier_name && iban) {
-          const ex = db.prepare('SELECT id FROM counterparties WHERE iban = ?').get(iban);
-          if (!ex) db.prepare('INSERT OR IGNORE INTO counterparties (name, iban, bic, currency) VALUES (?, ?, ?, ?)').run(
-            data.supplier_name, iban, bic, data.currency || 'BGN'
-          );
-        }
-
-        const extraNote = [
-          note,
-          data._extra.invoice_no   ? `Фактура: ${data._extra.invoice_no}`     : '',
-          data._extra.invoice_date ? `Дата: ${data._extra.invoice_date}`       : '',
-          data._extra.due_date     ? `Падеж: ${data._extra.due_date}`          : '',
-          data._extra.eik          ? `ЕИК: ${data._extra.eik}`                 : '',
-          data._extra.amount_no_vat != null ? `Основа: ${data._extra.amount_no_vat}` : '',
-          data._extra.vat_amount   != null  ? `ДДС: ${data._extra.vat_amount}`       : '',
-        ].filter(Boolean).join(' | ').slice(0, 500) || null;
-
-        db.prepare(`UPDATE expense_invoices SET
-          status='done', supplier_name=?, supplier_iban=?, supplier_bic=?,
-          amount=?, currency=?, reason=?, ai_notes=?,
-          invoice_number=?, invoice_date=?, supplier_eik=?, amount_no_vat=?, vat_amount=?
-          WHERE id=?`
-        ).run(
-          data.supplier_name, iban, bic,
-          data.amount, data.currency||'BGN', data.reason, extraNote,
-          data._extra.invoice_no   || null,
-          data._extra.invoice_date || null,
-          data._extra.eik          || null,
-          data._extra.amount_no_vat ?? null,
-          data._extra.vat_amount    ?? null,
-          id
-        );
-
-        results.push({ id, status: 'done', supplier_name: data.supplier_name, amount: data.amount });
-      } catch(err) {
-        db.prepare("UPDATE expense_invoices SET status='error', ai_notes=? WHERE id=?")
-          .run(err.message.slice(0,200), id);
-        results.push({ id, status: 'error', error: err.message });
-      }
+    try {
+      const results = await runAiExtract(db, ids);
+      return res.json({ results });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
     }
-    res.json({ results });
   });
 
   // GET /?month=&category=&paid=
