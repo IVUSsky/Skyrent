@@ -149,6 +149,8 @@ async function main() {
   )`);
   // Add 'метал' column for multi-metal support (idempotent migrations)
   try { db.exec("ALTER TABLE gold_investments ADD COLUMN метал TEXT DEFAULT 'gold'");   console.log('Migration: added gold_investments.метал'); }   catch(_) {}
+  try { db.exec("ALTER TABLE gold_investments ADD COLUMN source_expense_id INTEGER"); console.log('Migration: added gold_investments.source_expense_id'); } catch(_) {}
+  try { db.exec("CREATE INDEX IF NOT EXISTS idx_gold_inv_expense ON gold_investments(source_expense_id)"); } catch(_) {}
   try { db.exec("ALTER TABLE gold_alerts ADD COLUMN метал TEXT DEFAULT 'gold'");        console.log('Migration: added gold_alerts.метал'); }         catch(_) {}
   try { db.exec("ALTER TABLE gold_price_history ADD COLUMN метал TEXT DEFAULT 'gold'"); console.log('Migration: added gold_price_history.метал'); } catch(_) {}
   try { db.exec("CREATE INDEX IF NOT EXISTS idx_gold_price_date ON gold_price_history(метал, дата DESC)"); } catch(_) {}

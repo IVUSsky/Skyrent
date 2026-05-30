@@ -55,6 +55,7 @@ function MetalDashboard({ API, metal, metalConfig }) {
   const [editAlert, setEditAlert] = useState(null)
   const [openReport, setOpenReport] = useState(null)
   const [generating, setGenerating] = useState(false)
+  const [showImport, setShowImport] = useState(false)
 
   const showToast = (msg, type = 'success') => {
     setToast({ msg, type })
@@ -203,11 +204,17 @@ function MetalDashboard({ API, metal, metalConfig }) {
       {view === 'transactions' && (
         <div className="bg-white rounded-xl shadow border border-gray-100 p-4">
           <div className="flex justify-between items-center mb-3">
-            <h3 className="text-sm font-semibold text-gray-700">Сделки със злато ({transactions.length})</h3>
-            <button onClick={() => { setEditTx(null); setShowTxForm(true) }}
-              className="bg-amber-500 hover:bg-amber-600 text-white text-sm px-3 py-1.5 rounded-lg">
-              + Добави сделка
-            </button>
+            <h3 className="text-sm font-semibold text-gray-700">Сделки със {metalConfig?.label.split(' ')[1] || metal} ({transactions.length})</h3>
+            <div className="flex gap-2">
+              <button onClick={() => setShowImport(true)}
+                className="bg-purple-600 hover:bg-purple-700 text-white text-sm px-3 py-1.5 rounded-lg">
+                📥 Импорт от разходи
+              </button>
+              <button onClick={() => { setEditTx(null); setShowTxForm(true) }}
+                className={`${metalConfig?.accentBg || 'bg-amber-500'} hover:opacity-90 text-white text-sm px-3 py-1.5 rounded-lg`}>
+                + Добави сделка
+              </button>
+            </div>
           </div>
           {transactions.length === 0 ? (
             <div className="text-center text-gray-400 py-8 text-sm">Все още няма сделки</div>
@@ -339,6 +346,10 @@ function MetalDashboard({ API, metal, metalConfig }) {
       {showAlertForm && <AlertForm API={API} metal={metal} alert={editAlert}
         onClose={() => { setShowAlertForm(false); setEditAlert(null) }}
         onSaved={() => { setShowAlertForm(false); setEditAlert(null); loadAll(); showToast('Запазено') }}
+      />}
+      {showImport && <ImportFromExpenses API={API} metal={metal} metalConfig={metalConfig}
+        onClose={() => setShowImport(false)}
+        onImported={(n) => { showToast(`Импортирани ${n} сделки`); loadAll() }}
       />}
       {openReport && <ReportModal report={openReport} onClose={() => setOpenReport(null)} />}
     </div>
@@ -511,6 +522,135 @@ function Field({ label, children }) {
     <div>
       <label className="block text-xs font-medium text-gray-700 mb-1">{label}</label>
       {children}
+    </div>
+  )
+}
+
+function ImportFromExpenses({ API, metal, metalConfig, onClose, onImported }) {
+  const [candidates, setCandidates] = useState(null)
+  const [importing, setImporting] = useState(null) // expense id being processed
+  const [qtys, setQtys] = useState({}) // { [expense_id]: 'oz string' }
+  const [products, setProducts] = useState({})
+  const [err, setErr] = useState(null)
+  const [imported, setImported] = useState(0)
+
+  useEffect(() => {
+    apiFetch(`${API}/api/investments/${metal}/expense-candidates`)
+      .then(r => r.json())
+      .then(d => setCandidates(Array.isArray(d) ? d : []))
+      .catch(() => setCandidates([]))
+  }, [metal])
+
+  const importOne = async (expense) => {
+    const qty = Number(qtys[expense.id])
+    if (!qty || qty <= 0) { setErr(`Въведи количество (oz) за разход #${expense.id}`); return }
+    setImporting(expense.id); setErr(null)
+    try {
+      const r = await apiFetch(`${API}/api/investments/${metal}/import-from-expense`, {
+        method: 'POST',
+        body: JSON.stringify({
+          expense_id: expense.id,
+          количество: qty,
+          продукт: products[expense.id] || '',
+        }),
+      })
+      const d = await r.json()
+      if (!r.ok) { setErr(d.error || 'Грешка'); setImporting(null); return }
+      setCandidates(prev => prev.filter(c => c.id !== expense.id))
+      setImported(n => n + 1)
+      setImporting(null)
+    } catch (e) { setErr(e.message); setImporting(null) }
+  }
+
+  const matched = candidates?.filter(c => c._metal_match) || []
+  const other   = candidates?.filter(c => !c._metal_match) || []
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col">
+        <div className="px-6 py-4 border-b flex items-center justify-between">
+          <div>
+            <h3 className="font-bold text-gray-900 text-lg">📥 Импорт от разходи → {metalConfig?.label}</h3>
+            <p className="text-sm text-gray-500">Само разходи с категория "инвестиция" или "благородни метали". Зеленото означава, че описанието съдържа ключова дума за {metalConfig?.label}.</p>
+          </div>
+          <button onClick={() => onClose(imported)} className="text-gray-400 hover:text-gray-600 text-xl">×</button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-6 py-4">
+          {candidates === null ? (
+            <div className="text-center text-gray-400 py-12">Зареждане...</div>
+          ) : candidates.length === 0 ? (
+            <div className="text-center text-gray-400 py-12">
+              <div className="text-4xl mb-2">📭</div>
+              <div>Няма неимпортирани разходи в категория "инвестиция" / "благородни метали".</div>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {matched.length > 0 && <div className="text-xs font-semibold text-green-700 mb-1">🎯 С ключова дума за {metalConfig?.label} ({matched.length})</div>}
+              {matched.map(e => <Row key={e.id} expense={e} matched={true} qtys={qtys} setQtys={setQtys} products={products} setProducts={setProducts} importOne={importOne} importing={importing} metalConfig={metalConfig} />)}
+
+              {other.length > 0 && <div className="text-xs font-semibold text-gray-500 mt-4 mb-1">Други (без явно съвпадение)</div>}
+              {other.map(e => <Row key={e.id} expense={e} matched={false} qtys={qtys} setQtys={setQtys} products={products} setProducts={setProducts} importOne={importOne} importing={importing} metalConfig={metalConfig} />)}
+            </div>
+          )}
+          {err && <div className="mt-3 bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded-lg text-sm">{err}</div>}
+        </div>
+
+        <div className="px-6 py-4 border-t flex justify-between items-center">
+          <div className="text-xs text-gray-500">
+            {imported > 0 && <span className="text-green-700 font-semibold">✓ Импортирани {imported}</span>}
+          </div>
+          <button onClick={() => { if (imported > 0) onImported(imported); onClose() }}
+            className="px-4 py-2 text-sm bg-gray-100 hover:bg-gray-200 rounded-lg">
+            Затвори
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function Row({ expense, matched, qtys, setQtys, products, setProducts, importOne, importing, metalConfig }) {
+  const date = expense.invoice_date || expense.месец || expense.created_at
+  const qty = Number(qtys[expense.id]) || 0
+  const total = Number(expense.amount) || 0
+  const unit = qty > 0 ? total / qty : 0
+  return (
+    <div className={`grid grid-cols-1 md:grid-cols-12 gap-2 p-3 rounded-lg border ${matched ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-200'}`}>
+      <div className="md:col-span-5">
+        <div className="font-medium text-gray-800 truncate">{expense.supplier_name || '— без доставчик'}</div>
+        <div className="text-xs text-gray-500 truncate">{expense.reason || '—'}</div>
+        <div className="text-xs text-gray-400">
+          {date ? new Date(date).toLocaleDateString('bg-BG') : '—'} · Категория: {expense.expense_category} · #{expense.id}
+        </div>
+      </div>
+
+      <div className="md:col-span-2 text-right">
+        <div className="text-xs text-gray-500">Сума</div>
+        <div className="font-semibold text-gray-800">€{total.toFixed(2)}</div>
+      </div>
+
+      <div className="md:col-span-3">
+        <input type="number" step="0.001" min="0.001" value={qtys[expense.id] || ''}
+          onChange={e => setQtys(p => ({ ...p, [expense.id]: e.target.value }))}
+          placeholder="oz"
+          className="w-full border border-gray-300 rounded px-2 py-1 text-sm" />
+        <input type="text" value={products[expense.id] || ''}
+          onChange={e => setProducts(p => ({ ...p, [expense.id]: e.target.value }))}
+          placeholder="Продукт (опционално)"
+          className="w-full border border-gray-300 rounded px-2 py-1 text-xs mt-1" />
+        {qty > 0 && (
+          <div className="text-xs text-gray-500 mt-0.5">→ €{unit.toFixed(2)}/oz</div>
+        )}
+      </div>
+
+      <div className="md:col-span-2 flex items-start justify-end">
+        <button onClick={() => importOne(expense)}
+          disabled={importing === expense.id || !qty}
+          className={`${metalConfig?.accentBg || 'bg-amber-500'} hover:opacity-90 disabled:opacity-40 text-white text-xs font-medium px-3 py-1.5 rounded-lg`}>
+          {importing === expense.id ? '...' : '✓ Импортирай'}
+        </button>
+      </div>
     </div>
   )
 }

@@ -172,6 +172,80 @@ module.exports = function(db) {
     res.json({ ok: true });
   });
 
+  // ── Import from expense_invoices ─────────────────────────────────────────
+  // Lists candidate expenses for the given metal: rows tagged as
+  // 'инвестиция' or 'благородни метали' AND whose supplier_name/reason
+  // contains a keyword for that metal, AND not yet imported.
+  const METAL_KEYWORDS = {
+    gold:   ['злато', 'gold', 'au ', 'au,', '(au)', 'aurum', 'tavex', 'igold'],
+    silver: ['сребро', 'silver', 'ag ', 'ag,', '(ag)', 'argentum'],
+  };
+
+  router.get('/:metal/expense-candidates', validateMetal, (req, res) => {
+    const expenses = db.prepare(`
+      SELECT ei.*
+      FROM expense_invoices ei
+      WHERE ei.expense_category IN ('инвестиция', 'благородни метали')
+        AND ei.id NOT IN (SELECT source_expense_id FROM gold_investments WHERE source_expense_id IS NOT NULL)
+      ORDER BY COALESCE(ei.invoice_date, ei.created_at) DESC
+    `).all();
+
+    const keywords = METAL_KEYWORDS[req.metal] || [];
+    // If no keywords match, still allow admin to import (returns all candidates)
+    const filtered = expenses.map(e => {
+      const haystack = `${e.supplier_name || ''} ${e.reason || ''}`.toLowerCase();
+      const matched = keywords.some(k => haystack.includes(k));
+      return { ...e, _metal_match: matched };
+    });
+
+    // Sort: matched first, then by date desc
+    filtered.sort((a, b) => {
+      if (a._metal_match !== b._metal_match) return b._metal_match - a._metal_match;
+      return 0;
+    });
+
+    res.json(filtered);
+  });
+
+  // POST /:metal/import-from-expense
+  // Body: { expense_id, количество, продукт?, доставчик?, сертификат?, съхранение?, бележка? }
+  // Date/amount come from the expense; admin supplies quantity (oz) so we can
+  // compute unit price. Links source_expense_id so the expense can't be
+  // re-imported.
+  router.post('/:metal/import-from-expense', validateMetal, (req, res) => {
+    const b = req.body || {};
+    const expenseId = Number(b.expense_id);
+    const qty = Number(b.количество);
+    if (!expenseId) return res.status(400).json({ error: 'expense_id е задължителен' });
+    if (!qty || qty <= 0) return res.status(400).json({ error: 'количество (oz) е задължително и > 0' });
+
+    const expense = db.prepare('SELECT * FROM expense_invoices WHERE id=?').get(expenseId);
+    if (!expense) return res.status(404).json({ error: 'Разходът не е намерен' });
+
+    const already = db.prepare('SELECT id FROM gold_investments WHERE source_expense_id=?').get(expenseId);
+    if (already) return res.status(400).json({ error: `Разходът вече е импортиран като сделка #${already.id}` });
+
+    const total = Number(expense.amount) || 0;
+    if (total <= 0) return res.status(400).json({ error: 'Разходът няма валидна сума' });
+    const unitPrice = Number((total / qty).toFixed(2));
+    const date = expense.invoice_date || expense.месец || new Date().toISOString().slice(0, 10);
+
+    const r = db.prepare(`
+      INSERT INTO gold_investments
+        (метал, дата, тип, количество, цена_eur, обща_сума, доставчик, продукт, сертификат, съхранение, бележка, source_expense_id)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+    `).run(
+      req.metal, date, 'покупка', qty, unitPrice, total,
+      b.доставчик || expense.supplier_name || '',
+      b.продукт   || '',
+      b.сертификат|| expense.invoice_number || '',
+      b.съхранение|| 'home',
+      b.бележка   || (expense.reason ? `Импорт от разход #${expenseId}: ${expense.reason}` : `Импорт от разход #${expenseId}`),
+      expenseId
+    );
+    res.status(201).json({ id: r.lastInsertRowid, цена_eur: unitPrice, обща_сума: total });
+  });
+
   // ── alerts ───────────────────────────────────────────────────────────────
   router.get('/:metal/alerts', validateMetal, (req, res) => {
     res.json(db.prepare('SELECT * FROM gold_alerts WHERE метал=? ORDER BY created_at DESC').all(req.metal));
