@@ -109,17 +109,151 @@ function makeStorage() {
   });
 }
 
-// ── Shared AI extract helper ─────────────────────────────────
-// Returns array of result objects (mirrors original /extract-ai response.results)
+// ── XML parser (e-invoice.bg signed XML — priority over PDF AI) ─
+const xmlParser = require('../lib/einvoiceXmlParser');
+
+// Shared updater — used by both XML and AI paths.
+// Applies tx_rules auto-categorize, counterparty upsert, месец detection, property matching by utility account.
+function applyParsedData(db, id, data, sourceNote) {
+  let iban = (data.supplier_iban || '').replace(/\s/g, '').toUpperCase();
+  let bic = (data.supplier_bic || '').replace(/\s/g, '').toUpperCase();
+  let note = sourceNote || '';
+
+  // Counterparty match — prefer DB IBAN if exists
+  if (data.supplier_name) {
+    const cp = db.prepare(
+      "SELECT * FROM counterparties WHERE LOWER(name) LIKE ?"
+    ).get('%' + data.supplier_name.toLowerCase().slice(0, 10) + '%');
+    if (cp) {
+      iban = cp.iban || iban;
+      bic = cp.bic || bic;
+      note = (note ? note + '; ' : '') + 'Контрагент от база';
+    }
+  }
+
+  // Upsert new valid counterparty
+  if (data.supplier_name && iban) {
+    const ex = db.prepare('SELECT id FROM counterparties WHERE iban = ?').get(iban);
+    if (!ex) db.prepare('INSERT OR IGNORE INTO counterparties (name, iban, bic, currency) VALUES (?, ?, ?, ?)').run(
+      data.supplier_name, iban, bic, data.currency || 'BGN'
+    );
+  }
+
+  // ── Property matching by utility account number ──
+  let autoPropertyId = null;
+  if (data.utility_account_id && data.utility_type) {
+    // Search all properties for matching utility_account
+    const properties = db.prepare("SELECT id, utility_accounts FROM properties WHERE utility_accounts IS NOT NULL AND utility_accounts != '' AND utility_accounts != '{}'").all();
+    for (const prop of properties) {
+      try {
+        const accounts = JSON.parse(prop.utility_accounts || '{}');
+        if (accounts[data.utility_type] === data.utility_account_id ||
+            accounts[data.utility_type] === data.utility_bp) {
+          autoPropertyId = prop.id;
+          note = (note ? note + '; ' : '') + `Имот auto-match по партиден ${data.utility_account_id}`;
+          break;
+        }
+      } catch (_) {}
+    }
+    if (!autoPropertyId) {
+      note = (note ? note + '; ' : '') + `Партиден ${data.utility_account_id} (${data.utility_type}) — нужен mapping към имот`;
+    }
+  }
+
+  // Auto-categorize from tx_rules (only if no property match yet)
+  let autoCategory = null;
+  if (data.supplier_name) {
+    const supplierLower = data.supplier_name.toLowerCase();
+    const allRules = db.prepare('SELECT * FROM tx_rules').all();
+    for (const rule of allRules) {
+      if (rule.pattern && supplierLower.includes(rule.pattern.toLowerCase())) {
+        autoCategory = rule.категория;
+        if (!autoPropertyId && rule.property_id) autoPropertyId = rule.property_id;
+        note = (note ? note + '; ' : '') + `Авто-категория от правило: ${rule.категория}`;
+        break;
+      }
+    }
+  }
+
+  // Map utility_type to expense_category if not set by rules
+  if (!autoCategory && data.utility_type && data.utility_type !== 'друго') {
+    autoCategory = data.utility_type;
+  }
+
+  // Detect месец — prefer parsed XML data, fallback to invoice_date
+  let detectedMonth = data.detected_month || null;
+  if (!detectedMonth && data.invoice_date && /^\d{4}-\d{2}/.test(data.invoice_date)) {
+    detectedMonth = data.invoice_date.slice(0, 7);
+  }
+
+  // Compose ai_notes
+  const noteParts = [note];
+  if (data.invoice_number) noteParts.push(`Фактура: ${data.invoice_number}`);
+  if (data.invoice_date)   noteParts.push(`Дата: ${data.invoice_date}`);
+  if (data.due_date)       noteParts.push(`Падеж: ${data.due_date}`);
+  if (data.supplier_eik)   noteParts.push(`ЕИК: ${data.supplier_eik}`);
+  if (data.amount_no_vat != null) noteParts.push(`Основа: ${data.amount_no_vat}`);
+  if (data.vat_amount != null)    noteParts.push(`ДДС: ${data.vat_amount}`);
+  const extraNote = noteParts.filter(Boolean).join(' | ').slice(0, 500) || null;
+
+  const updates = [
+    "status='done'", 'supplier_name=?', 'supplier_iban=?', 'supplier_bic=?',
+    'amount=?', 'currency=?', 'reason=?', 'ai_notes=?',
+    'invoice_number=?', 'invoice_date=?', 'supplier_eik=?', 'amount_no_vat=?', 'vat_amount=?'
+  ];
+  const params = [
+    data.supplier_name || '', iban, bic,
+    data.amount, data.currency || 'BGN', data.reason || 'PAYMENT', extraNote,
+    data.invoice_number || null,
+    data.invoice_date || null,
+    data.supplier_eik || null,
+    data.amount_no_vat ?? null,
+    data.vat_amount ?? null,
+  ];
+  if (detectedMonth) { updates.push('месец=?'); params.push(detectedMonth); }
+  if (autoCategory)  { updates.push('expense_category=?'); params.push(autoCategory); }
+  if (autoPropertyId){ updates.push('property_id=?'); params.push(autoPropertyId); }
+  params.push(id);
+
+  db.prepare(`UPDATE expense_invoices SET ${updates.join(', ')} WHERE id=?`).run(...params);
+
+  // Save consumption history if matched to property and we have utility data
+  let historyId = null;
+  if (autoPropertyId && data.utility_type && detectedMonth && data.consumption) {
+    try {
+      const r = db.prepare(`
+        INSERT OR REPLACE INTO property_utility_history
+          (property_id, invoice_id, utility_type, period, amount, currency, consumption_data)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        autoPropertyId, id, data.utility_type, detectedMonth,
+        data.amount, data.currency || 'BGN',
+        JSON.stringify(data.consumption)
+      );
+      historyId = r.lastInsertRowid;
+    } catch (e) {
+      // duplicate or constraint — just skip silently
+    }
+  }
+
+  return {
+    id, status: 'done',
+    supplier_name: data.supplier_name,
+    amount: data.amount,
+    auto_category: autoCategory,
+    auto_property_id: autoPropertyId,
+    utility_type: data.utility_type,
+    utility_account_id: data.utility_account_id,
+    needs_property_mapping: !!(data.utility_account_id && !autoPropertyId),
+    месец: detectedMonth,
+    source_format: data.source_format || 'ai',
+    history_id: historyId,
+  };
+}
+
+// ── Shared extract helper — XML first, AI fallback ───────────
+// Returns array of result objects.
 async function runAiExtract(db, ids) {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) throw new Error('ANTHROPIC_API_KEY not set');
-
-  let Anthropic;
-  try { Anthropic = require('@anthropic-ai/sdk'); }
-  catch(e) { throw new Error('@anthropic-ai/sdk not installed: ' + e.message); }
-
-  const client = new Anthropic.default({ apiKey });
   const results = [];
 
   for (const id of ids) {
@@ -132,6 +266,23 @@ async function runAiExtract(db, ids) {
     try {
       const fp = inv.filepath;
       if (!fp || !fs.existsSync(fp)) throw new Error('File missing: ' + fp);
+
+      // STEP 1: Try XML parser first (instant, 100% accurate for e-invoice.bg)
+      const xmlResult = xmlParser.tryParseFile(fp);
+      if (xmlResult && xmlResult.ok) {
+        const result = applyParsedData(db, id, xmlResult.data, 'XML signed (e-invoice.bg)');
+        results.push(result);
+        continue;
+      }
+
+      // STEP 2: Fallback to Claude AI (PDF, images, non-XML)
+      const apiKey = process.env.ANTHROPIC_API_KEY;
+      if (!apiKey) throw new Error('Not XML; Claude fallback unavailable (ANTHROPIC_API_KEY not set)');
+
+      let Anthropic;
+      try { Anthropic = require('@anthropic-ai/sdk'); }
+      catch(e) { throw new Error('@anthropic-ai/sdk not installed: ' + e.message); }
+      const client = new Anthropic.default({ apiKey });
 
       const base64 = fs.readFileSync(fp).toString('base64');
       const isPdf  = fp.toLowerCase().endsWith('.pdf');
@@ -188,110 +339,32 @@ IBAN EXTRACTION RULES - very important:
       if (s === -1 || e === -1) throw new Error('No JSON in response');
       const raw_data = JSON.parse(raw.slice(s, e+1));
 
+      // Normalize AI output to unified format expected by applyParsedData
       const data = {
         supplier_name: raw_data.supplier_name || '',
-        supplier_iban: raw_data.supplier_iban || '',
-        supplier_bic:  raw_data.supplier_bic  || '',
-        amount:   raw_data.amount_total ?? raw_data.amount ?? 0,
-        currency: raw_data.currency || 'BGN',
+        supplier_iban: (raw_data.supplier_iban || '').replace(/\s/g, '').toUpperCase(),
+        supplier_bic:  (raw_data.supplier_bic  || '').replace(/\s/g, '').toUpperCase(),
+        supplier_eik:  raw_data.supplier_eik   || '',
+        amount:        raw_data.amount_total ?? raw_data.amount ?? 0,
+        amount_no_vat: raw_data.amount_no_vat ?? null,
+        vat_amount:    raw_data.vat_amount    ?? null,
+        currency:      raw_data.currency || 'BGN',
+        invoice_number: raw_data.invoice_number || '',
+        invoice_date:   raw_data.invoice_date   || '',
+        due_date:       raw_data.due_date       || '',
+        description:    raw_data.description    || '',
         reason: [raw_data.description, raw_data.invoice_number]
           .filter(Boolean).join(' | ').slice(0, 90) || 'PAYMENT',
-        _extra: {
-          eik:          raw_data.supplier_eik    || '',
-          invoice_no:   raw_data.invoice_number  || '',
-          invoice_date: raw_data.invoice_date    || '',
-          due_date:     raw_data.due_date        || '',
-          amount_no_vat:raw_data.amount_no_vat   ?? null,
-          vat_amount:   raw_data.vat_amount      ?? null,
-        },
+        source_format: 'ai',
       };
 
-      let iban = (data.supplier_iban||'').replace(/\s/g,'').toUpperCase();
-      let bic  = (data.supplier_bic||'').replace(/\s/g,'').toUpperCase();
-      let note = '';
-
-      if (data.supplier_name) {
-        const cp = db.prepare(
-          "SELECT * FROM counterparties WHERE LOWER(name) LIKE ?"
-        ).get('%' + data.supplier_name.toLowerCase().slice(0,10) + '%');
-        if (cp) {
-          const ocrIban = iban;
-          iban = cp.iban || iban;
-          bic  = cp.bic  || bic;
-          note = ocrIban && ocrIban !== cp.iban
-            ? `Контрагент от база (OCR IBAN: ${ocrIban})`
-            : 'Контрагент от база';
-        }
+      let sourceNote = 'AI parsed (Claude)';
+      if (data.supplier_iban && !validateIBAN(data.supplier_iban)) {
+        sourceNote += '; ⚠ IBAN невалиден';
       }
 
-      if (!validateIBAN(iban) && iban) note = (note ? note+'; ' : '') + '⚠ IBAN невалиден';
-
-      if (validateIBAN(iban) && data.supplier_name && iban) {
-        const ex = db.prepare('SELECT id FROM counterparties WHERE iban = ?').get(iban);
-        if (!ex) db.prepare('INSERT OR IGNORE INTO counterparties (name, iban, bic, currency) VALUES (?, ?, ?, ?)').run(
-          data.supplier_name, iban, bic, data.currency || 'BGN'
-        );
-      }
-
-      // Auto-categorize from tx_rules
-      let autoCategory = null;
-      let autoPropertyId = null;
-      if (data.supplier_name) {
-        const supplierLower = data.supplier_name.toLowerCase();
-        const allRules = db.prepare('SELECT * FROM tx_rules').all();
-        for (const rule of allRules) {
-          if (rule.pattern && supplierLower.includes(rule.pattern.toLowerCase())) {
-            autoCategory = rule.категория;
-            autoPropertyId = rule.property_id;
-            note = (note ? note + '; ' : '') + `Авто-категория от правило: ${rule.категория}`;
-            break;
-          }
-        }
-      }
-
-      let detectedМесец = null;
-      if (data._extra.invoice_date && /^\d{4}-\d{2}/.test(data._extra.invoice_date)) {
-        detectedМесец = data._extra.invoice_date.slice(0, 7);
-      }
-
-      const extraNote = [
-        note,
-        data._extra.invoice_no   ? `Фактура: ${data._extra.invoice_no}`     : '',
-        data._extra.invoice_date ? `Дата: ${data._extra.invoice_date}`       : '',
-        data._extra.due_date     ? `Падеж: ${data._extra.due_date}`          : '',
-        data._extra.eik          ? `ЕИК: ${data._extra.eik}`                 : '',
-        data._extra.amount_no_vat != null ? `Основа: ${data._extra.amount_no_vat}` : '',
-        data._extra.vat_amount   != null  ? `ДДС: ${data._extra.vat_amount}`       : '',
-      ].filter(Boolean).join(' | ').slice(0, 500) || null;
-
-      const updates = [
-        "status='done'", 'supplier_name=?', 'supplier_iban=?', 'supplier_bic=?',
-        'amount=?', 'currency=?', 'reason=?', 'ai_notes=?',
-        'invoice_number=?', 'invoice_date=?', 'supplier_eik=?', 'amount_no_vat=?', 'vat_amount=?'
-      ];
-      const params = [
-        data.supplier_name, iban, bic,
-        data.amount, data.currency||'BGN', data.reason, extraNote,
-        data._extra.invoice_no   || null,
-        data._extra.invoice_date || null,
-        data._extra.eik          || null,
-        data._extra.amount_no_vat ?? null,
-        data._extra.vat_amount    ?? null,
-      ];
-      if (detectedМесец) { updates.push('месец=?'); params.push(detectedМесец); }
-      if (autoCategory)  { updates.push('expense_category=?'); params.push(autoCategory); }
-      if (autoPropertyId){ updates.push('property_id=?');      params.push(autoPropertyId); }
-      params.push(id);
-
-      db.prepare(`UPDATE expense_invoices SET ${updates.join(', ')} WHERE id=?`).run(...params);
-
-      results.push({
-        id, status: 'done',
-        supplier_name: data.supplier_name,
-        amount: data.amount,
-        auto_category: autoCategory,
-        месец: detectedМесец,
-      });
+      const result = applyParsedData(db, id, data, sourceNote);
+      results.push(result);
     } catch(err) {
       db.prepare("UPDATE expense_invoices SET status='error', ai_notes=? WHERE id=?")
         .run(String(err.message).slice(0, 500), id);
@@ -549,6 +622,89 @@ module.exports = function(db) {
     } catch (err) {
       console.error('GET /summary error:', err.message);
       res.json({ total_bgn: 0, total_eur: 0, count: 0, paid_count: 0, paid_amount: 0, unpaid_amount: 0, invest: { total_bgn:0, total_eur:0, count:0, items:[] }, by_category: [], by_property: [] });
+    }
+  });
+
+  // ── Utility account mapping endpoints ──────────────────────
+
+  // GET /unmapped-invoices — list invoices with utility_account_id but no property_id
+  expRouter.get('/unmapped-invoices', (req, res) => {
+    try {
+      // Find invoices with utility info in ai_notes but no property_id
+      const rows = db.prepare(`
+        SELECT id, supplier_name, amount, currency, invoice_date, ai_notes
+        FROM expense_invoices
+        WHERE property_id IS NULL
+          AND ai_notes LIKE '%Партиден%'
+          AND ai_notes LIKE '%нужен mapping%'
+        ORDER BY invoice_date DESC LIMIT 100
+      `).all();
+      res.json({ unmapped: rows });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST /:id/map-property  { property_id, utility_type, utility_account_id }
+  // Saves the partiden number on the property + links current invoice + retroactively links matching others.
+  expRouter.post('/:id/map-property', (req, res) => {
+    try {
+      const invId = parseInt(req.params.id);
+      const { property_id, utility_type, utility_account_id } = req.body || {};
+      if (!property_id || !utility_type || !utility_account_id) {
+        return res.status(400).json({ error: 'property_id, utility_type, utility_account_id са задължителни' });
+      }
+      const prop = db.prepare('SELECT id, utility_accounts FROM properties WHERE id = ?').get(property_id);
+      if (!prop) return res.status(404).json({ error: 'Имот не намерен' });
+
+      // Update property.utility_accounts JSON
+      let accounts = {};
+      try { accounts = JSON.parse(prop.utility_accounts || '{}'); } catch (_) {}
+      accounts[utility_type] = utility_account_id;
+      db.prepare('UPDATE properties SET utility_accounts = ? WHERE id = ?').run(
+        JSON.stringify(accounts), property_id
+      );
+
+      // Link current invoice
+      db.prepare('UPDATE expense_invoices SET property_id = ? WHERE id = ?').run(property_id, invId);
+
+      // Retroactive: find other invoices with this partiden number in ai_notes
+      const others = db.prepare(`
+        SELECT id FROM expense_invoices
+        WHERE property_id IS NULL AND ai_notes LIKE ?
+      `).all('%Партиден ' + utility_account_id + '%');
+      let retroCount = 0;
+      for (const o of others) {
+        db.prepare('UPDATE expense_invoices SET property_id = ? WHERE id = ?').run(property_id, o.id);
+        retroCount++;
+      }
+
+      res.json({ ok: true, retroactive_linked: retroCount, accounts });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // GET /properties/:property_id/utility-history?utility_type=&period_from=&period_to=
+  expRouter.get('/properties/:property_id/utility-history', (req, res) => {
+    try {
+      const pid = parseInt(req.params.property_id);
+      const { utility_type, period_from, period_to } = req.query;
+      let sql = 'SELECT * FROM property_utility_history WHERE property_id = ?';
+      const params = [pid];
+      if (utility_type)  { sql += ' AND utility_type = ?'; params.push(utility_type); }
+      if (period_from)   { sql += ' AND period >= ?';      params.push(period_from); }
+      if (period_to)     { sql += ' AND period <= ?';      params.push(period_to); }
+      sql += ' ORDER BY period DESC, utility_type';
+      const rows = db.prepare(sql).all(...params);
+      // Parse consumption_data JSON for convenience
+      const parsed = rows.map(r => ({
+        ...r,
+        consumption_data: (() => { try { return JSON.parse(r.consumption_data || '{}'); } catch { return {}; } })()
+      }));
+      res.json({ history: parsed });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
     }
   });
 

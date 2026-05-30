@@ -56,6 +56,24 @@ async function main() {
   try { db.exec("ALTER TABLE expense_invoices ADD COLUMN bank_tx_id INTEGER");  console.log('Migration: added bank_tx_id');     } catch(_) {}
   try { db.exec("ALTER TABLE expense_invoices ADD COLUMN source TEXT DEFAULT 'manual'"); console.log('Migration: added source'); } catch(_) {}
 
+  // Property utility accounts (JSON map: {"топлофикация": "4000457500", "ток": "...", "вода": "..."})
+  try { db.exec("ALTER TABLE properties ADD COLUMN utility_accounts TEXT DEFAULT '{}'"); console.log('Migration: added properties.utility_accounts'); } catch(_) {}
+
+  // Property utility history — month-by-month consumption per property per utility
+  db.exec(`CREATE TABLE IF NOT EXISTS property_utility_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    property_id INTEGER REFERENCES properties(id),
+    invoice_id INTEGER REFERENCES expense_invoices(id),
+    utility_type TEXT,          -- 'топлофикация', 'ток', 'вода', 'газ', 'друго'
+    period TEXT,                -- 'YYYY-MM'
+    amount REAL,                -- total cost (with VAT)
+    currency TEXT,
+    consumption_data TEXT,      -- JSON with all metrics (kWh, m³, degree days, etc.)
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(property_id, utility_type, period)
+  )`);
+  try { db.exec("CREATE INDEX IF NOT EXISTS idx_puh_property ON property_utility_history(property_id, utility_type, period DESC)"); } catch(_) {}
+
   try { db.exec("ALTER TABLE properties ADD COLUMN email TEXT");              console.log('Migration: added email'); }              catch(_) {}
   try { db.exec("ALTER TABLE properties ADD COLUMN телефон TEXT");           console.log('Migration: added телефон'); }           catch(_) {}
   try { db.exec("ALTER TABLE properties ADD COLUMN invoice_enabled INTEGER DEFAULT 0"); console.log('Migration: added invoice_enabled'); } catch(_) {}
@@ -93,6 +111,50 @@ async function main() {
   // Backfill expense_invoices currency based on месец (банков_импорт rows had 'BGN' hardcoded)
   db.exec("UPDATE expense_invoices SET currency='EUR' WHERE (currency IS NULL OR currency='BGN') AND месец >= '2026-01'");
   db.exec("UPDATE expense_invoices SET currency='BGN' WHERE currency IS NULL");
+
+  // ── Investments module: gold ───────────────────────────────────────────
+  db.exec(`CREATE TABLE IF NOT EXISTS gold_investments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    дата DATE NOT NULL,
+    тип TEXT NOT NULL,
+    количество REAL NOT NULL,
+    цена_eur REAL NOT NULL,
+    обща_сума REAL NOT NULL,
+    доставчик TEXT DEFAULT '',
+    продукт TEXT DEFAULT '',
+    сертификат TEXT DEFAULT '',
+    съхранение TEXT DEFAULT 'home',
+    бележка TEXT DEFAULT '',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+  db.exec(`CREATE TABLE IF NOT EXISTS gold_alerts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    цена_eur REAL NOT NULL,
+    посока TEXT NOT NULL,
+    количество_oz REAL,
+    съобщение TEXT DEFAULT '',
+    активна INTEGER DEFAULT 1,
+    задействана INTEGER DEFAULT 0,
+    задействана_на DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+  db.exec(`CREATE TABLE IF NOT EXISTS gold_price_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    дата DATETIME DEFAULT CURRENT_TIMESTAMP,
+    цена_usd REAL,
+    цена_eur REAL,
+    промяна_24h REAL
+  )`);
+  try { db.exec("CREATE INDEX IF NOT EXISTS idx_gold_price_date ON gold_price_history(дата DESC)"); } catch(_) {}
+  db.exec(`CREATE TABLE IF NOT EXISTS investment_reports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    месец TEXT,
+    тип TEXT,
+    съдържание TEXT,
+    данни TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+  console.log('investments tables ready (gold_investments, gold_alerts, gold_price_history, investment_reports)');
 
   // Contract templates & contracts
   db.exec(`CREATE TABLE IF NOT EXISTS contract_templates (
