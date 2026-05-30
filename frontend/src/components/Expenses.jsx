@@ -1,7 +1,8 @@
 import { apiFetch } from '../api'
 import React, { useState, useEffect, useRef, useCallback } from 'react'
+import UnmappedInvoicesBanner from './UnmappedInvoicesBanner'
 
-const CATEGORIES = ['ток','вода','ремонт','ремонт д','застраховка','такса','счетоводство','ддс','друго','инвестиция','благородни метали']
+const CATEGORIES = ['ток','вода','ремонт','ремонт д','застраховка','такса','счетоводство','ддс','друго','инвестиция','благородни метали','топлофикация','газ']
 const CURRENCIES  = ['BGN','EUR','USD']
 const PAYER_IBAN  = 'BG75PRCB92301053911901'
 
@@ -1084,6 +1085,9 @@ export default function Expenses({ API }) {
               )}
             </div>
           </div>
+
+          {/* Unmapped invoices banner — XML фактури с партиден но без имот */}
+          <UnmappedInvoicesBanner onChange={loadInvoices} />
 
           {/* Drag & drop zone */}
           <div

@@ -1,6 +1,7 @@
 import { apiFetch, authUrl } from '../api'
 import React, { useState, useEffect, useRef } from 'react'
 import Inventory from './Inventory'
+import UtilityHistoryChart from './UtilityHistoryChart'
 
 const STATUS_COLORS = {
   '✅': 'bg-green-100 text-green-800',
@@ -27,6 +28,7 @@ export default function Portfolio({ API }) {
 
   const [photosProp, setPhotosProp] = useState(null)
   const [inventoryProp, setInventoryProp] = useState(null)
+  const [utilityProp, setUtilityProp] = useState(null)
   const [photos, setPhotos] = useState([])
   const [uploading, setUploading] = useState(false)
   const photoInputRef = React.useRef()
@@ -234,6 +236,11 @@ export default function Portfolio({ API }) {
                           className="text-amber-600 hover:text-amber-800 hover:bg-amber-50 p-1 rounded transition-colors"
                           title="Обзавеждане / инвентар"
                         >🛋️</button>
+                        <button
+                          onClick={() => setUtilityProp(p)}
+                          className="text-purple-600 hover:text-purple-800 hover:bg-purple-50 p-1 rounded transition-colors"
+                          title="Консумация и фактури"
+                        >📊</button>
                       </div>
                     </td>
                   </tr>
@@ -561,6 +568,29 @@ export default function Portfolio({ API }) {
       {/* Inventory modal */}
       {inventoryProp && (
         <Inventory API={API} property={inventoryProp} onClose={() => setInventoryProp(null)} />
+      )}
+
+      {/* Utility history modal */}
+      {utilityProp && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-40 p-4" onClick={() => setUtilityProp(null)}>
+          <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <div className="sticky top-0 bg-white border-b px-4 py-3 flex justify-between items-center z-10">
+              <h2 className="text-lg font-bold flex items-center gap-2">
+                📊 Консумация — {utilityProp.адрес}
+                {utilityProp.utility_accounts && utilityProp.utility_accounts !== '{}' && (
+                  <span className="text-xs font-normal text-gray-500">
+                    (партиди: {Object.entries(JSON.parse(utilityProp.utility_accounts || '{}'))
+                      .map(([k, v]) => `${k}: ${v}`).join(', ')})
+                  </span>
+                )}
+              </h2>
+              <button onClick={() => setUtilityProp(null)} className="text-gray-400 hover:text-gray-600 text-2xl leading-none">×</button>
+            </div>
+            <div className="p-4">
+              <UtilityHistoryChart propertyId={utilityProp.id} showAmounts={true} compact={false} />
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

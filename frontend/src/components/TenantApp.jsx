@@ -1,14 +1,16 @@
 import React, { useEffect, useState } from 'react'
 import { apiFetch, authUrl } from '../api'
+import UtilityHistoryChart from './UtilityHistoryChart'
 
 const API = import.meta.env.VITE_API_URL || ''
 
 const TABS = [
-  { id: 'home',      label: 'Начало',   icon: '🏠' },
-  { id: 'photos',    label: 'Снимки',   icon: '📷' },
-  { id: 'contract',  label: 'Договор',  icon: '📋' },
-  { id: 'invoices',  label: 'Фактури',  icon: '🧾' },
-  { id: 'profile',   label: 'Профил',   icon: '👤' },
+  { id: 'home',         label: 'Начало',     icon: '🏠' },
+  { id: 'photos',       label: 'Снимки',     icon: '📷' },
+  { id: 'contract',     label: 'Договор',    icon: '📋' },
+  { id: 'invoices',     label: 'Фактури',    icon: '🧾' },
+  { id: 'consumption',  label: 'Сметки',     icon: '📊' },
+  { id: 'profile',      label: 'Профил',     icon: '👤' },
 ]
 
 export default function TenantApp({ userName, onLogout, mustChangePassword }) {
@@ -182,11 +184,12 @@ export default function TenantApp({ userName, onLogout, mustChangePassword }) {
 
       {/* Body */}
       <main className="max-w-2xl mx-auto px-4 py-4">
-        {tab === 'home'     && <Home me={me} property={property} contract={activeContract} />}
-        {tab === 'photos'   && <Photos me={me} property={property} />}
-        {tab === 'contract' && <Contract contracts={me?.contracts || []} />}
-        {tab === 'invoices' && <Invoices />}
-        {tab === 'profile'  && <Profile me={me} onChangePassword={() => setShowPwd(true)} />}
+        {tab === 'home'        && <Home me={me} property={property} contract={activeContract} />}
+        {tab === 'photos'      && <Photos me={me} property={property} />}
+        {tab === 'contract'    && <Contract contracts={me?.contracts || []} />}
+        {tab === 'invoices'    && <Invoices />}
+        {tab === 'consumption' && <Consumption property={property} />}
+        {tab === 'profile'     && <Profile me={me} onChangePassword={() => setShowPwd(true)} />}
       </main>
 
       {/* Bottom nav */}
@@ -410,6 +413,24 @@ function Invoices() {
           </Card>
         )
       })}
+    </div>
+  )
+}
+
+function Consumption({ property }) {
+  if (!property) return (
+    <div className="bg-white rounded-lg p-4 text-sm text-gray-500 text-center">
+      Все още няма обвързан имот.
+    </div>
+  )
+  return (
+    <div className="space-y-3">
+      <div className="bg-white rounded-lg p-3 border">
+        <div className="text-xs text-gray-500">Имот</div>
+        <div className="font-semibold">{property.адрес}</div>
+      </div>
+      {/* showAmounts=true за да види наемателят колко плащаш собственикът */}
+      <UtilityHistoryChart propertyId={property.id} showAmounts={true} compact={true} />
     </div>
   )
 }
