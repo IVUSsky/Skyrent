@@ -112,11 +112,15 @@ async function processMetal(db, metal) {
 }
 
 function startInvestmentsCron(db) {
-  // ── 1) Hourly price check + alert evaluation for ALL metals ─────────────
-  cron.schedule('0 * * * *', async () => {
+  // ── 1) Twice-daily price check + alert evaluation for ALL metals ────────
+  // Mon–Fri only: COMEX / LBMA / NYMEX are closed on weekends, so spot price
+  // is frozen at Friday close until Monday — saves API budget on duplicates.
+  // 08:00 + 20:00 Europe/Sofia (server TZ). Budget: 2 metals × 2 calls × ~22
+  // weekdays/month ≈ 88 calls — fits in goldapi.io free tier (100).
+  cron.schedule('0 8,20 * * 1-5', async () => {
     for (const metal of SUPPORTED_METALS) {
       try { await processMetal(db, metal); }
-      catch (e) { console.error(`[metals cron] hourly ${metal} error:`, e.message); }
+      catch (e) { console.error(`[metals cron] scheduled ${metal} error:`, e.message); }
     }
   });
 
@@ -154,7 +158,7 @@ function startInvestmentsCron(db) {
     }
   }, 60 * 1000);
 
-  console.log('[metals cron] schedules installed for', SUPPORTED_METALS.join(', '), '(hourly price, Mon 09:00 weekly, 1st 08:00 monthly)');
+  console.log('[metals cron] schedules installed for', SUPPORTED_METALS.join(', '), '(Mon-Fri 08:00+20:00, Mon 09:00 weekly, 1st 08:00 monthly)');
 }
 
 module.exports = { startInvestmentsCron };
