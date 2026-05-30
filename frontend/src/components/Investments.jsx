@@ -2,26 +2,29 @@ import React, { useState, useEffect, useMemo } from 'react'
 import { apiFetch } from '../api'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts'
 
-const SUB_TABS = [
-  { id: 'gold', label: '🥇 Злато' },
+const METALS = [
+  { id: 'gold',     label: '🥇 Злато',    accent: '#f59e0b', accentBg: 'bg-amber-500',  bgSoft: 'bg-amber-50',  border: 'border-amber-200', textSoft: 'text-amber-700' },
+  { id: 'silver',   label: '🥈 Сребро',   accent: '#9ca3af', accentBg: 'bg-gray-400',   bgSoft: 'bg-gray-100',  border: 'border-gray-300',  textSoft: 'text-gray-600' },
+  { id: 'platinum', label: '⚪ Платина',  accent: '#0ea5e9', accentBg: 'bg-sky-500',    bgSoft: 'bg-sky-50',    border: 'border-sky-200',   textSoft: 'text-sky-700' },
 ]
 
 export default function Investments({ API }) {
-  const [sub, setSub] = useState('gold')
+  const [metal, setMetal] = useState('gold')
+  const metalConfig = METALS.find(m => m.id === metal)
   return (
     <div>
       <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
         <h2 className="text-2xl font-bold text-gray-800">📈 Инвестиции</h2>
         <div className="flex gap-1">
-          {SUB_TABS.map(t => (
-            <button key={t.id} onClick={() => setSub(t.id)}
-              className={`px-3 py-1.5 text-sm rounded-lg border font-medium ${sub === t.id ? 'bg-amber-500 text-white border-amber-500' : 'bg-white text-gray-600 border-gray-300'}`}>
+          {METALS.map(t => (
+            <button key={t.id} onClick={() => setMetal(t.id)}
+              className={`px-3 py-1.5 text-sm rounded-lg border font-medium ${metal === t.id ? `${t.accentBg} text-white border-transparent` : 'bg-white text-gray-600 border-gray-300'}`}>
               {t.label}
             </button>
           ))}
         </div>
       </div>
-      {sub === 'gold' && <GoldDashboard API={API} />}
+      <MetalDashboard API={API} metal={metal} metalConfig={metalConfig} />
     </div>
   )
 }
@@ -36,7 +39,7 @@ function fmtDate(s) {
   try { return new Date(s).toLocaleDateString('bg-BG') } catch { return s }
 }
 
-function GoldDashboard({ API }) {
+function MetalDashboard({ API, metal, metalConfig }) {
   const [price, setPrice] = useState(null)
   const [history, setHistory] = useState([])
   const [portfolio, setPortfolio] = useState(null)
@@ -58,26 +61,26 @@ function GoldDashboard({ API }) {
   }
 
   const loadAll = () => {
-    apiFetch(`${API}/api/investments/gold/price`).then(r => r.json()).then(d => setPrice(d.error ? null : d)).catch(() => setPrice(null))
-    apiFetch(`${API}/api/investments/gold/price-history?days=30`).then(r => r.json()).then(setHistory).catch(() => setHistory([]))
-    apiFetch(`${API}/api/investments/gold/portfolio`).then(r => r.json()).then(setPortfolio).catch(() => setPortfolio(null))
-    apiFetch(`${API}/api/investments/gold/transactions`).then(r => r.json()).then(setTransactions).catch(() => setTransactions([]))
-    apiFetch(`${API}/api/investments/gold/alerts`).then(r => r.json()).then(setAlerts).catch(() => setAlerts([]))
-    apiFetch(`${API}/api/investments/gold/reports`).then(r => r.json()).then(setReports).catch(() => setReports([]))
+    apiFetch(`${API}/api/investments/${metal}/price`).then(r => r.json()).then(d => setPrice(d.error ? null : d)).catch(() => setPrice(null))
+    apiFetch(`${API}/api/investments/${metal}/price-history?days=30`).then(r => r.json()).then(setHistory).catch(() => setHistory([]))
+    apiFetch(`${API}/api/investments/${metal}/portfolio`).then(r => r.json()).then(setPortfolio).catch(() => setPortfolio(null))
+    apiFetch(`${API}/api/investments/${metal}/transactions`).then(r => r.json()).then(setTransactions).catch(() => setTransactions([]))
+    apiFetch(`${API}/api/investments/${metal}/alerts`).then(r => r.json()).then(setAlerts).catch(() => setAlerts([]))
+    apiFetch(`${API}/api/investments/reports?metal=${metal}`).then(r => r.json()).then(setReports).catch(() => setReports([]))
   }
-  useEffect(loadAll, [])
+  useEffect(loadAll, [metal])
 
   const chartData = useMemo(() => history.map(h => ({
     дата: new Date(h.дата).toLocaleDateString('bg-BG', { day: '2-digit', month: '2-digit' }),
     цена: Number(h.цена_eur),
   })), [history])
 
-  const generateReport = async (type) => {
+  const generateReport = async (type, scope = 'metal') => {
     setGenerating(true)
     try {
-      const r = await apiFetch(`${API}/api/investments/gold/report`, {
+      const r = await apiFetch(`${API}/api/investments/report`, {
         method: 'POST',
-        body: JSON.stringify({ тип: type }),
+        body: JSON.stringify({ тип: type, метал: scope === 'all' ? 'all' : metal }),
       })
       const d = await r.json()
       if (!r.ok) { showToast(d.error || 'Грешка', 'error'); return }
@@ -151,7 +154,7 @@ function GoldDashboard({ API }) {
         <>
           <div className="bg-white rounded-xl shadow border border-gray-100 p-4 mb-5">
             <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-semibold text-gray-700">Цена за последните 30 дни</h3>
+              <h3 className="text-sm font-semibold text-gray-700">{metalConfig?.label} — цена за последните 30 дни</h3>
               <span className="text-xs text-gray-400">EUR / oz</span>
             </div>
             {chartData.length > 1 ? (
@@ -164,27 +167,32 @@ function GoldDashboard({ API }) {
                     <ReferenceLine y={portfolio.средна_цена} stroke="#3b82f6" strokeDasharray="3 3"
                       label={{ value: `Ср. покупна €${portfolio.средна_цена.toFixed(0)}`, position: 'right', fontSize: 10, fill: '#3b82f6' }} />
                   )}
-                  <Line type="monotone" dataKey="цена" stroke="#f59e0b" strokeWidth={2} dot={false} />
+                  <Line type="monotone" dataKey="цена" stroke={metalConfig?.accent || '#f59e0b'} strokeWidth={2} dot={false} />
                 </LineChart>
               </ResponsiveContainer>
             ) : (
               <div className="text-center text-gray-400 py-12 text-sm">
-                Все още няма достатъчно исторически данни. <br />
+                Все още няма достатъчно исторически данни за {metalConfig?.label}. <br />
                 <span className="text-xs">Cron-ът записва цената всеки час; първите точки ще се появят след ~1ч.</span>
               </div>
             )}
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <button onClick={() => generateReport('weekly')} disabled={generating}
               className="bg-purple-50 border border-purple-200 rounded-xl p-4 text-left hover:bg-purple-100">
-              <div className="font-semibold text-purple-800">🤖 Генерирай AI седмично резюме</div>
-              <div className="text-xs text-purple-700 mt-1">Claude анализира портфейла + ценови движения.</div>
+              <div className="font-semibold text-purple-800">🤖 Седмично за {metalConfig?.label}</div>
+              <div className="text-xs text-purple-700 mt-1">Claude анализира само текущия метал.</div>
             </button>
             <button onClick={() => generateReport('monthly')} disabled={generating}
               className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-left hover:bg-blue-100">
-              <div className="font-semibold text-blue-800">📊 Генерирай AI месечен доклад</div>
-              <div className="text-xs text-blue-700 mt-1">Пълно резюме + контекст от наеми и кредити.</div>
+              <div className="font-semibold text-blue-800">📊 Месечно за {metalConfig?.label}</div>
+              <div className="text-xs text-blue-700 mt-1">Пълно резюме + наеми/кредити.</div>
+            </button>
+            <button onClick={() => generateReport('monthly', 'all')} disabled={generating}
+              className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-left hover:bg-emerald-100">
+              <div className="font-semibold text-emerald-800">⚖️ Цялостен месечен (3-те метала)</div>
+              <div className="text-xs text-emerald-700 mt-1">Сравнение злато + сребро + платина.</div>
             </button>
           </div>
         </>
@@ -232,7 +240,7 @@ function GoldDashboard({ API }) {
                         <button onClick={() => { setEditTx(t); setShowTxForm(true) }} className="text-xs px-2 py-1 text-blue-700 hover:bg-blue-50 rounded">✏️</button>
                         <button onClick={async () => {
                           if (!window.confirm(`Изтриване на сделка от ${fmtDate(t.дата)}?`)) return
-                          await apiFetch(`${API}/api/investments/gold/transactions/${t.id}`, { method: 'DELETE' })
+                          await apiFetch(`${API}/api/investments/${metal}/transactions/${t.id}`, { method: 'DELETE' })
                           loadAll(); showToast('Изтрито')
                         }} className="text-xs px-2 py-1 text-red-600 hover:bg-red-50 rounded">🗑️</button>
                       </td>
@@ -274,7 +282,7 @@ function GoldDashboard({ API }) {
                   <button onClick={() => { setEditAlert(a); setShowAlertForm(true) }} className="text-xs px-2 py-1 text-blue-700 hover:bg-blue-100 rounded">✏️</button>
                   <button onClick={async () => {
                     if (!window.confirm('Изтриване на алармата?')) return
-                    await apiFetch(`${API}/api/investments/gold/alerts/${a.id}`, { method: 'DELETE' })
+                    await apiFetch(`${API}/api/investments/${metal}/alerts/${a.id}`, { method: 'DELETE' })
                     loadAll(); showToast('Изтрито')
                   }} className="text-xs px-2 py-1 text-red-600 hover:bg-red-100 rounded">🗑️</button>
                 </div>
@@ -304,7 +312,7 @@ function GoldDashboard({ API }) {
             <div className="space-y-1">
               {reports.map(r => (
                 <button key={r.id} onClick={async () => {
-                  const f = await apiFetch(`${API}/api/investments/gold/reports/${r.id}`).then(x => x.json())
+                  const f = await apiFetch(`${API}/api/investments/reports/${r.id}`).then(x => x.json())
                   setOpenReport(f)
                 }}
                   className="w-full text-left flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 border border-gray-100">
@@ -323,11 +331,11 @@ function GoldDashboard({ API }) {
         </div>
       )}
 
-      {showTxForm && <TxForm API={API} tx={editTx}
+      {showTxForm && <TxForm API={API} metal={metal} tx={editTx}
         onClose={() => { setShowTxForm(false); setEditTx(null) }}
         onSaved={() => { setShowTxForm(false); setEditTx(null); loadAll(); showToast('Запазено') }}
       />}
-      {showAlertForm && <AlertForm API={API} alert={editAlert}
+      {showAlertForm && <AlertForm API={API} metal={metal} alert={editAlert}
         onClose={() => { setShowAlertForm(false); setEditAlert(null) }}
         onSaved={() => { setShowAlertForm(false); setEditAlert(null); loadAll(); showToast('Запазено') }}
       />}
@@ -336,7 +344,7 @@ function GoldDashboard({ API }) {
   )
 }
 
-function TxForm({ API, tx, onClose, onSaved }) {
+function TxForm({ API, metal, tx, onClose, onSaved }) {
   const isNew = !tx
   const [f, setF] = useState({
     дата: tx?.дата || new Date().toISOString().slice(0,10),
@@ -365,7 +373,7 @@ function TxForm({ API, tx, onClose, onSaved }) {
     if (!f.количество || !f.цена_eur) { setErr('Количество и цена са задължителни'); return }
     setSaving(true); setErr(null)
     try {
-      const url = isNew ? `${API}/api/investments/gold/transactions` : `${API}/api/investments/gold/transactions/${tx.id}`
+      const url = isNew ? `${API}/api/investments/${metal}/transactions` : `${API}/api/investments/${metal}/transactions/${tx.id}`
       const r = await apiFetch(url, { method: isNew ? 'POST' : 'PUT', body: JSON.stringify(f) })
       const d = await r.json()
       if (!r.ok) { setErr(d.error || 'Грешка'); setSaving(false); return }
@@ -415,7 +423,7 @@ function TxForm({ API, tx, onClose, onSaved }) {
   )
 }
 
-function AlertForm({ API, alert, onClose, onSaved }) {
+function AlertForm({ API, metal, alert, onClose, onSaved }) {
   const isNew = !alert
   const [f, setF] = useState({
     цена_eur: alert?.цена_eur || '',
@@ -431,7 +439,7 @@ function AlertForm({ API, alert, onClose, onSaved }) {
     if (!f.цена_eur) { setErr('Цената е задължителна'); return }
     setSaving(true)
     try {
-      const url = isNew ? `${API}/api/investments/gold/alerts` : `${API}/api/investments/gold/alerts/${alert.id}`
+      const url = isNew ? `${API}/api/investments/${metal}/alerts` : `${API}/api/investments/${metal}/alerts/${alert.id}`
       const r = await apiFetch(url, { method: isNew ? 'POST' : 'PUT', body: JSON.stringify(f) })
       const d = await r.json()
       if (!r.ok) { setErr(d.error); setSaving(false); return }

@@ -112,7 +112,9 @@ async function main() {
   db.exec("UPDATE expense_invoices SET currency='EUR' WHERE (currency IS NULL OR currency='BGN') AND месец >= '2026-01'");
   db.exec("UPDATE expense_invoices SET currency='BGN' WHERE currency IS NULL");
 
-  // ── Investments module: gold ───────────────────────────────────────────
+  // ── Investments module: precious metals (gold, silver, platinum) ──────
+  // Tables are named gold_* for historical reasons but contain a 'метал'
+  // column distinguishing 'gold' | 'silver' | 'platinum'.
   db.exec(`CREATE TABLE IF NOT EXISTS gold_investments (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     дата DATE NOT NULL,
@@ -145,7 +147,11 @@ async function main() {
     цена_eur REAL,
     промяна_24h REAL
   )`);
-  try { db.exec("CREATE INDEX IF NOT EXISTS idx_gold_price_date ON gold_price_history(дата DESC)"); } catch(_) {}
+  // Add 'метал' column for multi-metal support (idempotent migrations)
+  try { db.exec("ALTER TABLE gold_investments ADD COLUMN метал TEXT DEFAULT 'gold'");   console.log('Migration: added gold_investments.метал'); }   catch(_) {}
+  try { db.exec("ALTER TABLE gold_alerts ADD COLUMN метал TEXT DEFAULT 'gold'");        console.log('Migration: added gold_alerts.метал'); }         catch(_) {}
+  try { db.exec("ALTER TABLE gold_price_history ADD COLUMN метал TEXT DEFAULT 'gold'"); console.log('Migration: added gold_price_history.метал'); } catch(_) {}
+  try { db.exec("CREATE INDEX IF NOT EXISTS idx_gold_price_date ON gold_price_history(метал, дата DESC)"); } catch(_) {}
   db.exec(`CREATE TABLE IF NOT EXISTS investment_reports (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     месец TEXT,
@@ -154,7 +160,8 @@ async function main() {
     данни TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`);
-  console.log('investments tables ready (gold_investments, gold_alerts, gold_price_history, investment_reports)');
+  try { db.exec("ALTER TABLE investment_reports ADD COLUMN метал TEXT DEFAULT 'all'"); console.log('Migration: added investment_reports.метал'); } catch(_) {}
+  console.log('investments tables ready (multi-metal: gold/silver/platinum)');
 
   // Contract templates & contracts
   db.exec(`CREATE TABLE IF NOT EXISTS contract_templates (

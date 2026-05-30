@@ -3,8 +3,8 @@
 // reports and Resend for email delivery; price-check works without either.
 
 const cron = require('node-cron');
-const { getGoldPriceEUR } = require('./goldPrice');
-const { buildReport } = require('../routes/investments');
+const { getMetalPriceEUR } = require('./goldPrice');
+const { buildReport, SUPPORTED_METALS, METAL_LABEL_BG } = require('../routes/investments');
 
 function getAdminEmails(db) {
   return db.prepare("SELECT email FROM users WHERE role='admin' AND email IS NOT NULL AND email != ''").all().map(u => u.email);
@@ -70,45 +70,53 @@ function markdownToHtml(md) {
     .join('\n');
 }
 
+const METAL_ICON = { gold: '🥇', silver: '🥈', platinum: '⚪' };
+
+async function processMetal(db, metal) {
+  const price = await getMetalPriceEUR(metal);
+  if (!price) { console.warn(`[metals cron] ${metal} price fetch failed`); return; }
+  db.prepare('INSERT INTO gold_price_history (метал, цена_usd, цена_eur, промяна_24h) VALUES (?,?,?,?)')
+    .run(metal, price.usd || null, price.eur || null, price.change24h || 0);
+  console.log(`[metals cron] ${metal} price: €${Number(price.eur).toFixed(2)} (${price.source})`);
+
+  const alerts = db.prepare(`SELECT * FROM gold_alerts WHERE метал=? AND активна=1 AND задействана=0`).all(metal);
+  for (const a of alerts) {
+    const triggered =
+      (a.посока === 'под' && price.eur <= a.цена_eur) ||
+      (a.посока === 'над' && price.eur >= a.цена_eur);
+    if (!triggered) continue;
+
+    const icon = METAL_ICON[metal] || '📈';
+    const body = `
+      <h2>🚨 Алармата за ${METAL_LABEL_BG[metal]} се задейства</h2>
+      <table cellpadding="0" cellspacing="0" style="margin:18px 0;border-collapse:collapse;border:1px solid #d1d5db;border-radius:6px;overflow:hidden;width:100%;">
+        <tr><td style="background:#f9fafb;padding:8px 14px;border-bottom:1px solid #d1d5db;color:#6b7280;font-size:12px;">Метал</td>
+            <td style="padding:8px 14px;border-bottom:1px solid #d1d5db;font-weight:bold;">${icon} ${METAL_LABEL_BG[metal]}</td></tr>
+        <tr><td style="background:#f9fafb;padding:8px 14px;border-bottom:1px solid #d1d5db;color:#6b7280;font-size:12px;">Условие</td>
+            <td style="padding:8px 14px;border-bottom:1px solid #d1d5db;font-weight:bold;">Цена ${a.посока} €${Number(a.цена_eur).toFixed(0)}/oz</td></tr>
+        <tr><td style="background:#f9fafb;padding:8px 14px;border-bottom:1px solid #d1d5db;color:#6b7280;font-size:12px;">Текуща цена</td>
+            <td style="padding:8px 14px;border-bottom:1px solid #d1d5db;font-weight:bold;color:#166534;">€${Number(price.eur).toFixed(2)}/oz</td></tr>
+        ${a.количество_oz ? `<tr><td style="background:#f9fafb;padding:8px 14px;border-bottom:1px solid #d1d5db;color:#6b7280;font-size:12px;">Препоръчано количество</td>
+            <td style="padding:8px 14px;border-bottom:1px solid #d1d5db;font-weight:bold;">${a.количество_oz} oz ≈ €${(a.количество_oz * price.eur).toFixed(0)}</td></tr>` : ''}
+        <tr><td style="background:#f9fafb;padding:8px 14px;color:#6b7280;font-size:12px;">Време</td>
+            <td style="padding:8px 14px;">${new Date().toLocaleString('bg-BG')}</td></tr>
+      </table>
+      ${a.съобщение ? `<p style="background:#fef3c7;border:1px solid #fcd34d;padding:10px 14px;border-radius:6px;">${a.съобщение}</p>` : ''}
+    `;
+    for (const adminEmail of getAdminEmails(db)) {
+      await sendEmail({ to: adminEmail, subject: `${icon} ${METAL_LABEL_BG[metal]} alert: €${Number(price.eur).toFixed(0)}/oz`, html: emailShell(body) });
+    }
+    db.prepare("UPDATE gold_alerts SET задействана=1, задействана_на=datetime('now') WHERE id=?").run(a.id);
+    console.log(`[metals cron] ${metal} alert ${a.id} triggered at €${price.eur.toFixed(2)}`);
+  }
+}
+
 function startInvestmentsCron(db) {
-  // ── 1) Hourly price check + alert evaluation ─────────────────────────────
+  // ── 1) Hourly price check + alert evaluation for ALL metals ─────────────
   cron.schedule('0 * * * *', async () => {
-    try {
-      const price = await getGoldPriceEUR();
-      if (!price) { console.warn('[gold cron] price fetch failed'); return; }
-      db.prepare('INSERT INTO gold_price_history (цена_usd, цена_eur, промяна_24h) VALUES (?,?,?)')
-        .run(price.usd || null, price.eur || null, price.change24h || 0);
-      console.log(`[gold cron] price recorded: €${Number(price.eur).toFixed(2)} (${price.source})`);
-
-      const alerts = db.prepare(`SELECT * FROM gold_alerts WHERE активна=1 AND задействана=0`).all();
-      for (const a of alerts) {
-        const triggered =
-          (a.посока === 'под' && price.eur <= a.цена_eur) ||
-          (a.посока === 'над' && price.eur >= a.цена_eur);
-        if (!triggered) continue;
-
-        const body = `
-          <h2>🚨 Алармата за злато се задейства</h2>
-          <table cellpadding="0" cellspacing="0" style="margin:18px 0;border-collapse:collapse;border:1px solid #d1d5db;border-radius:6px;overflow:hidden;width:100%;">
-            <tr><td style="background:#f9fafb;padding:8px 14px;border-bottom:1px solid #d1d5db;color:#6b7280;font-size:12px;">Условие</td>
-                <td style="padding:8px 14px;border-bottom:1px solid #d1d5db;font-weight:bold;">Цена ${a.посока} €${Number(a.цена_eur).toFixed(0)}/oz</td></tr>
-            <tr><td style="background:#f9fafb;padding:8px 14px;border-bottom:1px solid #d1d5db;color:#6b7280;font-size:12px;">Текуща цена</td>
-                <td style="padding:8px 14px;border-bottom:1px solid #d1d5db;font-weight:bold;color:#166534;">€${Number(price.eur).toFixed(2)}/oz</td></tr>
-            ${a.количество_oz ? `<tr><td style="background:#f9fafb;padding:8px 14px;border-bottom:1px solid #d1d5db;color:#6b7280;font-size:12px;">Препоръчано количество</td>
-                <td style="padding:8px 14px;border-bottom:1px solid #d1d5db;font-weight:bold;">${a.количество_oz} oz ≈ €${(a.количество_oz * price.eur).toFixed(0)}</td></tr>` : ''}
-            <tr><td style="background:#f9fafb;padding:8px 14px;color:#6b7280;font-size:12px;">Време</td>
-                <td style="padding:8px 14px;">${new Date().toLocaleString('bg-BG')}</td></tr>
-          </table>
-          ${a.съобщение ? `<p style="background:#fef3c7;border:1px solid #fcd34d;padding:10px 14px;border-radius:6px;">${a.съобщение}</p>` : ''}
-        `;
-        for (const adminEmail of getAdminEmails(db)) {
-          await sendEmail({ to: adminEmail, subject: `🥇 Gold alert: €${Number(price.eur).toFixed(0)}/oz`, html: emailShell(body) });
-        }
-        db.prepare("UPDATE gold_alerts SET задействана=1, задействана_на=datetime('now') WHERE id=?").run(a.id);
-        console.log(`[gold cron] alert ${a.id} triggered at €${price.eur.toFixed(2)}`);
-      }
-    } catch (e) {
-      console.error('[gold cron] hourly job error:', e.message);
+    for (const metal of SUPPORTED_METALS) {
+      try { await processMetal(db, metal); }
+      catch (e) { console.error(`[metals cron] hourly ${metal} error:`, e.message); }
     }
   });
 
@@ -140,17 +148,13 @@ function startInvestmentsCron(db) {
 
   // Fire a price-check 60s after boot too — keeps history populated on fresh installs
   setTimeout(async () => {
-    try {
-      const price = await getGoldPriceEUR();
-      if (price) {
-        db.prepare('INSERT INTO gold_price_history (цена_usd, цена_eur, промяна_24h) VALUES (?,?,?)')
-          .run(price.usd || null, price.eur || null, price.change24h || 0);
-        console.log(`[gold cron] startup price: €${Number(price.eur).toFixed(2)}`);
-      }
-    } catch (e) { console.error('[gold cron] startup price error:', e.message); }
+    for (const metal of SUPPORTED_METALS) {
+      try { await processMetal(db, metal); }
+      catch (e) { console.error(`[metals cron] startup ${metal} error:`, e.message); }
+    }
   }, 60 * 1000);
 
-  console.log('[gold cron] schedules installed (hourly price, Mon 09:00 weekly, 1st 08:00 monthly)');
+  console.log('[metals cron] schedules installed for', SUPPORTED_METALS.join(', '), '(hourly price, Mon 09:00 weekly, 1st 08:00 monthly)');
 }
 
 module.exports = { startInvestmentsCron };

@@ -1,8 +1,12 @@
-// /api/investments — admin module for tracking gold (and later other assets).
-// Tenants do not access this. All endpoints require role = admin or broker.
+// /api/investments — admin module for precious-metals tracking.
+// Endpoints are parameterized by :metal (gold | silver | platinum).
+// Tenants are blocked; admin/broker only.
 
 const express = require('express');
-const { getGoldPriceEUR } = require('../lib/goldPrice');
+const { getMetalPriceEUR } = require('../lib/goldPrice');
+
+const SUPPORTED_METALS = ['gold', 'silver', 'platinum'];
+const METAL_LABEL_BG = { gold: 'злато', silver: 'сребро', platinum: 'платина' };
 
 module.exports = function(db) {
   const router = express.Router();
@@ -13,65 +17,68 @@ module.exports = function(db) {
     next();
   });
 
-  // ── Cached current price (avoid hammering external APIs) ──────────────────
-  let priceCache = { value: null, fetched_at: 0 };
+  // ── Cached current price per metal (avoid hammering APIs) ─────────────────
+  const priceCache = {}; // { gold: { value, fetched_at }, silver: {...}, ... }
   const PRICE_TTL = 5 * 60 * 1000; // 5 min
 
-  async function currentPrice() {
-    if (priceCache.value && Date.now() - priceCache.fetched_at < PRICE_TTL) {
-      return priceCache.value;
-    }
-    const p = await getGoldPriceEUR();
+  async function currentPrice(metal) {
+    const c = priceCache[metal];
+    if (c?.value && Date.now() - c.fetched_at < PRICE_TTL) return c.value;
+    const p = await getMetalPriceEUR(metal);
     if (p) {
-      priceCache = { value: p, fetched_at: Date.now() };
-      // Opportunistically store in history if no row exists for the current hour
-      const lastH = db.prepare("SELECT дата FROM gold_price_history ORDER BY id DESC LIMIT 1").get();
+      priceCache[metal] = { value: p, fetched_at: Date.now() };
+      // Opportunistically store in history if no row exists for current hour
+      const lastH = db.prepare("SELECT дата FROM gold_price_history WHERE метал=? ORDER BY id DESC LIMIT 1").get(metal);
       const needWrite = !lastH || (Date.now() - new Date(lastH.дата).getTime()) > 55 * 60 * 1000;
       if (needWrite) {
         try {
-          db.prepare("INSERT INTO gold_price_history (цена_usd, цена_eur, промяна_24h) VALUES (?,?,?)")
-            .run(p.usd || null, p.eur || null, p.change24h || 0);
+          db.prepare("INSERT INTO gold_price_history (метал, цена_usd, цена_eur, промяна_24h) VALUES (?,?,?,?)")
+            .run(metal, p.usd || null, p.eur || null, p.change24h || 0);
         } catch (_) {}
       }
     }
-    return priceCache.value;
+    return priceCache[metal]?.value || null;
   }
 
-  // ── GOLD: current price ───────────────────────────────────────────────────
-  router.get('/gold/price', async (req, res) => {
-    const p = await currentPrice();
-    if (!p) return res.status(502).json({ error: 'Цената на златото не е достъпна (external API failure)' });
+  function validateMetal(req, res, next) {
+    const m = (req.params.metal || '').toLowerCase();
+    if (!SUPPORTED_METALS.includes(m)) {
+      return res.status(400).json({ error: `Невалиден метал: ${m}. Позволени: ${SUPPORTED_METALS.join(', ')}` });
+    }
+    req.metal = m;
+    next();
+  }
+
+  // ── current price ────────────────────────────────────────────────────────
+  router.get('/:metal/price', validateMetal, async (req, res) => {
+    const p = await currentPrice(req.metal);
+    if (!p) return res.status(502).json({ error: `Цената на ${METAL_LABEL_BG[req.metal]} не е достъпна` });
     res.json({
+      метал:        req.metal,
       цена_usd:     p.usd,
       цена_eur:     p.eur,
       промяна_24h:  p.change24h,
       източник:     p.source,
-      обновено:     new Date(priceCache.fetched_at).toISOString(),
+      обновено:     new Date(priceCache[req.metal].fetched_at).toISOString(),
     });
   });
 
-  // ── GOLD: price history (last 30 days) ────────────────────────────────────
-  router.get('/gold/price-history', (req, res) => {
+  // ── price history ────────────────────────────────────────────────────────
+  router.get('/:metal/price-history', validateMetal, (req, res) => {
     const days = Math.min(365, Number(req.query.days) || 30);
     const rows = db.prepare(`
       SELECT id, дата, цена_eur, цена_usd, промяна_24h
       FROM gold_price_history
-      WHERE дата >= datetime('now', ?)
+      WHERE метал=? AND дата >= datetime('now', ?)
       ORDER BY дата ASC
-    `).all(`-${days} days`);
+    `).all(req.metal, `-${days} days`);
     res.json(rows);
   });
 
-  // ── GOLD: portfolio summary ───────────────────────────────────────────────
-  router.get('/gold/portfolio', async (req, res) => {
-    const txs = db.prepare('SELECT * FROM gold_investments ORDER BY дата ASC, id ASC').all();
-    let totalOz = 0;
-    let totalInvested = 0;       // sum of purchase costs minus sale proceeds
-    let totalBuyCost = 0;        // gross buy cost
-    let totalBuyOz = 0;          // gross buy quantity
-    let totalSellOz = 0;
-    let totalSellProceeds = 0;
-
+  // ── portfolio summary ────────────────────────────────────────────────────
+  router.get('/:metal/portfolio', validateMetal, async (req, res) => {
+    const txs = db.prepare('SELECT * FROM gold_investments WHERE метал=? ORDER BY дата ASC, id ASC').all(req.metal);
+    let totalOz = 0, totalInvested = 0, totalBuyOz = 0, totalBuyCost = 0, totalSellOz = 0, totalSellProceeds = 0;
     for (const t of txs) {
       if (t.тип === 'покупка') {
         totalOz       += Number(t.количество);
@@ -85,15 +92,14 @@ module.exports = function(db) {
         totalInvested     -= Number(t.обща_сума);
       }
     }
-
     const avgBuyPrice = totalBuyOz > 0 ? (totalBuyCost / totalBuyOz) : 0;
-    const price = await currentPrice();
+    const price = await currentPrice(req.metal);
     const currentPriceEur = price?.eur || null;
     const currentValue = currentPriceEur ? totalOz * currentPriceEur : null;
     const profit = currentValue !== null ? (currentValue - totalInvested) : null;
     const profitPct = (currentValue !== null && totalInvested > 0) ? ((profit / totalInvested) * 100) : null;
-
     res.json({
+      метал:                req.metal,
       общо_oz:              Number(totalOz.toFixed(4)),
       средна_цена:          Number(avgBuyPrice.toFixed(2)),
       текуща_цена:          currentPriceEur ? Number(currentPriceEur.toFixed(2)) : null,
@@ -108,37 +114,36 @@ module.exports = function(db) {
     });
   });
 
-  // ── GOLD: transactions list ───────────────────────────────────────────────
-  router.get('/gold/transactions', (req, res) => {
-    res.json(db.prepare('SELECT * FROM gold_investments ORDER BY дата DESC, id DESC').all());
+  // ── transactions list ────────────────────────────────────────────────────
+  router.get('/:metal/transactions', validateMetal, (req, res) => {
+    res.json(db.prepare('SELECT * FROM gold_investments WHERE метал=? ORDER BY дата DESC, id DESC').all(req.metal));
   });
 
-  // ── GOLD: create transaction ──────────────────────────────────────────────
-  router.post('/gold/transactions', (req, res) => {
+  // ── create transaction ───────────────────────────────────────────────────
+  router.post('/:metal/transactions', validateMetal, (req, res) => {
     const b = req.body || {};
-    const requiredErr = ['дата','тип','количество','цена_eur'].find(k => b[k] === undefined || b[k] === '');
-    if (requiredErr) return res.status(400).json({ error: `Поле "${requiredErr}" е задължително` });
+    const missing = ['дата','тип','количество','цена_eur'].find(k => b[k] === undefined || b[k] === '');
+    if (missing) return res.status(400).json({ error: `Поле "${missing}" е задължително` });
     if (!['покупка','продажба'].includes(b.тип)) {
       return res.status(400).json({ error: 'тип трябва да е "покупка" или "продажба"' });
     }
     const qty   = Number(b.количество);
     const price = Number(b.цена_eur);
     const total = b.обща_сума !== undefined ? Number(b.обща_сума) : Number((qty * price).toFixed(2));
-
     const r = db.prepare(`
       INSERT INTO gold_investments
-        (дата, тип, количество, цена_eur, обща_сума, доставчик, продукт, сертификат, съхранение, бележка)
-      VALUES (?,?,?,?,?,?,?,?,?,?)
+        (метал, дата, тип, количество, цена_eur, обща_сума, доставчик, продукт, сертификат, съхранение, бележка)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?)
     `).run(
-      b.дата, b.тип, qty, price, total,
+      req.metal, b.дата, b.тип, qty, price, total,
       b.доставчик || '', b.продукт || '', b.сертификат || '',
       b.съхранение || 'home', b.бележка || ''
     );
     res.status(201).json({ id: r.lastInsertRowid });
   });
 
-  router.put('/gold/transactions/:id', (req, res) => {
-    const existing = db.prepare('SELECT * FROM gold_investments WHERE id=?').get(req.params.id);
+  router.put('/:metal/transactions/:id', validateMetal, (req, res) => {
+    const existing = db.prepare('SELECT * FROM gold_investments WHERE id=? AND метал=?').get(req.params.id, req.metal);
     if (!existing) return res.status(404).json({ error: 'Not found' });
     const b = req.body || {};
     const set = (k) => b[k] !== undefined ? b[k] : existing[k];
@@ -159,25 +164,25 @@ module.exports = function(db) {
     res.json({ ok: true });
   });
 
-  router.delete('/gold/transactions/:id', (req, res) => {
-    db.prepare('DELETE FROM gold_investments WHERE id=?').run(req.params.id);
+  router.delete('/:metal/transactions/:id', validateMetal, (req, res) => {
+    db.prepare('DELETE FROM gold_investments WHERE id=? AND метал=?').run(req.params.id, req.metal);
     res.json({ ok: true });
   });
 
-  // ── GOLD: alerts ─────────────────────────────────────────────────────────
-  router.get('/gold/alerts', (req, res) => {
-    res.json(db.prepare('SELECT * FROM gold_alerts ORDER BY created_at DESC').all());
+  // ── alerts ───────────────────────────────────────────────────────────────
+  router.get('/:metal/alerts', validateMetal, (req, res) => {
+    res.json(db.prepare('SELECT * FROM gold_alerts WHERE метал=? ORDER BY created_at DESC').all(req.metal));
   });
 
-  router.post('/gold/alerts', (req, res) => {
+  router.post('/:metal/alerts', validateMetal, (req, res) => {
     const b = req.body || {};
     if (!b.цена_eur || !b.посока) return res.status(400).json({ error: 'цена_eur и посока са задължителни' });
     if (!['под','над'].includes(b.посока)) return res.status(400).json({ error: 'посока: "под" или "над"' });
     const r = db.prepare(`
-      INSERT INTO gold_alerts (цена_eur, посока, количество_oz, съобщение, активна)
-      VALUES (?,?,?,?,?)
+      INSERT INTO gold_alerts (метал, цена_eur, посока, количество_oz, съобщение, активна)
+      VALUES (?,?,?,?,?,?)
     `).run(
-      Number(b.цена_eur), b.посока,
+      req.metal, Number(b.цена_eur), b.посока,
       b.количество_oz ? Number(b.количество_oz) : null,
       b.съобщение || '',
       b.активна !== undefined ? (b.активна ? 1 : 0) : 1
@@ -185,8 +190,8 @@ module.exports = function(db) {
     res.status(201).json({ id: r.lastInsertRowid });
   });
 
-  router.put('/gold/alerts/:id', (req, res) => {
-    const existing = db.prepare('SELECT * FROM gold_alerts WHERE id=?').get(req.params.id);
+  router.put('/:metal/alerts/:id', validateMetal, (req, res) => {
+    const existing = db.prepare('SELECT * FROM gold_alerts WHERE id=? AND метал=?').get(req.params.id, req.metal);
     if (!existing) return res.status(404).json({ error: 'Not found' });
     const b = req.body || {};
     db.prepare(`
@@ -207,30 +212,39 @@ module.exports = function(db) {
     res.json({ ok: true });
   });
 
-  router.delete('/gold/alerts/:id', (req, res) => {
-    db.prepare('DELETE FROM gold_alerts WHERE id=?').run(req.params.id);
+  router.delete('/:metal/alerts/:id', validateMetal, (req, res) => {
+    db.prepare('DELETE FROM gold_alerts WHERE id=? AND метал=?').run(req.params.id, req.metal);
     res.json({ ok: true });
   });
 
-  // ── GOLD: reports (Claude-generated AI analyses) ─────────────────────────
-  router.get('/gold/reports', (req, res) => {
+  // ── reports ─────────────────────────────────────────────────────────────
+  router.get('/reports', (req, res) => {
     const limit = Math.min(50, Number(req.query.limit) || 12);
-    res.json(db.prepare('SELECT id, месец, тип, created_at FROM investment_reports ORDER BY created_at DESC LIMIT ?').all(limit));
+    const metal = req.query.metal;
+    if (metal && SUPPORTED_METALS.includes(metal)) {
+      res.json(db.prepare('SELECT id, метал, месец, тип, created_at FROM investment_reports WHERE метал=? OR метал=? ORDER BY created_at DESC LIMIT ?').all(metal, 'all', limit));
+    } else {
+      res.json(db.prepare('SELECT id, метал, месец, тип, created_at FROM investment_reports ORDER BY created_at DESC LIMIT ?').all(limit));
+    }
   });
 
-  router.get('/gold/reports/:id', (req, res) => {
+  router.get('/reports/:id', (req, res) => {
     const r = db.prepare('SELECT * FROM investment_reports WHERE id=?').get(req.params.id);
     if (!r) return res.status(404).json({ error: 'Not found' });
     res.json(r);
   });
 
-  // POST /gold/report — ad-hoc Claude-generated report. `type`: monthly | weekly | alert
-  router.post('/gold/report', async (req, res) => {
+  // POST /report — body { тип: weekly|monthly|alert, метал: gold|silver|platinum|all }
+  router.post('/report', async (req, res) => {
     const apiKey = process.env.ANTHROPIC_API_KEY;
     if (!apiKey) return res.status(500).json({ error: 'ANTHROPIC_API_KEY не е конфигуриран' });
     const reportType = (req.body?.тип || 'monthly').toLowerCase();
+    const metal      = (req.body?.метал || 'all').toLowerCase();
+    if (metal !== 'all' && !SUPPORTED_METALS.includes(metal)) {
+      return res.status(400).json({ error: 'метал: gold | silver | platinum | all' });
+    }
     try {
-      const result = await buildReport(db, reportType);
+      const result = await buildReport(db, reportType, metal);
       res.json(result);
     } catch (err) {
       console.error('Investment report error:', err.message);
@@ -238,23 +252,35 @@ module.exports = function(db) {
     }
   });
 
+  // ── Back-compat aliases for old /gold/* URLs (frontend still calls them
+  // during the transitional period) ────────────────────────────────────────
+  router.get('/gold/reports', (req, res, next) => {
+    req.url = '/reports?metal=gold';
+    router.handle(req, res, next);
+  });
+
   return router;
 };
 
-// ── Helper exported for the cron and the ad-hoc endpoint ───────────────────
-async function buildReport(db, reportType) {
+// ── Helpers exported for cron + ad-hoc endpoint ──────────────────────────
+async function buildReport(db, reportType, metal = 'all') {
   const Anthropic = require('@anthropic-ai/sdk');
   const client = new Anthropic.default
     ? new Anthropic.default({ apiKey: process.env.ANTHROPIC_API_KEY })
     : new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-  const portfolio = computePortfolioSnapshot(db);
-  const historyRows = db.prepare(`
-    SELECT дата, цена_eur, промяна_24h
-    FROM gold_price_history
-    WHERE дата >= datetime('now', ?)
-    ORDER BY дата ASC
-  `).all(reportType === 'weekly' ? '-14 days' : '-90 days');
+  const metalsToCover = metal === 'all' ? SUPPORTED_METALS : [metal];
+  const portfolios = {};
+  const histories = {};
+  for (const m of metalsToCover) {
+    portfolios[m] = computePortfolioSnapshot(db, m);
+    histories[m] = db.prepare(`
+      SELECT дата, цена_eur, промяна_24h
+      FROM gold_price_history
+      WHERE метал=? AND дата >= datetime('now', ?)
+      ORDER BY дата ASC
+    `).all(m, reportType === 'weekly' ? '-14 days' : '-90 days');
+  }
 
   const propertyMetrics = db.prepare(`
     SELECT SUM(наем) AS total_rent,
@@ -270,35 +296,41 @@ async function buildReport(db, reportType) {
       ? `алармен анализ (${new Date().toLocaleDateString('bg-BG')})`
       : `${new Date().toLocaleDateString('bg-BG', { month:'long', year:'numeric' })}`;
 
+  const metalsSection = metalsToCover.map(m => {
+    const p = portfolios[m];
+    const hist = histories[m];
+    return `
+ПОРТФЕЙЛ — ${METAL_LABEL_BG[m].toUpperCase()}:
+- Притежавани: ${p.общо_oz} troy oz.
+- Средна покупна цена: €${p.средна_цена.toFixed(0)}/oz.
+- Текуща цена: €${p.текуща_цена !== null ? p.текуща_цена.toFixed(0) : 'неизвестна'}/oz.
+- Обща инвестиция: €${p.обща_инвестиция.toFixed(0)}.
+- Текуща стойност: €${p.текуща_стойност !== null ? p.текуща_стойност.toFixed(0) : 'неизвестна'}.
+- Печалба: €${p.печалба_eur !== null ? p.печалба_eur.toFixed(0) : 'n/a'} (${p.печалба_pct !== null ? p.печалба_pct.toFixed(1) + '%' : 'n/a'}).
+
+Движение на цената (${hist.length} наблюдения):
+${hist.slice(-15).map(r => `- ${new Date(r.дата).toISOString().slice(0,10)}: €${Number(r.цена_eur).toFixed(0)}`).join('\n') || '— няма данни'}`;
+  }).join('\n');
+
   const prompt = `Ти си финансов анализатор на портфейла на Иво Лазаров (Sky Capital OOD).
-Генерирай ${reportType === 'weekly' ? 'седмично' : reportType === 'alert' ? 'алармено' : 'месечно'} инвестиционно резюме за ${periodName}.
+Генерирай ${reportType === 'weekly' ? 'седмично' : reportType === 'alert' ? 'алармено' : 'месечно'} инвестиционно резюме за ${periodName}${metal !== 'all' ? ` — фокус: ${METAL_LABEL_BG[metal]}` : ' — всички метали'}.
 
 ПОРТФЕЙЛ — ИМОТИ:
 - Месечни наеми (активни): €${(propertyMetrics?.total_rent || 0).toFixed(0)} от ${propertyMetrics?.active || 0}/${propertyMetrics?.total || 0} имота.
 - Общ дълг по кредити: €${(loans?.debt || 0).toFixed(0)}.
 - Месечни вноски: €${(loans?.monthly || 0).toFixed(0)}.
 - Нетен месечен cash-flow от наеми: €${((propertyMetrics?.total_rent || 0) - (loans?.monthly || 0)).toFixed(0)}.
-
-ПОРТФЕЙЛ — ЗЛАТО:
-- Притежавани: ${portfolio.общо_oz} troy oz.
-- Средна покупна цена: €${portfolio.средна_цена.toFixed(0)}/oz.
-- Текуща цена: €${portfolio.текуща_цена !== null ? portfolio.текуща_цена.toFixed(0) : 'неизвестна'}/oz.
-- Обща инвестиция: €${portfolio.обща_инвестиция.toFixed(0)}.
-- Текуща стойност: €${portfolio.текуща_стойност !== null ? portfolio.текуща_стойност.toFixed(0) : 'неизвестна'}.
-- Печалба: €${portfolio.печалба_eur !== null ? portfolio.печалба_eur.toFixed(0) : 'n/a'} (${portfolio.печалба_pct !== null ? portfolio.печалба_pct.toFixed(1) + '%' : 'n/a'}).
-
-ДВИЖЕНИЕ НА ЦЕНАТА (последни ${historyRows.length} наблюдения):
-${historyRows.slice(-30).map(r => `- ${new Date(r.дата).toISOString().slice(0,10)}: €${Number(r.цена_eur).toFixed(0)}`).join('\n') || '— няма исторически данни'}
+${metalsSection}
 
 Очаквам кратък структуриран markdown отговор (на български):
 
 ### 📊 Резюме
-1-2 изречения за състоянието на портфейла.
+1-2 изречения за състоянието.
 
-### 🥇 Анализ на златото
-- Тенденция (нагоре/надолу/странично) с конкретни числа.
-- Сравнение спрямо средната покупна цена.
-- Препоръка: купувай / задръж / частична реализация.
+### 🥇 Анализ по метал
+За всеки метал: тенденция (нагоре/надолу/странично), сравнение спрямо средната покупна цена, препоръка (купувай/задръж/частична реализация).
+
+${metal === 'all' ? '### ⚖️ Диверсификация\nКоментар как се разпределя капиталът между трите метала.\n' : ''}
 
 ### 🏠 Контекст от имотите
 Накратко как cash-flow от наеми се отнася към инвестициите.
@@ -306,31 +338,31 @@ ${historyRows.slice(-30).map(r => `- ${new Date(r.дата).toISOString().slice(
 ### 💡 Конкретна следваща стъпка
 Едно конкретно действие за следващия период.
 
-Не повече от 300 думи. Конкретен, без вода.`;
+Не повече от ${metal === 'all' ? 400 : 300} думи. Конкретен, без вода.`;
 
   const response = await client.messages.create({
     model: 'claude-sonnet-4-6',
-    max_tokens: 1500,
+    max_tokens: 2000,
     messages: [{ role: 'user', content: prompt }],
   });
   const text = (response.content?.[0]?.text || '').trim();
 
   const r = db.prepare(`
-    INSERT INTO investment_reports (месец, тип, съдържание, данни)
-    VALUES (?,?,?,?)
+    INSERT INTO investment_reports (метал, месец, тип, съдържание, данни)
+    VALUES (?,?,?,?,?)
   `).run(
+    metal,
     new Date().toISOString().slice(0, 7),
     reportType,
     text,
-    JSON.stringify({ portfolio, propertyMetrics, loans, historyPoints: historyRows.length })
+    JSON.stringify({ portfolios, propertyMetrics, loans })
   );
 
-  return { id: r.lastInsertRowid, тип: reportType, съдържание: text };
+  return { id: r.lastInsertRowid, тип: reportType, метал: metal, съдържание: text };
 }
 
-// Same logic as the /gold/portfolio handler — extracted for the cron + report
-function computePortfolioSnapshot(db) {
-  const txs = db.prepare('SELECT * FROM gold_investments ORDER BY дата ASC, id ASC').all();
+function computePortfolioSnapshot(db, metal = 'gold') {
+  const txs = db.prepare('SELECT * FROM gold_investments WHERE метал=? ORDER BY дата ASC, id ASC').all(metal);
   let totalOz = 0, totalInvested = 0, totalBuyOz = 0, totalBuyCost = 0;
   for (const t of txs) {
     if (t.тип === 'покупка') {
@@ -344,12 +376,13 @@ function computePortfolioSnapshot(db) {
     }
   }
   const avgBuyPrice = totalBuyOz > 0 ? (totalBuyCost / totalBuyOz) : 0;
-  const latestPrice = db.prepare('SELECT цена_eur FROM gold_price_history ORDER BY id DESC LIMIT 1').get();
+  const latestPrice = db.prepare('SELECT цена_eur FROM gold_price_history WHERE метал=? ORDER BY id DESC LIMIT 1').get(metal);
   const currentEur  = latestPrice ? Number(latestPrice.цена_eur) : null;
   const currentValue = currentEur ? totalOz * currentEur : null;
   const profit = currentValue !== null ? (currentValue - totalInvested) : null;
   const profitPct = (currentValue !== null && totalInvested > 0) ? ((profit / totalInvested) * 100) : null;
   return {
+    метал:             metal,
     общо_oz:           Number(totalOz.toFixed(4)),
     средна_цена:       Number(avgBuyPrice.toFixed(2)),
     текуща_цена:       currentEur,
@@ -362,3 +395,5 @@ function computePortfolioSnapshot(db) {
 
 module.exports.buildReport = buildReport;
 module.exports.computePortfolioSnapshot = computePortfolioSnapshot;
+module.exports.SUPPORTED_METALS = SUPPORTED_METALS;
+module.exports.METAL_LABEL_BG = METAL_LABEL_BG;
