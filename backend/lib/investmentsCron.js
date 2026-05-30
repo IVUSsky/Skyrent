@@ -5,6 +5,10 @@
 const cron = require('node-cron');
 const { getMetalPriceEUR } = require('./goldPrice');
 const { buildReport, SUPPORTED_METALS, METAL_LABEL_BG } = require('../routes/investments');
+const { runAgent } = require('./newsAgent');
+
+const SIGNAL_EMOJI = { 'купи': '🟢', 'продай': '🔴', 'задръж': '⚪', 'наблюдавай': '🟡' };
+const CONFIDENCE_THRESHOLD = 60;
 
 function getAdminEmails(db) {
   return db.prepare("SELECT email FROM users WHERE role='admin' AND email IS NOT NULL AND email != ''").all().map(u => u.email);
@@ -124,6 +128,56 @@ function startInvestmentsCron(db) {
     }
   });
 
+  // ── 1b) AI Agent — daily 09:30 Mon-Fri ──────────────────────────────────
+  // Runs after the European market opens; analyzes news + portfolio + price
+  // history and stores a signal. Emails admins only on actionable signals
+  // (купи/продай) with confidence >= 60.
+  cron.schedule('30 9 * * 1-5', async () => {
+    if (!process.env.ANTHROPIC_API_KEY) {
+      console.warn('[agent cron] skipping — no ANTHROPIC_API_KEY');
+      return;
+    }
+    for (const metal of SUPPORTED_METALS) {
+      try {
+        const signal = await runAgent(db, metal);
+        console.log(`[agent cron] ${metal}: ${signal.сигнал} (${signal.уверенност}% confidence)`);
+
+        const isActionable = ['купи', 'продай'].includes(signal.сигнал);
+        if (isActionable && Number(signal.уверенност) >= CONFIDENCE_THRESHOLD) {
+          const emoji = SIGNAL_EMOJI[signal.сигнал] || '📊';
+          const body = `
+            <h2>${emoji} AI препоръка: ${signal.сигнал.toUpperCase()} ${METAL_LABEL_BG[metal]}</h2>
+            <table cellpadding="0" cellspacing="0" style="margin:18px 0;border-collapse:collapse;border:1px solid #d1d5db;border-radius:6px;overflow:hidden;width:100%;">
+              <tr><td style="background:#f9fafb;padding:8px 14px;border-bottom:1px solid #d1d5db;color:#6b7280;font-size:12px;">Сигнал</td>
+                  <td style="padding:8px 14px;border-bottom:1px solid #d1d5db;font-weight:bold;">${emoji} ${signal.сигнал.toUpperCase()}</td></tr>
+              <tr><td style="background:#f9fafb;padding:8px 14px;border-bottom:1px solid #d1d5db;color:#6b7280;font-size:12px;">Увереност</td>
+                  <td style="padding:8px 14px;border-bottom:1px solid #d1d5db;font-weight:bold;">${signal.уверенност}%</td></tr>
+              <tr><td style="background:#f9fafb;padding:8px 14px;border-bottom:1px solid #d1d5db;color:#6b7280;font-size:12px;">Текуща цена</td>
+                  <td style="padding:8px 14px;border-bottom:1px solid #d1d5db;">€${signal.цена_eur ? Number(signal.цена_eur).toFixed(2) : 'n/a'}/oz</td></tr>
+              <tr><td style="background:#f9fafb;padding:8px 14px;color:#6b7280;font-size:12px;">Действие</td>
+                  <td style="padding:8px 14px;font-weight:bold;color:#166534;">${signal.действие_препоръка || '—'}</td></tr>
+            </table>
+            <h3>📝 Обоснование</h3>
+            <p>${signal.обоснование || '—'}</p>
+            ${signal.ключови_фактори && signal.ключови_фактори.length ? `
+            <h3>🔑 Ключови фактори</h3>
+            <ul>${signal.ключови_фактори.map(f => `<li>${f}</li>`).join('')}</ul>` : ''}
+          `;
+          for (const adminEmail of getAdminEmails(db)) {
+            await sendEmail({
+              to: adminEmail,
+              subject: `${emoji} ${signal.сигнал.toUpperCase()} ${METAL_LABEL_BG[metal]} — €${signal.цена_eur ? Number(signal.цена_eur).toFixed(0) : '?'} (${signal.уверенност}% conf.)`,
+              html: emailShell(body),
+            });
+          }
+          db.prepare('UPDATE agent_signals SET email_sent=1 WHERE id=?').run(signal.id);
+        }
+      } catch (e) {
+        console.error(`[agent cron] ${metal} error:`, e.message);
+      }
+    }
+  });
+
   // ── 2) Monday 09:00 — weekly Claude summary ──────────────────────────────
   cron.schedule('0 9 * * 1', async () => {
     if (!process.env.ANTHROPIC_API_KEY) { console.warn('[gold cron] skipping weekly report — no API key'); return; }
@@ -158,7 +212,7 @@ function startInvestmentsCron(db) {
     }
   }, 60 * 1000);
 
-  console.log('[metals cron] schedules installed for', SUPPORTED_METALS.join(', '), '(Mon-Fri 08:00+20:00, Mon 09:00 weekly, 1st 08:00 monthly)');
+  console.log('[metals cron] schedules installed for', SUPPORTED_METALS.join(', '), '(Mon-Fri 08:00+20:00 price, 09:30 agent, Mon 09:00 weekly, 1st 08:00 monthly)');
 }
 
 module.exports = { startInvestmentsCron };

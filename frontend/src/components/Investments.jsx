@@ -48,7 +48,10 @@ function MetalDashboard({ API, metal, metalConfig }) {
   const [alerts, setAlerts] = useState([])
   const [reports, setReports] = useState([])
   const [toast, setToast] = useState(null)
-  const [view, setView] = useState('dashboard') // dashboard | transactions | alerts | reports
+  const [view, setView] = useState('dashboard') // dashboard | transactions | alerts | reports | agent
+  const [signals, setSignals] = useState([])
+  const [analyzing, setAnalyzing] = useState(false)
+  const [openSignal, setOpenSignal] = useState(null)
   const [showTxForm, setShowTxForm] = useState(false)
   const [editTx, setEditTx] = useState(null)
   const [showAlertForm, setShowAlertForm] = useState(false)
@@ -69,8 +72,24 @@ function MetalDashboard({ API, metal, metalConfig }) {
     apiFetch(`${API}/api/investments/${metal}/transactions`).then(r => r.json()).then(setTransactions).catch(() => setTransactions([]))
     apiFetch(`${API}/api/investments/${metal}/alerts`).then(r => r.json()).then(setAlerts).catch(() => setAlerts([]))
     apiFetch(`${API}/api/investments/reports?metal=${metal}`).then(r => r.json()).then(setReports).catch(() => setReports([]))
+    apiFetch(`${API}/api/investments/agent/signals?metal=${metal}&limit=30`).then(r => r.json()).then(setSignals).catch(() => setSignals([]))
   }
   useEffect(loadAll, [metal])
+
+  const analyzeNow = async () => {
+    setAnalyzing(true)
+    try {
+      const r = await apiFetch(`${API}/api/investments/agent/analyze`, {
+        method: 'POST', body: JSON.stringify({ метал: metal }),
+      })
+      const d = await r.json()
+      if (!r.ok) { showToast(d.error || 'Грешка', 'error'); setAnalyzing(false); return }
+      setOpenSignal(d)
+      loadAll()
+      showToast('Анализът е завършен')
+    } catch (e) { showToast(e.message, 'error') }
+    finally { setAnalyzing(false) }
+  }
 
   const chartData = useMemo(() => history.map(h => ({
     дата: new Date(h.дата).toLocaleDateString('bg-BG', { day: '2-digit', month: '2-digit' }),
@@ -107,6 +126,7 @@ function MetalDashboard({ API, metal, metalConfig }) {
           ['dashboard',   '📊 Dashboard'],
           ['transactions', '💼 Сделки'],
           ['alerts',      '🚨 Аларми'],
+          ['agent',       '🤖 AI Агент'],
           ['reports',     '📄 AI Доклади'],
         ].map(([id, label]) => (
           <button key={id} onClick={() => setView(id)}
@@ -300,6 +320,94 @@ function MetalDashboard({ API, metal, metalConfig }) {
         </div>
       )}
 
+      {/* AI Agent */}
+      {view === 'agent' && (
+        <div className="space-y-4">
+          {/* Latest signal card */}
+          {signals[0] && (
+            <button onClick={async () => {
+              const f = await apiFetch(`${API}/api/investments/agent/signals/${signals[0].id}`).then(x => x.json())
+              setOpenSignal(f)
+            }} className={`w-full text-left rounded-xl p-5 border-2 ${
+              signals[0].сигнал === 'купи' ? 'bg-green-50 border-green-300' :
+              signals[0].сигнал === 'продай' ? 'bg-red-50 border-red-300' :
+              signals[0].сигнал === 'наблюдавай' ? 'bg-yellow-50 border-yellow-300' :
+              'bg-gray-50 border-gray-200'
+            } hover:shadow-md`}>
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-3xl">{signals[0].сигнал === 'купи' ? '🟢' : signals[0].сигнал === 'продай' ? '🔴' : signals[0].сигнал === 'наблюдавай' ? '🟡' : '⚪'}</span>
+                  <div>
+                    <div className="text-xl font-bold text-gray-800 uppercase">{signals[0].сигнал}</div>
+                    <div className="text-xs text-gray-500">{new Date(signals[0].дата).toLocaleString('bg-BG')}</div>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="text-2xl font-bold text-gray-700">{signals[0].уверенност}%</div>
+                  <div className="text-xs text-gray-500">увереност</div>
+                </div>
+              </div>
+              {signals[0].действие_препоръка && (
+                <div className="bg-white/60 border border-gray-200 rounded-lg p-3 mt-3">
+                  <div className="text-xs text-gray-500 font-semibold uppercase mb-1">Действие</div>
+                  <div className="text-sm text-gray-800">{signals[0].действие_препоръка}</div>
+                </div>
+              )}
+              {signals[0].обоснование && (
+                <p className="text-sm text-gray-600 mt-3 italic">"{signals[0].обоснование}"</p>
+              )}
+              <div className="text-xs text-blue-600 mt-3">прегледай детайли →</div>
+            </button>
+          )}
+
+          {/* Manual analyze button */}
+          <div className="bg-white border border-gray-200 rounded-xl p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="font-semibold text-gray-800">🤖 Анализ сега</h3>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  AI чете последните новини за {metalConfig?.label} + цените + портфейла → генерира сигнал.
+                </p>
+              </div>
+              <button onClick={analyzeNow} disabled={analyzing}
+                className="bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white text-sm font-semibold px-4 py-2 rounded-lg">
+                {analyzing ? '...analyzing' : '⚡ Анализирай'}
+              </button>
+            </div>
+          </div>
+
+          {/* History */}
+          <div className="bg-white border border-gray-200 rounded-xl p-4">
+            <h3 className="text-sm font-semibold text-gray-700 mb-3">История на сигналите ({signals.length})</h3>
+            {signals.length === 0 ? (
+              <div className="text-center text-gray-400 py-8 text-sm">
+                Все още няма анализи. Натисни <strong>⚡ Анализирай</strong> или изчакай ежедневния cron (09:30 Mon-Fri).
+              </div>
+            ) : (
+              <div className="space-y-1">
+                {signals.slice(1).map(s => (
+                  <button key={s.id} onClick={async () => {
+                    const f = await apiFetch(`${API}/api/investments/agent/signals/${s.id}`).then(x => x.json())
+                    setOpenSignal(f)
+                  }} className="w-full text-left flex items-center gap-3 p-2 rounded hover:bg-gray-50">
+                    <span className="text-xl">{s.сигнал === 'купи' ? '🟢' : s.сигнал === 'продай' ? '🔴' : s.сигнал === 'наблюдавай' ? '🟡' : '⚪'}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium uppercase">{s.сигнал}</span>
+                        <span className="text-xs text-gray-500">{s.уверенност}%</span>
+                        {s.email_sent ? <span className="text-xs text-green-600">✉️</span> : null}
+                      </div>
+                      <div className="text-xs text-gray-500">{new Date(s.дата).toLocaleString('bg-BG')} · €{s.цена_eur ? Number(s.цена_eur).toFixed(0) : 'n/a'}/oz</div>
+                    </div>
+                    <div className="text-xs text-blue-600">→</div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Reports */}
       {view === 'reports' && (
         <div className="bg-white rounded-xl shadow border border-gray-100 p-4">
@@ -352,6 +460,7 @@ function MetalDashboard({ API, metal, metalConfig }) {
         onImported={(n) => { showToast(`Импортирани ${n} сделки`); loadAll() }}
       />}
       {openReport && <ReportModal report={openReport} onClose={() => setOpenReport(null)} />}
+      {openSignal && <SignalModal signal={openSignal} onClose={() => setOpenSignal(null)} />}
     </div>
   )
 }
@@ -511,6 +620,71 @@ function ReportModal({ report, onClose }) {
           <article className="prose prose-sm max-w-none whitespace-pre-wrap">
             {report.съдържание}
           </article>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function SignalModal({ signal, onClose }) {
+  const news = (() => {
+    try { return JSON.parse(signal.новини_json || '{}').news || [] } catch { return [] }
+  })()
+  const keywords = (() => {
+    try { return JSON.parse(signal.новини_json || '{}').keywords || [] } catch { return [] }
+  })()
+  const icon = { 'купи': '🟢', 'продай': '🔴', 'задръж': '⚪', 'наблюдавай': '🟡' }[signal.сигнал] || '📊'
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col">
+        <div className="px-6 py-4 border-b flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <span className="text-4xl">{icon}</span>
+            <div>
+              <h3 className="font-bold text-gray-900 text-lg uppercase">{signal.сигнал} {signal.метал === 'gold' ? 'злато' : 'сребро'}</h3>
+              <div className="text-xs text-gray-500">{new Date(signal.дата).toLocaleString('bg-BG')} · €{signal.цена_eur ? Number(signal.цена_eur).toFixed(2) : 'n/a'}/oz · {signal.уверенност}% увереност</div>
+            </div>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl">×</button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
+          {signal.действие_препоръка && (
+            <div className="bg-green-50 border border-green-200 rounded-lg p-3">
+              <div className="text-xs font-semibold text-green-700 uppercase mb-1">⚡ Действие</div>
+              <div className="text-sm text-green-900 font-semibold">{signal.действие_препоръка}</div>
+            </div>
+          )}
+          {signal.обоснование && (
+            <div>
+              <div className="text-xs font-semibold text-gray-500 uppercase mb-1">📝 Обоснование</div>
+              <p className="text-sm text-gray-800">{signal.обоснование}</p>
+            </div>
+          )}
+          {keywords.length > 0 && (
+            <div>
+              <div className="text-xs font-semibold text-gray-500 uppercase mb-2">🔑 Ключови фактори</div>
+              <ul className="text-sm text-gray-800 space-y-1">
+                {keywords.map((k, i) => <li key={i}>• {k}</li>)}
+              </ul>
+            </div>
+          )}
+          {news.length > 0 && (
+            <div>
+              <div className="text-xs font-semibold text-gray-500 uppercase mb-2">📰 Анализирани новини ({news.length})</div>
+              <div className="space-y-2">
+                {news.map((n, i) => (
+                  <a key={i} href={n.link} target="_blank" rel="noopener noreferrer"
+                    className="block bg-gray-50 hover:bg-blue-50 rounded-lg p-3 border border-gray-200">
+                    <div className="text-xs text-blue-600 font-semibold">{n.source}</div>
+                    <div className="text-sm font-medium text-gray-800 mt-0.5">{n.title}</div>
+                    {n.description && <div className="text-xs text-gray-600 mt-1 line-clamp-2">{n.description.slice(0, 200)}</div>}
+                    {n.pubDate && <div className="text-xs text-gray-400 mt-1">{n.pubDate}</div>}
+                  </a>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

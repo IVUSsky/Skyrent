@@ -311,6 +311,48 @@ module.exports = function(db) {
     res.json(r);
   });
 
+  // ── AI Market Agent ──────────────────────────────────────────────────────
+  // GET /agent/signals — recent signals list (optionally filter by metal)
+  router.get('/agent/signals', (req, res) => {
+    const limit = Math.min(100, Number(req.query.limit) || 30);
+    const metal = req.query.metal;
+    let sql = `SELECT id, дата, метал, сигнал, уверенност, обоснование, цена_eur, действие_препоръка, email_sent
+               FROM agent_signals`;
+    const params = [];
+    if (metal && SUPPORTED_METALS.includes(metal)) {
+      sql += ' WHERE метал=?';
+      params.push(metal);
+    }
+    sql += ' ORDER BY дата DESC LIMIT ?';
+    params.push(limit);
+    res.json(db.prepare(sql).all(...params));
+  });
+
+  router.get('/agent/signals/:id', (req, res) => {
+    const row = db.prepare('SELECT * FROM agent_signals WHERE id=?').get(req.params.id);
+    if (!row) return res.status(404).json({ error: 'Not found' });
+    res.json(row);
+  });
+
+  // POST /agent/analyze — manually trigger an analysis for a metal
+  // Body: { метал: gold|silver }
+  router.post('/agent/analyze', async (req, res) => {
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) return res.status(500).json({ error: 'ANTHROPIC_API_KEY не е конфигуриран' });
+    const metal = (req.body?.метал || req.body?.metal || 'gold').toLowerCase();
+    if (!SUPPORTED_METALS.includes(metal)) {
+      return res.status(400).json({ error: `Невалиден метал: ${metal}` });
+    }
+    try {
+      const { runAgent } = require('../lib/newsAgent');
+      const result = await runAgent(db, metal);
+      res.json(result);
+    } catch (err) {
+      console.error('Agent error:', err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // POST /report — body { тип: weekly|monthly|alert, метал: gold|silver|platinum|all }
   router.post('/report', async (req, res) => {
     const apiKey = process.env.ANTHROPIC_API_KEY;

@@ -163,7 +163,22 @@ async function main() {
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`);
   try { db.exec("ALTER TABLE investment_reports ADD COLUMN метал TEXT DEFAULT 'all'"); console.log('Migration: added investment_reports.метал'); } catch(_) {}
-  console.log('investments tables ready (multi-metal: gold/silver/platinum)');
+
+  // AI Market Agent — daily signals from news + price analysis
+  db.exec(`CREATE TABLE IF NOT EXISTS agent_signals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    дата DATETIME DEFAULT CURRENT_TIMESTAMP,
+    метал TEXT NOT NULL,
+    сигнал TEXT NOT NULL,
+    уверенност INTEGER,
+    обоснование TEXT,
+    новини_json TEXT,
+    цена_eur REAL,
+    действие_препоръка TEXT,
+    email_sent INTEGER DEFAULT 0
+  )`);
+  try { db.exec("CREATE INDEX IF NOT EXISTS idx_agent_signals_metal_date ON agent_signals(метал, дата DESC)"); } catch(_) {}
+  console.log('investments tables ready (multi-metal: gold/silver/platinum + agent_signals)');
 
   // Contract templates & contracts
   db.exec(`CREATE TABLE IF NOT EXISTS contract_templates (
