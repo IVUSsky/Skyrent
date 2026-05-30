@@ -413,6 +413,7 @@ async function main() {
 
   app.use('/api/smart', require('./routes/smart')(db));
   app.use('/api/inventory', require('./routes/inventory')(db));
+  app.use('/api/investments', require('./routes/investments')(db));
   app.use('/api/tenant', require('./routes/tenant')(db));
 
   // Stripe payments — tenant-facing endpoints mounted under /api/tenant (auth + tenant guard inside)
@@ -455,6 +456,14 @@ async function main() {
   // Run shortly after startup so port-bind isn't delayed
   setTimeout(runExpiryCheck, 30 * 1000);
   setInterval(runExpiryCheck, 24 * 60 * 60 * 1000);
+
+  // ─── Investments cron (gold price + alerts + AI reports) ─────────────────
+  try {
+    const { startInvestmentsCron } = require('./lib/investmentsCron');
+    startInvestmentsCron(db);
+  } catch (e) {
+    console.error('Failed to start investments cron:', e.message);
+  }
 
   // ─── SEPA Autopay daily cron ──────────────────────────────────────────────
   // Each day at boot + every 24h, charge users whose autopay_day matches today.
