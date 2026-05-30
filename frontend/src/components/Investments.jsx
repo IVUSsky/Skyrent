@@ -2,10 +2,11 @@ import React, { useState, useEffect, useMemo } from 'react'
 import { apiFetch } from '../api'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts'
 
+// Платината ще се добави по-късно (раздкоментирай реда).
 const METALS = [
   { id: 'gold',     label: '🥇 Злато',    accent: '#f59e0b', accentBg: 'bg-amber-500',  bgSoft: 'bg-amber-50',  border: 'border-amber-200', textSoft: 'text-amber-700' },
   { id: 'silver',   label: '🥈 Сребро',   accent: '#9ca3af', accentBg: 'bg-gray-400',   bgSoft: 'bg-gray-100',  border: 'border-gray-300',  textSoft: 'text-gray-600' },
-  { id: 'platinum', label: '⚪ Платина',  accent: '#0ea5e9', accentBg: 'bg-sky-500',    bgSoft: 'bg-sky-50',    border: 'border-sky-200',   textSoft: 'text-sky-700' },
+  // { id: 'platinum', label: '⚪ Платина',  accent: '#0ea5e9', accentBg: 'bg-sky-500',    bgSoft: 'bg-sky-50',    border: 'border-sky-200',   textSoft: 'text-sky-700' },
 ]
 
 export default function Investments({ API }) {
@@ -191,8 +192,8 @@ function MetalDashboard({ API, metal, metalConfig }) {
             </button>
             <button onClick={() => generateReport('monthly', 'all')} disabled={generating}
               className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-left hover:bg-emerald-100">
-              <div className="font-semibold text-emerald-800">⚖️ Цялостен месечен (3-те метала)</div>
-              <div className="text-xs text-emerald-700 mt-1">Сравнение злато + сребро + платина.</div>
+              <div className="font-semibold text-emerald-800">⚖️ Цялостен месечен</div>
+              <div className="text-xs text-emerald-700 mt-1">Сравнение злато + сребро.</div>
             </button>
           </div>
         </>

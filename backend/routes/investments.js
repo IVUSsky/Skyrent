@@ -5,7 +5,10 @@
 const express = require('express');
 const { getMetalPriceEUR } = require('../lib/goldPrice');
 
-const SUPPORTED_METALS = ['gold', 'silver', 'platinum'];
+// Платината е поддържана от helper-а и DB schema-та, но засега не я излагаме
+// през UI/cron. За да я върнем: добави 'platinum' в SUPPORTED_METALS + METAL_LABEL_BG
+// и съответната пункт в METALS array във frontend.
+const SUPPORTED_METALS = ['gold', 'silver'];
 const METAL_LABEL_BG = { gold: 'злато', silver: 'сребро', platinum: 'платина' };
 
 module.exports = function(db) {
