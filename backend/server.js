@@ -178,7 +178,24 @@ async function main() {
     email_sent INTEGER DEFAULT 0
   )`);
   try { db.exec("CREATE INDEX IF NOT EXISTS idx_agent_signals_metal_date ON agent_signals(метал, дата DESC)"); } catch(_) {}
-  console.log('investments tables ready (multi-metal: gold/silver/platinum + agent_signals)');
+
+  // Trading 212 portfolio snapshots — daily history for charting net wealth.
+  db.exec(`CREATE TABLE IF NOT EXISTS t212_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    дата DATETIME DEFAULT CURRENT_TIMESTAMP,
+    валута TEXT,
+    кеш_общо REAL,
+    кеш_свободен REAL,
+    блокиран REAL,
+    инвестирано REAL,
+    текуща_стойност REAL,
+    печалба REAL,
+    печалба_pct REAL,
+    брой_позиции INTEGER,
+    позиции_json TEXT
+  )`);
+  try { db.exec("CREATE INDEX IF NOT EXISTS idx_t212_snapshots_date ON t212_snapshots(дата DESC)"); } catch(_) {}
+  console.log('investments tables ready (multi-metal: gold/silver/platinum + agent_signals + t212_snapshots)');
 
   // Contract templates & contracts
   db.exec(`CREATE TABLE IF NOT EXISTS contract_templates (
@@ -436,6 +453,21 @@ async function main() {
     email TEXT DEFAULT '',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`);
+  // Login audit log — security alerts + forensics
+  db.exec(`CREATE TABLE IF NOT EXISTS login_audit (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER REFERENCES users(id),
+    username TEXT,
+    success INTEGER NOT NULL,
+    ip TEXT,
+    user_agent TEXT,
+    totp_used INTEGER DEFAULT 0,
+    failure_reason TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+  try { db.exec("CREATE INDEX IF NOT EXISTS idx_login_audit_user_date ON login_audit(user_id, created_at DESC)"); } catch(_) {}
+  console.log('login_audit table ready');
+
   try { db.exec("ALTER TABLE users ADD COLUMN phone TEXT DEFAULT ''");          console.log('Migration: added users.phone'); }          catch(_) {}
   try { db.exec("ALTER TABLE users ADD COLUMN must_change_password INTEGER DEFAULT 0"); console.log('Migration: added users.must_change_password'); } catch(_) {}
   try { db.exec("ALTER TABLE users ADD COLUMN last_login_at DATETIME");          console.log('Migration: added users.last_login_at'); }  catch(_) {}
@@ -549,6 +581,45 @@ async function main() {
     startInvestmentsCron(db);
   } catch (e) {
     console.error('Failed to start investments cron:', e.message);
+  }
+
+  // ─── Daily DB backup cron + email ─────────────────────────────────────────
+  try {
+    const { startBackupCron, runBackup } = require('./lib/backupCron');
+    startBackupCron(db);
+    // Expose a manual-trigger endpoint for admins (handy if you want a fresh
+    // copy before risky changes). Tenant role blocked.
+    app.post('/api/backup/run', async (req, res) => {
+      if (req.user?.role === 'tenant') return res.status(403).json({ error: 'Forbidden' });
+      try {
+        const result = await runBackup(db);
+        res.json(result);
+      } catch (err) { res.status(500).json({ error: err.message }); }
+    });
+
+    // Manual /data zip download — bundles contracts, invoices, photos.
+    // Big — not emailed; downloaded on demand. Tenant role blocked.
+    app.get('/api/backup/data', (req, res) => {
+      if (req.user?.role === 'tenant') return res.status(403).json({ error: 'Forbidden' });
+      try {
+        const AdmZip = require('adm-zip');
+        const dataDir = process.env.DATA_DIR || path.join(__dirname, 'data');
+        if (!fs.existsSync(dataDir)) return res.status(404).json({ error: 'DATA_DIR missing' });
+        const zip = new AdmZip();
+        // Only include the subdirectories we care about — skip /backups so the
+        // archive doesn't recursively grow.
+        for (const sub of ['contracts', 'invoices', 'property_photos']) {
+          const dir = path.join(dataDir, sub);
+          if (fs.existsSync(dir)) zip.addLocalFolder(dir, sub);
+        }
+        const date = new Date().toISOString().slice(0, 10);
+        res.setHeader('Content-Type', 'application/zip');
+        res.setHeader('Content-Disposition', `attachment; filename="skyrent_data_${date}.zip"`);
+        res.send(zip.toBuffer());
+      } catch (err) { res.status(500).json({ error: err.message }); }
+    });
+  } catch (e) {
+    console.error('Failed to start backup cron:', e.message);
   }
 
   // ─── Tenant chat learner — weekly digest (Sun 02:00 Europe/Sofia) ─────────
