@@ -350,6 +350,24 @@ async function main() {
   )`);
   console.log('property_photos table ready');
 
+  // Apartment knowledge base — for AI tenant chat agent (Phase 1)
+  db.exec(`CREATE TABLE IF NOT EXISTS apartment_knowledge (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    property_id INTEGER NOT NULL UNIQUE REFERENCES properties(id),
+    wifi_ssid TEXT DEFAULT '',
+    wifi_password TEXT DEFAULT '',
+    internet_provider TEXT DEFAULT '',
+    internet_account TEXT DEFAULT '',
+    building_info TEXT DEFAULT '',
+    payment_instructions TEXT DEFAULT '',
+    free_faq TEXT DEFAULT '',
+    appliances_json TEXT DEFAULT '[]',
+    contacts_json TEXT DEFAULT '[]',
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+  try { db.exec("CREATE INDEX IF NOT EXISTS idx_apartment_knowledge_property ON apartment_knowledge(property_id)"); } catch(_) {}
+  console.log('apartment_knowledge table ready');
+
   // Contract annexes
   db.exec(`CREATE TABLE IF NOT EXISTS contract_annexes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

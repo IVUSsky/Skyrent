@@ -267,5 +267,86 @@ module.exports = function(db) {
     res.sendFile(path.join(PHOTOS_DIR, row.filename));
   });
 
+  // ── Apartment knowledge base (Phase 1: AI tenant chat agent) ──
+  // Admin/broker only — tenants cannot see or edit raw knowledge here
+  // (Tenant access happens via the chat agent in Phase 2.)
+  router.get('/:id/knowledge', (req, res) => {
+    if (req.user?.role === 'tenant') return res.status(403).json({ error: 'Само за администратори' });
+    const row = db.prepare('SELECT * FROM apartment_knowledge WHERE property_id = ?').get(req.params.id);
+    if (!row) {
+      return res.json({
+        property_id: Number(req.params.id),
+        wifi_ssid: '', wifi_password: '',
+        internet_provider: '', internet_account: '',
+        building_info: '', payment_instructions: '', free_faq: '',
+        appliances: [], contacts: [],
+        updated_at: null,
+      });
+    }
+    let appliances = [];
+    let contacts   = [];
+    try { appliances = JSON.parse(row.appliances_json || '[]'); } catch(_) {}
+    try { contacts   = JSON.parse(row.contacts_json   || '[]'); } catch(_) {}
+    res.json({
+      property_id: row.property_id,
+      wifi_ssid: row.wifi_ssid || '',
+      wifi_password: row.wifi_password || '',
+      internet_provider: row.internet_provider || '',
+      internet_account: row.internet_account || '',
+      building_info: row.building_info || '',
+      payment_instructions: row.payment_instructions || '',
+      free_faq: row.free_faq || '',
+      appliances,
+      contacts,
+      updated_at: row.updated_at,
+    });
+  });
+
+  router.put('/:id/knowledge', (req, res) => {
+    try {
+      if (req.user?.role === 'tenant') return res.status(403).json({ error: 'Само за администратори' });
+      const propId = Number(req.params.id);
+      const exists = db.prepare('SELECT id FROM properties WHERE id = ?').get(propId);
+      if (!exists) return res.status(404).json({ error: 'Имотът не съществува' });
+
+      const b = req.body || {};
+      const wifi_ssid            = b.wifi_ssid            || '';
+      const wifi_password        = b.wifi_password        || '';
+      const internet_provider    = b.internet_provider    || '';
+      const internet_account     = b.internet_account     || '';
+      const building_info        = b.building_info        || '';
+      const payment_instructions = b.payment_instructions || '';
+      const free_faq             = b.free_faq             || '';
+      const appliances_json      = JSON.stringify(Array.isArray(b.appliances) ? b.appliances : []);
+      const contacts_json        = JSON.stringify(Array.isArray(b.contacts)   ? b.contacts   : []);
+
+      const existing = db.prepare('SELECT id FROM apartment_knowledge WHERE property_id = ?').get(propId);
+      if (existing) {
+        db.prepare(`
+          UPDATE apartment_knowledge
+          SET wifi_ssid=?, wifi_password=?, internet_provider=?, internet_account=?,
+              building_info=?, payment_instructions=?, free_faq=?,
+              appliances_json=?, contacts_json=?,
+              updated_at=CURRENT_TIMESTAMP
+          WHERE property_id=?
+        `).run(wifi_ssid, wifi_password, internet_provider, internet_account,
+               building_info, payment_instructions, free_faq,
+               appliances_json, contacts_json, propId);
+      } else {
+        db.prepare(`
+          INSERT INTO apartment_knowledge
+            (property_id, wifi_ssid, wifi_password, internet_provider, internet_account,
+             building_info, payment_instructions, free_faq, appliances_json, contacts_json)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(propId, wifi_ssid, wifi_password, internet_provider, internet_account,
+               building_info, payment_instructions, free_faq, appliances_json, contacts_json);
+      }
+      res.json({ ok: true });
+    } catch (err) {
+      console.error('PUT knowledge error:', err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   return router;
 };

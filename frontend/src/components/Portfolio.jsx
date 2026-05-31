@@ -2,6 +2,7 @@ import { apiFetch, authUrl } from '../api'
 import React, { useState, useEffect, useRef } from 'react'
 import Inventory from './Inventory'
 import UtilityHistoryChart from './UtilityHistoryChart'
+import ApartmentKnowledge from './ApartmentKnowledge'
 
 const STATUS_COLORS = {
   '✅': 'bg-green-100 text-green-800',
@@ -29,6 +30,7 @@ export default function Portfolio({ API }) {
   const [photosProp, setPhotosProp] = useState(null)
   const [inventoryProp, setInventoryProp] = useState(null)
   const [utilityProp, setUtilityProp] = useState(null)
+  const [knowledgeProp, setKnowledgeProp] = useState(null)
   const [photos, setPhotos] = useState([])
   const [uploading, setUploading] = useState(false)
   const photoInputRef = React.useRef()
@@ -241,6 +243,11 @@ export default function Portfolio({ API }) {
                           className="text-purple-600 hover:text-purple-800 hover:bg-purple-50 p-1 rounded transition-colors"
                           title="Консумация и фактури"
                         >📊</button>
+                        <button
+                          onClick={() => setKnowledgeProp(p)}
+                          className="text-yellow-500 hover:text-yellow-700 hover:bg-yellow-50 p-1 rounded transition-colors"
+                          title="База знания за AI асистент"
+                        >💡</button>
                       </div>
                     </td>
                   </tr>
@@ -568,6 +575,11 @@ export default function Portfolio({ API }) {
       {/* Inventory modal */}
       {inventoryProp && (
         <Inventory API={API} property={inventoryProp} onClose={() => setInventoryProp(null)} />
+      )}
+
+      {/* Apartment knowledge modal (AI chat agent base) */}
+      {knowledgeProp && (
+        <ApartmentKnowledge API={API} property={knowledgeProp} onClose={() => setKnowledgeProp(null)} />
       )}
 
       {/* Utility history modal */}
