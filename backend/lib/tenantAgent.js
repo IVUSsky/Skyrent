@@ -41,15 +41,31 @@ function loadApartmentContext(db, userId) {
     `SELECT * FROM apartment_knowledge WHERE property_id IN (${placeholders})`
   ).all(...propertyIds);
 
-  return { properties, knowledge };
+  // Inventory: appliances/furniture already maintained via the Inventory tab.
+  // We deliberately skip purchase_price (privacy) and serial_number (rarely useful, often sensitive).
+  const inventory = db.prepare(
+    `SELECT property_id, category, name, brand, model, notes, common_problems,
+            purchase_date, warranty_end
+     FROM property_inventory
+     WHERE property_id IN (${placeholders})
+     ORDER BY property_id, sort_order, name`
+  ).all(...propertyIds);
+
+  return { properties, knowledge, inventory };
 }
 
-function formatApartmentContext({ properties, knowledge }) {
+function formatApartmentContext({ properties, knowledge, inventory = [] }) {
   if (properties.length === 0) {
     return 'Наемателят още няма свързан имот в системата.';
   }
   const kbByProp = {};
   for (const k of knowledge) kbByProp[k.property_id] = k;
+
+  const invByProp = {};
+  for (const item of inventory) {
+    if (!invByProp[item.property_id]) invByProp[item.property_id] = [];
+    invByProp[item.property_id].push(item);
+  }
 
   return properties.map(p => {
     const kb = kbByProp[p.id] || {};
@@ -83,9 +99,32 @@ function formatApartmentContext({ properties, knowledge }) {
         p['абонат_вход'] ? `  Входна такса: ${p['абонат_вход']}` : null);
     }
     if (appliances.length) {
-      lines.push('', 'УРЕДИ:');
+      lines.push('', 'УРЕДИ (ръчно въведени):');
       for (const a of appliances) {
         lines.push(`  • ${a.name || ''} ${a.brand_model ? `(${a.brand_model})` : ''}${a.instructions ? ` — ${a.instructions}` : ''}`);
+      }
+    }
+    const propInventory = invByProp[p.id] || [];
+    if (propInventory.length) {
+      // Group by category for readability
+      const byCat = {};
+      for (const it of propInventory) {
+        const cat = it.category || 'Друго';
+        if (!byCat[cat]) byCat[cat] = [];
+        byCat[cat].push(it);
+      }
+      lines.push('', 'ИНВЕНТАР / ОБЗАВЕЖДАНЕ:');
+      for (const [cat, items] of Object.entries(byCat)) {
+        lines.push(`  [${cat}]`);
+        for (const it of items) {
+          const brand = [it.brand, it.model].filter(Boolean).join(' ');
+          const parts = [`    • ${it.name}`];
+          if (brand) parts.push(`(${brand})`);
+          lines.push(parts.join(' '));
+          if (it.notes)           lines.push(`        бележка: ${it.notes}`);
+          if (it.common_problems) lines.push(`        чести проблеми/решения: ${it.common_problems}`);
+          if (it.warranty_end)    lines.push(`        гаранция до: ${it.warranty_end}`);
+        }
       }
     }
     if (contacts.length) {
