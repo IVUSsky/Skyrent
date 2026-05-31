@@ -350,6 +350,17 @@ async function main() {
   )`);
   console.log('property_photos table ready');
 
+  // Tenant chat history — AI assistant in Tenant Portal (Phase 2)
+  db.exec(`CREATE TABLE IF NOT EXISTS tenant_chat_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tenant_user_id INTEGER NOT NULL REFERENCES users(id),
+    role TEXT NOT NULL,
+    content TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+  try { db.exec("CREATE INDEX IF NOT EXISTS idx_tenant_chat_user_date ON tenant_chat_messages(tenant_user_id, created_at)"); } catch(_) {}
+  console.log('tenant_chat_messages table ready');
+
   // Apartment knowledge base — for AI tenant chat agent (Phase 1)
   db.exec(`CREATE TABLE IF NOT EXISTS apartment_knowledge (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

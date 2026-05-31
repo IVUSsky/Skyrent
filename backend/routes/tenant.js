@@ -2,6 +2,7 @@ const express = require('express');
 const path    = require('path');
 const fs      = require('fs');
 const bcrypt  = require('bcryptjs');
+const { askAgent, loadHistory } = require('../lib/tenantAgent');
 
 const DATA_DIR     = process.env.DATA_DIR || path.join(__dirname, '../data');
 const CONTRACTS_DIR = path.join(DATA_DIR, 'contracts');
@@ -107,6 +108,97 @@ module.exports = function(db) {
       ORDER BY i.issued_at DESC, i.id DESC
     `).all(req.user.id);
     res.json(invs);
+  });
+
+  // ── AI Chat agent (Phase 2) ──────────────────────────────────────
+  // POST /api/tenant/chat — send a message, get a reply
+  router.post('/chat', async (req, res) => {
+    try {
+      const message = String(req.body?.message || '').trim();
+      if (!message) return res.status(400).json({ error: 'message е задължително' });
+      if (message.length > 2000) return res.status(400).json({ error: 'Съобщението е твърде дълго (макс. 2000 символа)' });
+      const reply = await askAgent(db, req.user.id, message);
+      res.json({ reply });
+    } catch (err) {
+      console.error('Tenant chat error:', err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // GET /api/tenant/chat/history — full conversation (most recent first 50)
+  router.get('/chat/history', (req, res) => {
+    try {
+      const rows = db.prepare(`
+        SELECT id, role, content, created_at
+        FROM tenant_chat_messages
+        WHERE tenant_user_id=?
+        ORDER BY created_at DESC, id DESC
+        LIMIT 50
+      `).all(req.user.id);
+      res.json(rows.reverse());
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST /api/tenant/chat/escalate — email full transcript to admin
+  router.post('/chat/escalate', async (req, res) => {
+    try {
+      const note = String(req.body?.note || '').trim();
+      const user = db.prepare('SELECT id, username, name, email FROM users WHERE id=?').get(req.user.id);
+      const history = loadHistory(db, req.user.id, 50);
+
+      const transcript = history.map(m => {
+        const c = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
+        return `[${m.role === 'user' ? 'НАЕМАТЕЛ' : 'AI'}] ${c}`;
+      }).join('\n\n');
+
+      const html = `
+        <h2>Заявка за свързване с управител</h2>
+        <p><b>Наемател:</b> ${user.name || user.username} (${user.email || '—'})</p>
+        ${note ? `<p><b>Бележка от наемателя:</b><br>${note.replace(/\n/g, '<br>')}</p>` : ''}
+        <h3>История на разговора с AI асистента</h3>
+        <pre style="white-space:pre-wrap;font-family:Arial,sans-serif;font-size:13px;background:#f5f5f5;padding:12px;border-radius:6px">${
+          transcript.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') || '(няма история)'
+        }</pre>
+      `;
+
+      const apiKey = process.env.RESEND_API_KEY;
+      if (!apiKey) {
+        console.warn('Escalate: RESEND_API_KEY missing — skipping send');
+        return res.json({ ok: false, sent: false, reason: 'no_resend_key' });
+      }
+
+      // Resolve admin recipient from settings.issuer.email or env fallback
+      const issuerRow = db.prepare("SELECT value FROM settings WHERE key='issuer'").get();
+      let adminEmail = process.env.ADMIN_EMAIL || '';
+      if (issuerRow) {
+        try { adminEmail = JSON.parse(issuerRow.value).email || adminEmail; } catch(_) {}
+      }
+      if (!adminEmail) return res.json({ ok: false, sent: false, reason: 'no_admin_email' });
+
+      const fromEmail = process.env.RESEND_FROM_EMAIL || 'info@skycapital.pro';
+      const resp = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          from: `Sky Capital <${fromEmail}>`,
+          to: [adminEmail],
+          reply_to: user.email || undefined,
+          subject: `🙋 Заявка от наемател ${user.name || user.username}`,
+          html,
+        }),
+      });
+      if (!resp.ok) {
+        const text = await resp.text();
+        console.error('Escalate email failed:', resp.status, text);
+        return res.status(502).json({ error: 'Изпращането на имейл се провали' });
+      }
+      res.json({ ok: true, sent: true });
+    } catch (err) {
+      console.error('Escalate error:', err.message);
+      res.status(500).json({ error: err.message });
+    }
   });
 
   // GET /api/tenant/invoices/:id/pdf

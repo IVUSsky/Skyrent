@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useState, useRef } from 'react'
 import { apiFetch, authUrl } from '../api'
 import UtilityHistoryChart from './UtilityHistoryChart'
 
@@ -6,6 +6,7 @@ const API = import.meta.env.VITE_API_URL || ''
 
 const TABS = [
   { id: 'home',         label: 'Начало',     icon: '🏠' },
+  { id: 'chat',         label: 'Помощник',   icon: '💬' },
   { id: 'photos',       label: 'Снимки',     icon: '📷' },
   { id: 'contract',     label: 'Договор',    icon: '📋' },
   { id: 'invoices',     label: 'Фактури',    icon: '🧾' },
@@ -185,6 +186,7 @@ export default function TenantApp({ userName, onLogout, mustChangePassword }) {
       {/* Body */}
       <main className="max-w-2xl mx-auto px-4 py-4">
         {tab === 'home'        && <Home me={me} property={property} contract={activeContract} />}
+        {tab === 'chat'        && <Chat />}
         {tab === 'photos'      && <Photos me={me} property={property} />}
         {tab === 'contract'    && <Contract contracts={me?.contracts || []} />}
         {tab === 'invoices'    && <Invoices />}
@@ -194,7 +196,7 @@ export default function TenantApp({ userName, onLogout, mustChangePassword }) {
 
       {/* Bottom nav */}
       <nav className="fixed bottom-0 inset-x-0 bg-white border-t shadow-lg z-20">
-        <div className="max-w-2xl mx-auto grid grid-cols-5">
+        <div className="max-w-2xl mx-auto grid grid-cols-7">
           {TABS.map(t => (
             <button
               key={t.id}
@@ -208,6 +210,173 @@ export default function TenantApp({ userName, onLogout, mustChangePassword }) {
           ))}
         </div>
       </nav>
+    </div>
+  )
+}
+
+function Chat() {
+  const [messages, setMessages] = useState([])
+  const [input, setInput]       = useState('')
+  const [sending, setSending]   = useState(false)
+  const [escalating, setEscalating] = useState(false)
+  const [escalateOpen, setEscalateOpen] = useState(false)
+  const [escalateNote, setEscalateNote] = useState('')
+  const [toast, setToast]       = useState(null)
+  const bottomRef = useRef(null)
+
+  useEffect(() => {
+    apiFetch(`${API}/api/tenant/chat/history`)
+      .then(r => r.json())
+      .then(data => Array.isArray(data) ? setMessages(data) : null)
+      .catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages, sending])
+
+  useEffect(() => {
+    if (!toast) return
+    const t = setTimeout(() => setToast(null), 4000)
+    return () => clearTimeout(t)
+  }, [toast])
+
+  const send = async () => {
+    const text = input.trim()
+    if (!text || sending) return
+    setSending(true)
+    setMessages(prev => [...prev, { role: 'user', content: text, created_at: new Date().toISOString(), _local: true }])
+    setInput('')
+    try {
+      const r = await apiFetch(`${API}/api/tenant/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: text }),
+      })
+      const data = await r.json()
+      if (!r.ok) throw new Error(data.error || 'Грешка')
+      setMessages(prev => [...prev, { role: 'assistant', content: data.reply, created_at: new Date().toISOString(), _local: true }])
+    } catch (e) {
+      setToast({ type: 'error', text: 'Грешка: ' + e.message })
+    } finally {
+      setSending(false)
+    }
+  }
+
+  const escalate = async () => {
+    setEscalating(true)
+    try {
+      const r = await apiFetch(`${API}/api/tenant/chat/escalate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ note: escalateNote }),
+      })
+      const data = await r.json()
+      if (!r.ok) throw new Error(data.error || 'Грешка')
+      if (data.sent) {
+        setToast({ type: 'success', text: '✅ Изпратихме съобщение до управителя. Ще се свържат с теб скоро.' })
+        setEscalateOpen(false)
+        setEscalateNote('')
+      } else {
+        setToast({ type: 'error', text: 'Имейлът към управителя не може да бъде изпратен (липсва конфигурация).' })
+      }
+    } catch (e) {
+      setToast({ type: 'error', text: 'Грешка: ' + e.message })
+    } finally {
+      setEscalating(false)
+    }
+  }
+
+  return (
+    <div className="flex flex-col" style={{ height: 'calc(100vh - 200px)', minHeight: '420px' }}>
+      {toast && (
+        <div className="mb-2 px-3 py-2 rounded text-sm"
+          style={{
+            background: toast.type === 'success' ? '#dcfce7' : '#fee2e2',
+            color: toast.type === 'success' ? '#166534' : '#991b1b',
+          }}>
+          {toast.text}
+        </div>
+      )}
+
+      {/* Messages */}
+      <div className="flex-1 overflow-y-auto bg-white rounded-lg shadow-sm border border-slate-200 p-3 space-y-3">
+        {messages.length === 0 && !sending && (
+          <div className="text-center text-slate-400 text-sm py-8">
+            <div className="text-3xl mb-2">💬</div>
+            <div>Питай ме за апартамента, договора, плащанията…</div>
+            <div className="text-xs mt-2 text-slate-300">Например: „Каква е WiFi паролата?" или „Колко дължа?"</div>
+          </div>
+        )}
+        {messages.map((m, i) => (
+          <div key={m.id || `local-${i}`} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+            <div className={`max-w-[85%] px-3 py-2 rounded-2xl text-sm whitespace-pre-wrap break-words ${
+              m.role === 'user'
+                ? 'bg-blue-600 text-white rounded-br-sm'
+                : 'bg-slate-100 text-slate-800 rounded-bl-sm'
+            }`}>
+              {m.content}
+            </div>
+          </div>
+        ))}
+        {sending && (
+          <div className="flex justify-start">
+            <div className="bg-slate-100 text-slate-500 px-3 py-2 rounded-2xl rounded-bl-sm text-sm">
+              <span className="inline-block animate-pulse">пише…</span>
+            </div>
+          </div>
+        )}
+        <div ref={bottomRef} />
+      </div>
+
+      {/* Escalate panel */}
+      {escalateOpen && (
+        <div className="mt-2 bg-amber-50 border border-amber-200 rounded-lg p-3">
+          <div className="text-sm font-semibold text-amber-900 mb-2">🙋 Свържи ме с управителя</div>
+          <textarea
+            value={escalateNote}
+            onChange={e => setEscalateNote(e.target.value)}
+            placeholder="Опиши накратко какво имаш нужда (по избор)…"
+            rows={2}
+            className="w-full text-sm border border-amber-300 rounded p-2 focus:outline-none focus:ring-2 focus:ring-amber-400 bg-white"
+          />
+          <div className="flex gap-2 mt-2 justify-end">
+            <button onClick={() => { setEscalateOpen(false); setEscalateNote('') }}
+              className="text-xs text-slate-600 hover:text-slate-800 px-3 py-1">
+              Отказ
+            </button>
+            <button onClick={escalate} disabled={escalating}
+              className="bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold px-3 py-1.5 rounded disabled:opacity-50">
+              {escalating ? 'Изпраща…' : 'Изпрати'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Input row */}
+      <div className="mt-2 flex gap-2">
+        <input
+          type="text"
+          value={input}
+          onChange={e => setInput(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }}
+          placeholder="Напиши съобщение…"
+          disabled={sending}
+          className="flex-1 border border-slate-300 rounded-full px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100"
+        />
+        <button onClick={send} disabled={sending || !input.trim()}
+          className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2 rounded-full disabled:opacity-50">
+          {sending ? '…' : '➤'}
+        </button>
+      </div>
+
+      {/* Escalate trigger */}
+      {!escalateOpen && (
+        <button onClick={() => setEscalateOpen(true)}
+          className="mt-2 text-xs text-amber-700 hover:text-amber-900 self-start">
+          🙋 Свържи ме с управителя
+        </button>
+      )}
     </div>
   )
 }
