@@ -6,6 +6,7 @@ const cron = require('node-cron');
 const { getMetalPriceEUR } = require('./goldPrice');
 const { buildReport, SUPPORTED_METALS, METAL_LABEL_BG } = require('../routes/investments');
 const { runAgent } = require('./newsAgent');
+const t212 = require('./trading212');
 
 const SIGNAL_EMOJI = { 'купи': '🟢', 'продай': '🔴', 'задръж': '⚪', 'наблюдавай': '🟡' };
 const CONFIDENCE_THRESHOLD = 60;
@@ -212,7 +213,27 @@ function startInvestmentsCron(db) {
     }
   }, 60 * 1000);
 
-  console.log('[metals cron] schedules installed for', SUPPORTED_METALS.join(', '), '(Mon-Fri 08:00+20:00 price, 09:30 agent, Mon 09:00 weekly, 1st 08:00 monthly)');
+  // ── 4) Trading 212 daily snapshot — 18:30 Mon-Fri (after Euronext close) ──
+  // Inserts/updates one row in t212_snapshots per calendar day → дава дневен
+  // chart на стойността на портфейла. Безопасно при липсващ ключ (no-op).
+  cron.schedule('30 18 * * 1-5', async () => {
+    if (!t212.isConfigured()) return;
+    try {
+      const id = await t212.takeSnapshot(db);
+      if (id) console.log('[t212 cron] snapshot saved id=' + id);
+    } catch (e) { console.error('[t212 cron] daily snapshot error:', e.message); }
+  });
+
+  // Also snapshot ~90s after boot, so fresh installs get a first datapoint.
+  setTimeout(async () => {
+    if (!t212.isConfigured()) return;
+    try {
+      const id = await t212.takeSnapshot(db);
+      if (id) console.log('[t212 cron] boot snapshot saved id=' + id);
+    } catch (e) { console.error('[t212 cron] boot snapshot error:', e.message); }
+  }, 90 * 1000);
+
+  console.log('[metals cron] schedules installed for', SUPPORTED_METALS.join(', '), '(Mon-Fri 08:00+20:00 price, 09:30 agent, Mon 09:00 weekly, 1st 08:00 monthly) + T212 daily 18:30');
 }
 
 module.exports = { startInvestmentsCron };

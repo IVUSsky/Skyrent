@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import { apiFetch } from '../api'
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts'
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine, PieChart, Pie, Cell, Legend } from 'recharts'
 
 // Платината ще се добави по-късно (раздкоментирай реда).
 const METALS = [
@@ -10,22 +10,33 @@ const METALS = [
 ]
 
 export default function Investments({ API }) {
-  const [metal, setMetal] = useState('gold')
-  const metalConfig = METALS.find(m => m.id === metal)
+  // 'gold' | 'silver' | 't212'
+  const [asset, setAsset] = useState('gold')
+  const metalConfig = METALS.find(m => m.id === asset)
   return (
     <div>
       <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
         <h2 className="text-2xl font-bold text-gray-800">📈 Инвестиции</h2>
-        <div className="flex gap-1">
+        <div className="flex gap-1 flex-wrap">
           {METALS.map(t => (
-            <button key={t.id} onClick={() => setMetal(t.id)}
-              className={`px-3 py-1.5 text-sm rounded-lg border font-medium ${metal === t.id ? `${t.accentBg} text-white border-transparent` : 'bg-white text-gray-600 border-gray-300'}`}>
+            <button key={t.id} onClick={() => setAsset(t.id)}
+              className={`px-3 py-1.5 text-sm rounded-lg border font-medium ${asset === t.id ? `${t.accentBg} text-white border-transparent` : 'bg-white text-gray-600 border-gray-300'}`}>
               {t.label}
             </button>
           ))}
+          <button onClick={() => setAsset('t212')}
+            className={`px-3 py-1.5 text-sm rounded-lg border font-medium ${asset === 't212' ? 'bg-blue-600 text-white border-transparent' : 'bg-white text-gray-600 border-gray-300'}`}>
+            🏦 Trading 212
+          </button>
+          <button onClick={() => setAsset('wealth')}
+            className={`px-3 py-1.5 text-sm rounded-lg border font-medium ${asset === 'wealth' ? 'bg-emerald-600 text-white border-transparent' : 'bg-white text-gray-600 border-gray-300'}`}>
+            💎 Нетно богатство
+          </button>
         </div>
       </div>
-      <MetalDashboard API={API} metal={metal} metalConfig={metalConfig} />
+      {asset === 't212'   ? <BrokerDashboard API={API} /> :
+       asset === 'wealth' ? <WealthDashboard API={API} /> :
+       <MetalDashboard API={API} metal={asset} metalConfig={metalConfig} />}
     </div>
   )
 }
@@ -825,6 +836,371 @@ function Row({ expense, matched, qtys, setQtys, products, setProducts, importOne
           {importing === expense.id ? '...' : '✓ Импортирай'}
         </button>
       </div>
+    </div>
+  )
+}
+
+// ── Trading 212 broker dashboard ─────────────────────────────────────────
+function BrokerDashboard({ API }) {
+  const [account, setAccount] = useState(null)
+  const [portfolio, setPortfolio] = useState(null)
+  const [orders, setOrders] = useState(null)
+  const [history, setHistory] = useState([])
+  const [error, setError] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [snapping, setSnapping] = useState(false)
+  const [refreshedAt, setRefreshedAt] = useState(null)
+
+  const loadAll = async () => {
+    setLoading(true); setError(null)
+    try {
+      const [accR, pfR, ordR, histR] = await Promise.all([
+        apiFetch(`${API}/api/investments/broker/t212/account`),
+        apiFetch(`${API}/api/investments/broker/t212/portfolio`),
+        apiFetch(`${API}/api/investments/broker/t212/orders`),
+        apiFetch(`${API}/api/investments/broker/t212/history?days=90`),
+      ])
+      const [acc, pf, ord, hist] = await Promise.all([accR.json(), pfR.json(), ordR.json(), histR.json()])
+      if (!accR.ok) throw new Error(acc.error || 'account')
+      if (!pfR.ok)  throw new Error(pf.error  || 'portfolio')
+      if (!ordR.ok) throw new Error(ord.error || 'orders')
+      setAccount(acc); setPortfolio(pf); setOrders(ord)
+      setHistory(Array.isArray(hist) ? hist : [])
+      setRefreshedAt(new Date())
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+  useEffect(() => { loadAll() }, [])
+
+  const snapshotNow = async () => {
+    setSnapping(true)
+    try {
+      const r = await apiFetch(`${API}/api/investments/broker/t212/snapshot`, { method: 'POST' })
+      if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || 'snapshot') }
+      await loadAll()
+    } catch (e) { setError(e.message) }
+    finally { setSnapping(false) }
+  }
+
+  const chartData = history.map(h => ({
+    дата: new Date(h.дата).toLocaleDateString('bg-BG', { day: '2-digit', month: '2-digit' }),
+    // T212 cash.total е NAV-ът (cash + positions at market) → не добавяме печалбата отделно
+    стойност: Number(h.кеш_общо || 0),
+    инвестирано: Number(h.инвестирано || 0),
+  }))
+
+  if (loading && !account) {
+    return <div className="text-center py-12 text-gray-400">⏳ Зареждам Trading 212…</div>
+  }
+
+  if (error) {
+    return (
+      <div className="bg-red-50 border border-red-200 rounded-xl p-4">
+        <div className="font-semibold text-red-800 mb-1">⚠️ Грешка от Trading 212</div>
+        <div className="text-sm text-red-700">{error}</div>
+        <button onClick={loadAll} className="mt-3 bg-red-600 hover:bg-red-700 text-white text-sm px-3 py-1.5 rounded-lg">
+          Опитай отново
+        </button>
+      </div>
+    )
+  }
+
+  const cur = account?.валута || 'EUR'
+  const totalWealth = (account?.кеш_общо || 0) + (portfolio?.общо?.печалба || 0) // total = cash incl. blocked + unrealized profit (invested вече е в кеш-блокиран)
+  const profit = portfolio?.общо?.печалба || 0
+  const profitPct = portfolio?.общо?.печалба_pct || 0
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+        <div className="text-xs text-gray-500">
+          {account?.акаунт_id && <>Акаунт #{account.акаунт_id} · {cur}</>}
+          {refreshedAt && <> · обновено {refreshedAt.toLocaleTimeString('bg-BG')}</>}
+        </div>
+        <div className="flex gap-2">
+          <button onClick={snapshotNow} disabled={snapping || loading}
+            className="bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white text-xs px-3 py-1.5 rounded-lg">
+            {snapping ? '⏳' : '📸'} Snapshot
+          </button>
+          <button onClick={loadAll} disabled={loading}
+            className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs px-3 py-1.5 rounded-lg">
+            {loading ? '⏳' : '🔄'} Обнови
+          </button>
+        </div>
+      </div>
+
+      {/* KPI cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+        <div className="bg-blue-50 border border-blue-200 rounded-xl p-3">
+          <div className="text-xs text-blue-700 font-semibold uppercase">Общо в T212</div>
+          <div className="text-xl font-bold text-blue-800 mt-0.5">{cur} {fmtMoney(account?.кеш_общо, 2)}</div>
+          <div className="text-xs text-blue-600 mt-0.5">{portfolio?.брой_позиции || 0} позиции</div>
+        </div>
+        <div className="bg-gray-50 border border-gray-200 rounded-xl p-3">
+          <div className="text-xs text-gray-600 font-semibold uppercase">Кеш</div>
+          <div className="text-xl font-bold text-gray-800 mt-0.5">{cur} {fmtMoney(account?.кеш_свободен, 2)}</div>
+          {(account?.блокиран || 0) > 0 && (
+            <div className="text-xs text-orange-600 mt-0.5">Блокиран: {cur} {fmtMoney(account.блокиран, 2)}</div>
+          )}
+        </div>
+        <div className="bg-purple-50 border border-purple-200 rounded-xl p-3">
+          <div className="text-xs text-purple-700 font-semibold uppercase">Инвестирано</div>
+          <div className="text-xl font-bold text-purple-800 mt-0.5">{cur} {fmtMoney(portfolio?.общо?.инвестирано, 2)}</div>
+          <div className="text-xs text-purple-600 mt-0.5">Стойност: {cur} {fmtMoney(portfolio?.общо?.текуща_стойност, 2)}</div>
+        </div>
+        <div className={`rounded-xl p-3 border ${profit >= 0 ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
+          <div className={`text-xs font-semibold uppercase ${profit >= 0 ? 'text-green-700' : 'text-red-700'}`}>Печалба</div>
+          <div className={`text-xl font-bold mt-0.5 ${profit >= 0 ? 'text-green-800' : 'text-red-800'}`}>
+            {profit >= 0 ? '+' : ''}{cur} {fmtMoney(profit, 2)}
+          </div>
+          {profitPct !== 0 && (
+            <div className={`text-xs mt-0.5 ${profitPct >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+              {profitPct >= 0 ? '▲' : '▼'} {Math.abs(profitPct).toFixed(2)}%
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Historical chart */}
+      <div className="bg-white rounded-xl shadow border border-gray-100 p-4 mb-5">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-semibold text-gray-700">📈 Стойност на портфейла (последни 90 дни)</h3>
+          <span className="text-xs text-gray-400">{cur}</span>
+        </div>
+        {chartData.length > 1 ? (
+          <ResponsiveContainer width="100%" height={220}>
+            <LineChart data={chartData}>
+              <XAxis dataKey="дата" tick={{ fontSize: 11 }} />
+              <YAxis domain={['auto', 'auto']} tick={{ fontSize: 11 }} tickFormatter={v => `${cur} ${v.toFixed(0)}`} />
+              <Tooltip formatter={v => `${cur} ${Number(v).toFixed(2)}`} />
+              <Line type="monotone" dataKey="стойност" name="Обща стойност" stroke="#2563eb" strokeWidth={2} dot={false} />
+              <Line type="monotone" dataKey="инвестирано" name="Инвестирано" stroke="#9ca3af" strokeWidth={1} strokeDasharray="3 3" dot={false} />
+            </LineChart>
+          </ResponsiveContainer>
+        ) : (
+          <div className="text-center text-gray-400 py-12 text-sm">
+            Все още няма достатъчно snapshots за chart.<br/>
+            <span className="text-xs">Cron-ът записва snapshot в 18:30 (Пн-Пт). Натисни 📸 Snapshot за ad-hoc запис.</span>
+          </div>
+        )}
+      </div>
+
+      {/* Pending orders */}
+      {orders?.брой > 0 && (
+        <div className="bg-white rounded-xl shadow border border-gray-100 p-4 mb-5">
+          <h3 className="text-sm font-semibold text-gray-700 mb-3">⏳ Чакащи поръчки ({orders.брой})</h3>
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-sm divide-y divide-gray-200">
+              <thead className="bg-gray-50">
+                <tr>
+                  {['Инструмент','ISIN','Страна','Тип','Статус','Стойност','Подадена'].map(h => (
+                    <th key={h} className="px-2 py-2 text-left text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {orders.поръчки.map(o => (
+                  <tr key={o.id} className="hover:bg-blue-50/40">
+                    <td className="px-2 py-1.5 text-xs font-medium">{o.име}</td>
+                    <td className="px-2 py-1.5 text-xs font-mono text-gray-500">{o.isin || '—'}</td>
+                    <td className="px-2 py-1.5">
+                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${o.страна === 'BUY' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>{o.страна}</span>
+                    </td>
+                    <td className="px-2 py-1.5 text-xs">{o.тип}</td>
+                    <td className="px-2 py-1.5">
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-orange-100 text-orange-700 font-medium">{o.статус}</span>
+                    </td>
+                    <td className="px-2 py-1.5 text-xs font-semibold">{cur} {fmtMoney(o.стойност, 2)}</td>
+                    <td className="px-2 py-1.5 text-xs text-gray-500">{fmtDate(o.създадена)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Positions */}
+      <div className="bg-white rounded-xl shadow border border-gray-100 p-4">
+        <h3 className="text-sm font-semibold text-gray-700 mb-3">📊 Позиции ({portfolio?.брой_позиции || 0})</h3>
+        {(!portfolio?.позиции || portfolio.позиции.length === 0) ? (
+          <div className="text-center text-gray-400 py-8 text-sm">
+            Все още няма открити позиции в Trading 212.
+            {orders?.брой > 0 && <div className="mt-1 text-xs">Имаш {orders.брой} чакаща(и) поръчка(и) — ще се появят тук след изпълнение.</div>}
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-sm divide-y divide-gray-200">
+              <thead className="bg-gray-50">
+                <tr>
+                  {['Тикер','Количество','Ср. цена','Текуща','Инвестирано','Стойност','Печалба','%'].map(h => (
+                    <th key={h} className="px-2 py-2 text-left text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {portfolio.позиции.map(p => (
+                  <tr key={p.тикер} className="hover:bg-blue-50/40">
+                    <td className="px-2 py-1.5 text-xs font-mono">{p.тикер}{p.в_pie && <span className="ml-1 text-purple-600">🥧</span>}</td>
+                    <td className="px-2 py-1.5 text-xs">{fmtMoney(p.количество, 4)}</td>
+                    <td className="px-2 py-1.5 text-xs">{cur} {fmtMoney(p.средна_цена, 2)}</td>
+                    <td className="px-2 py-1.5 text-xs">{cur} {fmtMoney(p.текуща_цена, 2)}</td>
+                    <td className="px-2 py-1.5 text-xs">{cur} {fmtMoney(p.инвестирано, 2)}</td>
+                    <td className="px-2 py-1.5 text-xs font-semibold">{cur} {fmtMoney(p.текуща_стойност, 2)}</td>
+                    <td className={`px-2 py-1.5 text-xs font-semibold ${p.печалба >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+                      {p.печалба >= 0 ? '+' : ''}{cur} {fmtMoney(p.печалба, 2)}
+                    </td>
+                    <td className={`px-2 py-1.5 text-xs ${p.печалба_pct >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+                      {p.печалба_pct >= 0 ? '▲' : '▼'} {Math.abs(p.печалба_pct).toFixed(2)}%
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <div className="mt-3 text-xs text-gray-400 text-center">
+        Данните се кешират ~30s–1min на T212-страна за да не удрят rate limit-а.
+      </div>
+    </div>
+  )
+}
+
+// ── Net Worth dashboard ──────────────────────────────────────────────────
+const WEALTH_COLORS = {
+  имоти_equity: '#10b981',  // emerald
+  злато:        '#f59e0b',  // amber
+  сребро:       '#9ca3af',  // gray
+  t212:         '#2563eb',  // blue
+}
+const WEALTH_LABELS = {
+  имоти_equity: '🏠 Имоти (equity)',
+  злато:        '🥇 Злато',
+  сребро:       '🥈 Сребро',
+  t212:         '🏦 Trading 212',
+}
+
+function WealthDashboard({ API }) {
+  const [data, setData] = useState(null)
+  const [error, setError] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [refreshedAt, setRefreshedAt] = useState(null)
+
+  const load = async () => {
+    setLoading(true); setError(null)
+    try {
+      const r = await apiFetch(`${API}/api/investments/wealth/summary`)
+      const d = await r.json()
+      if (!r.ok) throw new Error(d.error || 'грешка')
+      setData(d); setRefreshedAt(new Date())
+    } catch (e) { setError(e.message) }
+    finally { setLoading(false) }
+  }
+  useEffect(() => { load() }, [])
+
+  if (loading && !data) return <div className="text-center py-12 text-gray-400">⏳ Изчислявам нетното богатство…</div>
+  if (error)            return <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-red-700">⚠️ {error}</div>
+  if (!data)            return null
+
+  const cur = data.валута || 'EUR'
+  const a = data.разпределение || {}
+  // Pie data — само секции с положителна стойност
+  const slices = Object.entries({
+    имоти_equity: data.имоти?.equity || 0,
+    злато:        data.злато?.текуща_стойност || 0,
+    сребро:       data.сребро?.текуща_стойност || 0,
+    t212:         data.t212?.обща_стойност || 0,
+  }).filter(([_, v]) => v > 0).map(([k, v]) => ({ name: WEALTH_LABELS[k], value: v, key: k }))
+
+  // Cards
+  const cards = [
+    { key: 'имоти_equity', title: '🏠 Имоти (equity)', value: data.имоти?.equity, subtitle: `${data.имоти?.брой || 0} имота · asset ${cur} ${fmtMoney(data.имоти?.asset_value, 0)} − дълг ${cur} ${fmtMoney(data.имоти?.debt, 0)}` },
+    { key: 'злато',        title: '🥇 Злато',           value: data.злато?.текуща_стойност || 0, subtitle: `${fmtMoney(data.злато?.общо_oz, 3)} oz · ${cur} ${fmtMoney(data.злато?.обща_инвестиция, 0)} инвестирано` },
+    { key: 'сребро',       title: '🥈 Сребро',          value: data.сребро?.текуща_стойност || 0, subtitle: `${fmtMoney(data.сребро?.общо_oz, 3)} oz · ${cur} ${fmtMoney(data.сребро?.обща_инвестиция, 0)} инвестирано` },
+    { key: 't212',         title: '🏦 Trading 212',     value: data.t212?.обща_стойност || 0, subtitle: `${data.t212?.брой_позиции || 0} позиции · ${cur} ${fmtMoney(data.t212?.инвестирано, 0)} инвестирано${data.t212?.източник === 'snapshot' ? ' (от snapshot)' : ''}` },
+  ]
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+        <div className="text-xs text-gray-500">
+          {refreshedAt && <>Обновено {refreshedAt.toLocaleTimeString('bg-BG')}</>}
+        </div>
+        <button onClick={load} disabled={loading}
+          className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs px-3 py-1.5 rounded-lg">
+          {loading ? '⏳' : '🔄'} Преизчисли
+        </button>
+      </div>
+
+      {/* Hero — total wealth */}
+      <div className="bg-gradient-to-br from-emerald-600 to-emerald-700 rounded-xl p-6 mb-5 text-white">
+        <div className="text-sm uppercase font-semibold opacity-90">Общо нетно богатство</div>
+        <div className="text-4xl font-bold mt-1">{cur} {fmtMoney(data.общо, 0)}</div>
+        <div className="text-xs opacity-80 mt-2">
+          Equity в имоти + злато + сребро + Trading 212 (NAV)
+        </div>
+      </div>
+
+      {/* Pie + cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-5">
+        <div className="bg-white rounded-xl shadow border border-gray-100 p-4">
+          <h3 className="text-sm font-semibold text-gray-700 mb-3">Разпределение по asset class</h3>
+          {slices.length > 0 ? (
+            <ResponsiveContainer width="100%" height={260}>
+              <PieChart>
+                <Pie data={slices} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={90} innerRadius={50} paddingAngle={2}>
+                  {slices.map(s => <Cell key={s.key} fill={WEALTH_COLORS[s.key]} />)}
+                </Pie>
+                <Tooltip formatter={v => `${cur} ${fmtMoney(v, 0)}`} />
+                <Legend />
+              </PieChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="text-center text-gray-400 py-12 text-sm">Няма данни за визуализация</div>
+          )}
+        </div>
+        <div className="bg-white rounded-xl shadow border border-gray-100 p-4">
+          <h3 className="text-sm font-semibold text-gray-700 mb-3">Дял от общото (%)</h3>
+          <div className="space-y-3">
+            {Object.entries(a).map(([k, pct]) => (
+              <div key={k}>
+                <div className="flex justify-between text-xs mb-1">
+                  <span className="font-medium text-gray-700">{WEALTH_LABELS[k]}</span>
+                  <span className="text-gray-500">{pct.toFixed(2)}%</span>
+                </div>
+                <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                  <div className="h-full rounded-full transition-all" style={{ width: `${Math.min(100, pct)}%`, backgroundColor: WEALTH_COLORS[k] }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Asset class cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+        {cards.map(c => (
+          <div key={c.key} className="bg-white rounded-xl shadow border border-gray-100 p-4">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-sm font-semibold text-gray-700">{c.title}</span>
+              <span className="w-3 h-3 rounded-full" style={{ backgroundColor: WEALTH_COLORS[c.key] }}></span>
+            </div>
+            <div className="text-2xl font-bold text-gray-800">{cur} {fmtMoney(c.value, 0)}</div>
+            <div className="text-xs text-gray-500 mt-1">{c.subtitle}</div>
+          </div>
+        ))}
+      </div>
+
+      {data.t212?.live_error && (
+        <div className="mt-4 bg-yellow-50 border border-yellow-200 rounded-xl p-3 text-xs text-yellow-800">
+          ⚠️ Trading 212 live API недостъпен — ползвам последния snapshot ({fmtDate(data.t212.snapshot_date)}). Грешка: {data.t212.live_error}
+        </div>
+      )}
     </div>
   )
 }

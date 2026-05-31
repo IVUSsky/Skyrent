@@ -371,6 +371,225 @@ module.exports = function(db) {
     }
   });
 
+  // ── Broker: Trading 212 (POC) ────────────────────────────────────────────
+  // Read-only proxy към T212 REST API. Изисква T212_API_KEY в env.
+  // Кешираме per-endpoint в lib/trading212.js за да не удряме rate limits.
+  const t212 = require('../lib/trading212');
+
+  router.get('/broker/t212/status', (req, res) => {
+    res.json({ configured: t212.isConfigured(), base_url: process.env.T212_BASE_URL || 'https://live.trading212.com/api/v0' });
+  });
+
+  router.get('/broker/t212/account', async (req, res) => {
+    try {
+      const [info, cash] = await Promise.all([t212.getAccountInfo(), t212.getCash()]);
+      res.json({
+        акаунт_id:        info.id,
+        валута:           info.currencyCode,
+        кеш_свободен:     cash.free,
+        кеш_общо:         cash.total,
+        инвестирано:      cash.invested,
+        блокиран:         cash.blocked,
+        нереализирана_пл: cash.ppl,
+        резултат:         cash.result,
+        кеш_кеширан:      cash._cached,
+        кеш_възраст_ms:   cash._age_ms,
+      });
+    } catch (err) {
+      res.status(502).json({ error: err.message });
+    }
+  });
+
+  // ── Net Worth: aggregates properties + metals + T212 ─────────────────────
+  router.get('/wealth/summary', async (req, res) => {
+    try {
+      // Properties
+      const properties = db.prepare('SELECT * FROM properties').all();
+      const loans = db.prepare('SELECT * FROM loans').all();
+      const property_asset = properties.reduce((s, p) => {
+        const v = p.market_val != null && p.market_val > 0 ? p.market_val : (p['покупна'] || 0) + (p['ремонт'] || 0);
+        return s + v;
+      }, 0);
+      const property_debt = loans.reduce((s, l) => s + (l['остатък'] || 0), 0);
+      const property_equity = property_asset - property_debt;
+      const property_invested = properties.reduce((s, p) => s + (p['покупна'] || 0) + (p['ремонт'] || 0), 0);
+
+      // Metals: gold + silver portfolios
+      const gold = computePortfolioSnapshot(db, 'gold');
+      const silver = computePortfolioSnapshot(db, 'silver');
+
+      // T212: prefer fresh cash + portfolio; fall back to latest snapshot
+      let t212Data = null;
+      if (t212.isConfigured()) {
+        try {
+          const [info, cash, pf] = await Promise.all([t212.getAccountInfo(), t212.getCash(), t212.getPortfolio()]);
+          const positions = pf.items || [];
+          const invested = positions.reduce((s, p) => s + (Number(p.quantity) || 0) * (Number(p.averagePrice) || 0), 0);
+          const value = positions.reduce((s, p) => s + (Number(p.quantity) || 0) * (Number(p.currentPrice) || 0), 0);
+          t212Data = {
+            валута: info.currencyCode,
+            обща_стойност: Number((cash.total || 0).toFixed(2)),  // NAV
+            кеш_свободен: Number((cash.free || 0).toFixed(2)),
+            блокиран: Number((cash.blocked || 0).toFixed(2)),
+            инвестирано: Number(invested.toFixed(2)),
+            позиции_стойност: Number(value.toFixed(2)),
+            печалба: Number((value - invested).toFixed(2)),
+            брой_позиции: positions.length,
+            източник: 'live',
+          };
+        } catch (err) {
+          const last = db.prepare('SELECT * FROM t212_snapshots ORDER BY дата DESC LIMIT 1').get();
+          if (last) {
+            t212Data = {
+              валута: last.валута,
+              обща_стойност: last.кеш_общо,
+              кеш_свободен: last.кеш_свободен,
+              блокиран: last.блокиран,
+              инвестирано: last.инвестирано,
+              позиции_стойност: last.текуща_стойност,
+              печалба: last.печалба,
+              брой_позиции: last.брой_позиции,
+              източник: 'snapshot',
+              snapshot_date: last.дата,
+              live_error: err.message,
+            };
+          } else {
+            t212Data = { error: err.message };
+          }
+        }
+      }
+
+      // Totals
+      const metals_value = (gold.текуща_стойност || 0) + (silver.текуща_стойност || 0);
+      const t212_value = t212Data?.обща_стойност || 0;
+      const total_wealth = property_equity + metals_value + t212_value;
+
+      // Allocation %
+      const allocation = total_wealth > 0 ? {
+        имоти_equity: Number(((property_equity / total_wealth) * 100).toFixed(2)),
+        злато:        Number((((gold.текуща_стойност || 0) / total_wealth) * 100).toFixed(2)),
+        сребро:       Number((((silver.текуща_стойност || 0) / total_wealth) * 100).toFixed(2)),
+        t212:         Number(((t212_value / total_wealth) * 100).toFixed(2)),
+      } : null;
+
+      res.json({
+        общо: Number(total_wealth.toFixed(2)),
+        валута: 'EUR',
+        разпределение: allocation,
+        имоти: {
+          asset_value: Number(property_asset.toFixed(2)),
+          debt:        Number(property_debt.toFixed(2)),
+          equity:      Number(property_equity.toFixed(2)),
+          инвестирано: Number(property_invested.toFixed(2)),
+          брой:        properties.length,
+        },
+        злато:  gold,
+        сребро: silver,
+        t212:   t212Data,
+        изчислено_на: new Date().toISOString(),
+      });
+    } catch (err) {
+      console.error('wealth/summary error:', err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.get('/broker/t212/history', (req, res) => {
+    const days = Math.min(365, Math.max(1, Number(req.query.days) || 90));
+    const rows = db.prepare(`
+      SELECT id, дата, валута, кеш_общо, кеш_свободен, блокиран,
+             инвестирано, текуща_стойност, печалба, печалба_pct, брой_позиции
+      FROM t212_snapshots
+      WHERE дата >= datetime('now', ?)
+      ORDER BY дата ASC
+    `).all(`-${days} days`);
+    res.json(rows);
+  });
+
+  router.post('/broker/t212/snapshot', async (req, res) => {
+    try {
+      const id = await t212.takeSnapshot(db);
+      if (!id) return res.status(502).json({ error: 'Snapshot не успя — провери T212 ключа' });
+      const row = db.prepare('SELECT * FROM t212_snapshots WHERE id=?').get(id);
+      res.status(201).json(row);
+    } catch (err) {
+      res.status(502).json({ error: err.message });
+    }
+  });
+
+  router.get('/broker/t212/orders', async (req, res) => {
+    try {
+      const data = await t212.getOrders();
+      const items = (data.value || data.items || []).map(o => ({
+        id:           o.id,
+        тикер:        o.ticker,
+        име:          o.instrument?.name || o.ticker,
+        isin:         o.instrument?.isin || null,
+        страна:       o.side,                // BUY / SELL
+        тип:          o.type,                // MARKET / LIMIT / STOP / ...
+        статус:       o.status,              // NEW / PARTIALLY_FILLED / ...
+        стойност:     o.value,
+        изпълнено:    o.filledValue,
+        валута:       o.currency,
+        създадена:    o.createdAt,
+        от_източник:  o.initiatedFrom,
+      }));
+      res.json({ брой: items.length, поръчки: items, кеширан: data._cached, възраст_ms: data._age_ms });
+    } catch (err) {
+      res.status(502).json({ error: err.message });
+    }
+  });
+
+  router.get('/broker/t212/portfolio', async (req, res) => {
+    try {
+      const [pf, info] = await Promise.all([t212.getPortfolio(), t212.getAccountInfo()]);
+      const positions = (pf.items || []).map(p => {
+        const qty = Number(p.quantity) || 0;
+        const avg = Number(p.averagePrice) || 0;
+        const cur = Number(p.currentPrice) || 0;
+        const invested = qty * avg;
+        const value = qty * cur;
+        const profit = value - invested;
+        const profitPct = invested > 0 ? (profit / invested) * 100 : 0;
+        return {
+          тикер:            p.ticker,
+          количество:       qty,
+          средна_цена:      avg,
+          текуща_цена:      cur,
+          инвестирано:      Number(invested.toFixed(2)),
+          текуща_стойност:  Number(value.toFixed(2)),
+          печалба:          Number(profit.toFixed(2)),
+          печалба_pct:      Number(profitPct.toFixed(2)),
+          ppl:              p.ppl,
+          fx_ppl:           p.fxPpl,
+          в_pie:            !!p.pieQuantity,
+          начална_сделка:   p.initialFillDate,
+        };
+      });
+      positions.sort((a, b) => b.текуща_стойност - a.текуща_стойност);
+      const totals = positions.reduce((acc, p) => {
+        acc.инвестирано     += p.инвестирано;
+        acc.текуща_стойност += p.текуща_стойност;
+        acc.печалба         += p.печалба;
+        return acc;
+      }, { инвестирано: 0, текуща_стойност: 0, печалба: 0 });
+      totals.печалба_pct = totals.инвестирано > 0 ? Number(((totals.печалба / totals.инвестирано) * 100).toFixed(2)) : 0;
+      totals.инвестирано     = Number(totals.инвестирано.toFixed(2));
+      totals.текуща_стойност = Number(totals.текуща_стойност.toFixed(2));
+      totals.печалба         = Number(totals.печалба.toFixed(2));
+      res.json({
+        валута:       info.currencyCode,
+        брой_позиции: positions.length,
+        общо:         totals,
+        позиции:      positions,
+        кеширан:      pf._cached,
+        възраст_ms:   pf._age_ms,
+      });
+    } catch (err) {
+      res.status(502).json({ error: err.message });
+    }
+  });
+
   // ── Back-compat aliases for old /gold/* URLs (frontend still calls them
   // during the transitional period) ────────────────────────────────────────
   router.get('/gold/reports', (req, res, next) => {
