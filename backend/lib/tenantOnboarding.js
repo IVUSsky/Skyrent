@@ -94,13 +94,14 @@ async function sendWelcomeEmail(db, { user, contract, tempPassword }) {
             <li>Да преглеждате информация за имота и снимки</li>
             <li>Да изтегляте подписания договор</li>
             <li>Да следите фактурите си за наем</li>
+            <li>💬 Да питате AI Помощника за WiFi паролата, уредите, плащане, договор и др.</li>
             <li>Да получавате важни известия</li>
           </ul>
           ${credsBlock}
           <p style="text-align:center;margin:24px 0;">
             <a href="${portalUrl}" style="background:#4AABCC;color:#fff;text-decoration:none;padding:12px 28px;border-radius:6px;font-weight:bold;display:inline-block;">Влез в профила</a>
           </p>
-          <p style="margin-top:24px;font-size:13px;color:#6b7280;">При въпроси можете да отговорите на този имейл.</p>
+          <p style="margin-top:24px;font-size:13px;color:#6b7280;">При въпроси за апартамента, наема или плащане — попитайте 💬 AI Помощника в портала, който е достъпен 24/7 и знае всичко за Вашия имот.</p>
           <p style="margin-top:16px;">С уважение,<br><strong>${fromName}</strong></p>
         </td></tr>
         <tr><td style="background:#e8eaf2;padding:14px 32px;text-align:center;font-size:11px;color:#6b7280;border-top:1px solid #d1d5db;">

@@ -6,6 +6,7 @@ const Anthropic = require('@anthropic-ai/sdk');
 
 const MODEL = 'claude-haiku-4-5-20251001';
 const MAX_HISTORY = 20;     // turns sent back to Claude on each call
+const HISTORY_WINDOW_DAYS = 7;   // older messages aren't pulled — fresh context after a gap
 const MAX_TOOL_LOOPS = 5;   // safety cap on tool-use iterations
 
 // ── Read settings issuer (landlord IBAN etc.) ─────────────────────────
@@ -58,10 +59,18 @@ function loadApartmentContext(db, userId) {
      ORDER BY (property_id IS NULL), id DESC`
   ).all(...propertyIds);
 
-  return { properties, knowledge, inventory, learnedFaqs };
+  // Property photo counts + captions — for visual-question routing.
+  // Tenant can browse the actual images in the 📷 Снимки tab.
+  const photos = db.prepare(
+    `SELECT property_id, caption FROM property_photos
+     WHERE property_id IN (${placeholders})
+     ORDER BY property_id, created_at`
+  ).all(...propertyIds);
+
+  return { properties, knowledge, inventory, learnedFaqs, photos };
 }
 
-function formatApartmentContext({ properties, knowledge, inventory = [], learnedFaqs = [] }) {
+function formatApartmentContext({ properties, knowledge, inventory = [], learnedFaqs = [], photos = [] }) {
   if (properties.length === 0) {
     return 'Наемателят още няма свързан имот в системата.';
   }
@@ -82,6 +91,12 @@ function formatApartmentContext({ properties, knowledge, inventory = [], learned
       if (!faqByProp[f.property_id]) faqByProp[f.property_id] = [];
       faqByProp[f.property_id].push(f);
     }
+  }
+
+  const photosByProp = {};
+  for (const ph of photos) {
+    if (!photosByProp[ph.property_id]) photosByProp[ph.property_id] = [];
+    photosByProp[ph.property_id].push(ph);
   }
 
   const propertyBlocks = properties.map(p => {
@@ -153,6 +168,18 @@ function formatApartmentContext({ properties, knowledge, inventory = [], learned
     if (kb.building_info)        lines.push('', `СГРАДА: ${kb.building_info}`);
     if (kb.payment_instructions) lines.push('', `ПЛАЩАНЕ: ${kb.payment_instructions}`);
     if (kb.free_faq)             lines.push('', `ДОПЪЛНИТЕЛНА ИНФОРМАЦИЯ: ${kb.free_faq}`);
+
+    const propPhotos = photosByProp[p.id] || [];
+    if (propPhotos.length) {
+      lines.push('', `СНИМКИ: ${propPhotos.length} налични в раздел 📷 Снимки в портала.`);
+      const captioned = propPhotos.filter(ph => ph.caption && ph.caption.trim());
+      if (captioned.length) {
+        lines.push('Заглавия:');
+        for (const ph of captioned.slice(0, 10)) {
+          lines.push(`  • ${ph.caption}`);
+        }
+      }
+    }
 
     const propFaqs = faqByProp[p.id] || [];
     if (propFaqs.length) {
@@ -295,12 +322,15 @@ function runTool(db, userId, name) {
 
 // ── Persistence: load + save chat history ─────────────────────────────
 function loadHistory(db, userId, limit = MAX_HISTORY) {
+  // Cap by both count and age — if the tenant comes back after a long gap,
+  // we start a fresh conversation rather than dragging in stale context.
   const rows = db.prepare(`
     SELECT role, content FROM tenant_chat_messages
     WHERE tenant_user_id=?
+      AND created_at >= datetime('now', ?)
     ORDER BY created_at DESC, id DESC
     LIMIT ?
-  `).all(userId, limit);
+  `).all(userId, `-${HISTORY_WINDOW_DAYS} days`, limit);
   return rows.reverse().map(r => ({ role: r.role, content: r.content }));
 }
 
@@ -355,6 +385,7 @@ async function askAgent(db, userId, userMessage) {
 - Бъди кратък, директен, любезен. Без излишни любезности.
 - Когато даваш суми, винаги слагай валутата.
 - Не измисляй данни. Не давай юридически/счетоводни съвети.
+- За визуални въпроси ("как изглежда X", "къде е Y", "покажи ми Z"): ако в контекста има секция СНИМКИ с подходящо заглавие, насочи: "Виж раздел 📷 Снимки в портала". НЕ описвай снимките сам — нямаш достъп до изображенията.
 
 ═══ КОГА ДА ТЪРСИШ В НЕТА (web_search) ═══
 - САМО когато наемателят пита как да оправи / използва / настрои конкретен уред И имаш марка+модел в контекста (секции УРЕДИ или ИНВЕНТАР).

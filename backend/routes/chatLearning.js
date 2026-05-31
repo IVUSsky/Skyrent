@@ -47,6 +47,64 @@ module.exports = function(db) {
     res.json({ count: row.c });
   });
 
+  // GET /api/chat-learning/stats — chat usage overview for admin
+  router.get('/stats', (req, res) => {
+    try {
+      // Message volumes
+      const v7  = db.prepare("SELECT COUNT(*) AS c FROM tenant_chat_messages WHERE created_at >= datetime('now', '-7 days')").get();
+      const v30 = db.prepare("SELECT COUNT(*) AS c FROM tenant_chat_messages WHERE created_at >= datetime('now', '-30 days')").get();
+      const userMsgs7  = db.prepare("SELECT COUNT(*) AS c FROM tenant_chat_messages WHERE role='user' AND created_at >= datetime('now', '-7 days')").get();
+      const userMsgs30 = db.prepare("SELECT COUNT(*) AS c FROM tenant_chat_messages WHERE role='user' AND created_at >= datetime('now', '-30 days')").get();
+
+      // Unique active tenants
+      const active7  = db.prepare("SELECT COUNT(DISTINCT tenant_user_id) AS c FROM tenant_chat_messages WHERE created_at >= datetime('now', '-7 days')").get();
+      const active30 = db.prepare("SELECT COUNT(DISTINCT tenant_user_id) AS c FROM tenant_chat_messages WHERE created_at >= datetime('now', '-30 days')").get();
+
+      // "I don't know" rate — heuristic via answer phrases
+      const dunnoPatterns = "'%нямам тази информация%' OR LOWER(content) LIKE '%нямам тази информац%' OR LOWER(content) LIKE '%не разполагам%' OR LOWER(content) LIKE '%не е попълнен%' OR LOWER(content) LIKE '%don''t have%' OR LOWER(content) LIKE '%i don''t know%'";
+      const dunno7 = db.prepare(
+        `SELECT COUNT(*) AS c FROM tenant_chat_messages
+         WHERE role='assistant' AND created_at >= datetime('now', '-7 days')
+           AND (LOWER(content) LIKE ${dunnoPatterns})`
+      ).get();
+      const totalAssist7 = db.prepare(
+        "SELECT COUNT(*) AS c FROM tenant_chat_messages WHERE role='assistant' AND created_at >= datetime('now', '-7 days')"
+      ).get();
+      const dunnoRate7 = totalAssist7.c > 0 ? Math.round((dunno7.c / totalAssist7.c) * 100) : 0;
+
+      // Top recent user questions (last 50, no clustering — admin gets a feel)
+      const recentQs = db.prepare(`
+        SELECT m.content, m.created_at, u.username, u.name
+        FROM tenant_chat_messages m
+        LEFT JOIN users u ON u.id = m.tenant_user_id
+        WHERE m.role='user' AND m.created_at >= datetime('now', '-30 days')
+        ORDER BY m.created_at DESC
+        LIMIT 25
+      `).all();
+
+      // Learned FAQs count (how much has been promoted)
+      const learnedTotal  = db.prepare("SELECT COUNT(*) AS c FROM chat_learned_faqs").get();
+      const queueApproved = db.prepare("SELECT COUNT(*) AS c FROM chat_learning_queue WHERE status='approved'").get();
+      const queueRejected = db.prepare("SELECT COUNT(*) AS c FROM chat_learning_queue WHERE status='rejected'").get();
+
+      res.json({
+        messages_7d:      v7.c,
+        messages_30d:     v30.c,
+        user_questions_7d:  userMsgs7.c,
+        user_questions_30d: userMsgs30.c,
+        active_tenants_7d:  active7.c,
+        active_tenants_30d: active30.c,
+        dunno_rate_7d:      dunnoRate7,
+        learned_faqs_total: learnedTotal.c,
+        queue_approved_total: queueApproved.c,
+        queue_rejected_total: queueRejected.c,
+        recent_questions:   recentQs,
+      });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // POST /api/chat-learning/run — manual trigger (also useful for testing)
   router.post('/run', async (req, res) => {
     try {

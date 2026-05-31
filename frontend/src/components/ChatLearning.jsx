@@ -4,13 +4,23 @@ import { apiFetch } from '../api'
 export default function ChatLearning({ API, onClose, onChanged }) {
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(true)
-  const [tab, setTab] = useState('pending')   // pending | approved | rejected
+  const [tab, setTab] = useState('pending')   // pending | approved | rejected | stats
   const [editing, setEditing] = useState({})  // { [id]: { question, proposed_answer, scope, property_ids } }
   const [busy, setBusy] = useState(null)      // id of row being acted on
   const [running, setRunning] = useState(false)
   const [toast, setToast] = useState(null)
+  const [stats, setStats] = useState(null)
+  const [statsLoading, setStatsLoading] = useState(false)
 
   const load = () => {
+    if (tab === 'stats') {
+      setStatsLoading(true)
+      apiFetch(`${API}/api/chat-learning/stats`)
+        .then(r => r.json())
+        .then(data => { setStats(data); setStatsLoading(false) })
+        .catch(() => setStatsLoading(false))
+      return
+    }
     setLoading(true)
     apiFetch(`${API}/api/chat-learning?status=${tab}`)
       .then(r => r.json())
@@ -143,6 +153,7 @@ export default function ChatLearning({ API, onClose, onChanged }) {
             { id: 'pending',  label: 'За преглед' },
             { id: 'approved', label: 'Одобрени' },
             { id: 'rejected', label: 'Отхвърлени' },
+            { id: 'stats',    label: '📊 Статистики' },
           ].map(t => (
             <button key={t.id} onClick={() => setTab(t.id)}
               className={`px-3 py-2 text-sm font-medium border-b-2 -mb-px ${
@@ -155,7 +166,58 @@ export default function ChatLearning({ API, onClose, onChanged }) {
 
         {/* Body */}
         <div className="px-6 py-4 overflow-y-auto flex-1 space-y-3">
-          {loading ? (
+          {tab === 'stats' ? (
+            statsLoading || !stats ? (
+              <div className="text-center text-gray-500 py-8">Зарежда…</div>
+            ) : (
+              <div className="space-y-4">
+                {/* KPI cards */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                    <div className="text-xs text-blue-700 uppercase tracking-wide">Въпроси (7 дни)</div>
+                    <div className="text-2xl font-bold text-blue-900">{stats.user_questions_7d}</div>
+                    <div className="text-xs text-blue-600 mt-1">за 30 дни: {stats.user_questions_30d}</div>
+                  </div>
+                  <div className="bg-green-50 border border-green-200 rounded-lg p-3">
+                    <div className="text-xs text-green-700 uppercase tracking-wide">Активни наематели (7 дни)</div>
+                    <div className="text-2xl font-bold text-green-900">{stats.active_tenants_7d}</div>
+                    <div className="text-xs text-green-600 mt-1">за 30 дни: {stats.active_tenants_30d}</div>
+                  </div>
+                  <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                    <div className="text-xs text-amber-700 uppercase tracking-wide">„Не знам" процент (7 дни)</div>
+                    <div className="text-2xl font-bold text-amber-900">{stats.dunno_rate_7d}%</div>
+                    <div className="text-xs text-amber-600 mt-1">колкото по-нисък, по-добре</div>
+                  </div>
+                  <div className="bg-purple-50 border border-purple-200 rounded-lg p-3">
+                    <div className="text-xs text-purple-700 uppercase tracking-wide">Научени FAQ-и (всички)</div>
+                    <div className="text-2xl font-bold text-purple-900">{stats.learned_faqs_total}</div>
+                    <div className="text-xs text-purple-600 mt-1">
+                      ✓ {stats.queue_approved_total} ✕ {stats.queue_rejected_total}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Recent questions */}
+                <div>
+                  <div className="text-sm font-semibold text-gray-800 mb-2">Последни въпроси от наематели (до 25, последни 30 дни)</div>
+                  {stats.recent_questions.length === 0 ? (
+                    <div className="text-sm text-gray-400 italic">Все още няма въпроси от наематели.</div>
+                  ) : (
+                    <div className="space-y-1 max-h-96 overflow-y-auto border border-gray-200 rounded">
+                      {stats.recent_questions.map((q, i) => (
+                        <div key={i} className="p-2 border-b border-gray-100 last:border-b-0 hover:bg-gray-50">
+                          <div className="text-sm text-gray-800">{q.content}</div>
+                          <div className="text-xs text-gray-400 mt-0.5">
+                            {q.name || q.username || 'наемател'} • {new Date(q.created_at).toLocaleString('bg-BG')}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )
+          ) : loading ? (
             <div className="text-center text-gray-500 py-8">Зарежда…</div>
           ) : items.length === 0 ? (
             <div className="text-center text-gray-400 py-12 text-sm">
