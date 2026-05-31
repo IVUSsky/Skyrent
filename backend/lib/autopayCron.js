@@ -145,6 +145,10 @@ async function runAutopayCharges(db, options = {}) {
       }
 
       const property = db.prepare('SELECT * FROM properties WHERE id=?').get(contract.property_id);
+      if (property.stripe_enabled === 0) {
+        console.warn(`Autopay: user ${user.id} property ${property.id} has stripe_enabled=0 — skip`);
+        continue;
+      }
       const inv = ensureInvoiceForMonth(db, property, currentMonth, false);
       if (!inv) {
         console.warn(`Autopay: user ${user.id} property ${property.id} has invoice_enabled=0 — skip`);

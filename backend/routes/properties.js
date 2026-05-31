@@ -368,6 +368,7 @@ module.exports = function(db) {
       const invoice_enabled    = body.invoice_enabled    !== undefined ? body.invoice_enabled    : current.invoice_enabled;
       const invoice_recipient  = body.invoice_recipient  !== undefined ? body.invoice_recipient  : current.invoice_recipient;
       const vat_exempt         = body.vat_exempt         !== undefined ? body.vat_exempt         : current.vat_exempt;
+      const stripe_enabled     = body.stripe_enabled     !== undefined ? (body.stripe_enabled ? 1 : 0) : (current.stripe_enabled ?? 1);
       const абонат_ток  = body.абонат_ток  !== undefined ? body.абонат_ток  : current.абонат_ток;
       const абонат_вода = body.абонат_вода !== undefined ? body.абонат_вода : current.абонат_вода;
       const абонат_тец  = body.абонат_тец  !== undefined ? body.абонат_тец  : current.абонат_тец;
@@ -376,11 +377,11 @@ module.exports = function(db) {
       db.prepare(`
         UPDATE properties
         SET адрес=?, район=?, наем=?, наемател=?, статус=?, market_val=?, тип=?, площ=?, покупна=?, ремонт=?,
-            email=?, телефон=?, invoice_enabled=?, invoice_recipient=?, vat_exempt=?,
+            email=?, телефон=?, invoice_enabled=?, invoice_recipient=?, vat_exempt=?, stripe_enabled=?,
             абонат_ток=?, абонат_вода=?, абонат_тец=?, абонат_вход=?,
             updated_at=CURRENT_TIMESTAMP
         WHERE id=?
-      `).run(адрес, район, наем, наемател, статус, market_val, тип, площ, покупна, ремонт, email, телефон, invoice_enabled, invoice_recipient, vat_exempt, абонат_ток, абонат_вода, абонат_тец, абонат_вход, id);
+      `).run(адрес, район, наем, наемател, статус, market_val, тип, площ, покупна, ремонт, email, телефон, invoice_enabled, invoice_recipient, vat_exempt, stripe_enabled, абонат_ток, абонат_вода, абонат_тец, абонат_вход, id);
 
       const updated = db.prepare('SELECT * FROM properties WHERE id = ?').get(id);
       console.log('Saved тип:', updated.тип, '| покупна:', updated.покупна, '| ремонт:', updated.ремонт);

@@ -105,7 +105,10 @@ function tenantPaymentsRouter(db) {
     if (!inv) return res.status(404).json({ error: 'Фактурата не е намерена' });
     if (inv.paid_at) return res.status(400).json({ error: 'Фактурата вече е платена' });
 
-    const prop = db.prepare('SELECT адрес FROM properties WHERE id=?').get(inv.property_id);
+    const prop = db.prepare('SELECT адрес, stripe_enabled FROM properties WHERE id=?').get(inv.property_id);
+    if (prop && prop.stripe_enabled === 0) {
+      return res.status(403).json({ error: 'Плащане с карта не е активирано за този имот. Моля, наредете плащането по банков път.' });
+    }
     const user = db.prepare('SELECT email FROM users WHERE id=?').get(req.user.id);
 
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';

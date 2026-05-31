@@ -98,7 +98,8 @@ module.exports = function(db) {
     const invs = db.prepare(`
       SELECT i.id, i.invoice_number, i.type, i.month, i.amount, i.vat_amount, i.total,
              i.due_date, i.issued_at, i.pdf_path, i.paid_at, i.payment_method,
-             p.адрес AS property_address
+             p.адрес AS property_address,
+             COALESCE(p.stripe_enabled, 1) AS stripe_enabled
       FROM rent_invoices i
       LEFT JOIN properties p ON p.id = i.property_id
       WHERE i.property_id IN (

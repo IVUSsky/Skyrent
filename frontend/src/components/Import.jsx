@@ -650,11 +650,10 @@ function AnalysisTab({ API }) {
 
   const chartData = monthly.slice(-24).map(r => ({
     name:    fmtMonth(r.месец),
-    Наем:    r.наем_total,
-    Вноски:  r.вноска_total,
-    Разходи: r.разход_total,
-    НАП:     r.нап_ддс_total,
-    Нет:     r.net,
+    'Наем (нето)':       r.наем_net,
+    'Вноски (график)':   r.вноска_scheduled,
+    Разходи:             r.разход_total,
+    'Нет (консолид.)':   r.net_consolidated,
   }))
 
   return (
@@ -662,8 +661,12 @@ function AnalysisTab({ API }) {
       {/* KPI Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {kpiCards.map(({ key, label, icon }) => {
-          const d   = stats[key] || {}
-          const net = (d.наем||0) + (d.нап_ддс||0) - (d.вноска||0) - (d.разход||0)
+          const d         = stats[key] || {}
+          const наем_net  = d.наем_net || 0
+          const scheduled = d.вноска_scheduled || 0
+          const net = d.net_consolidated != null
+            ? d.net_consolidated
+            : наем_net + (d.нап_ддс||0) - scheduled - (d.разход||0)
           return (
             <div key={key} className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
               <div className="flex items-center gap-2 mb-3">
@@ -675,25 +678,37 @@ function AnalysisTab({ API }) {
               </div>
               <div className="space-y-1.5">
                 <div className="flex justify-between text-sm">
-                  <span className="text-gray-500">Наем приход</span>
-                  <span className="font-semibold text-green-700">+{fmt0(d.наем)}</span>
+                  <span className="text-gray-500">Наем (без ДДС)</span>
+                  <span className="font-semibold text-green-700">+{fmt0(наем_net)}</span>
                 </div>
+                {(d.наем || 0) > 0 && Math.round(d.наем) !== Math.round(наем_net) && (
+                  <div className="flex justify-between text-[10px] -mt-1">
+                    <span className="text-gray-400 italic">с ДДС от банка</span>
+                    <span className="text-gray-400 italic">+{fmt0(d.наем)}</span>
+                  </div>
+                )}
                 <div className="flex justify-between text-sm">
-                  <span className="text-gray-500">Кредитни вноски</span>
-                  <span className="font-semibold text-orange-700">-{fmt0(d.вноска)}</span>
+                  <span className="text-gray-500" title="Месечни вноски от модул Кредити">Вноски (по график)</span>
+                  <span className="font-semibold text-orange-700">-{fmt0(scheduled)}</span>
                 </div>
+                {(d.вноска || 0) > 0 && (
+                  <div className="flex justify-between text-[10px] -mt-1">
+                    <span className="text-gray-400 italic">от тази банка</span>
+                    <span className="text-gray-400 italic">-{fmt0(d.вноска)}</span>
+                  </div>
+                )}
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-500">Разходи</span>
                   <span className="font-semibold text-red-700">-{fmt0(d.разход)}</span>
                 </div>
                 {(d.нап_ддс||0) > 0 && (
                   <div className="flex justify-between text-sm">
-                    <span className="text-gray-500">Постъпл. НАП/ДДС</span>
+                    <span className="text-gray-500" title="Постъпления/възстановявания от НАП (нетен ДДС差ентиал)">НАП/ДДС</span>
                     <span className="font-semibold text-purple-600">+{fmt0(d.нап_ддс)}</span>
                   </div>
                 )}
                 <div className="border-t border-gray-100 pt-1.5 flex justify-between text-sm font-bold">
-                  <span className="text-gray-700">Нет</span>
+                  <span className="text-gray-700">Нет (консолид.)</span>
                   <span className={net >= 0 ? 'text-green-700' : 'text-red-700'}>
                     {net >= 0 ? '+' : ''}{fmt0(net)}
                   </span>
@@ -707,18 +722,18 @@ function AnalysisTab({ API }) {
       {/* Chart */}
       {chartData.length > 0 && (
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
-          <h3 className="font-bold text-gray-800 mb-4">Месечни парични потоци (последни {chartData.length} месеца)</h3>
+          <h3 className="font-bold text-gray-800 mb-4">Месечни парични потоци (последни {chartData.length} месеца, в EUR)</h3>
           <ResponsiveContainer width="100%" height={280}>
             <LineChart data={chartData} margin={{ top:5, right:20, left:10, bottom:5 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0"/>
               <XAxis dataKey="name" tick={{ fontSize:11 }}/>
               <YAxis tick={{ fontSize:11 }} tickFormatter={v => fmt0(v)}/>
-              <Tooltip formatter={(v,n) => [fmt(v)+' лв.', n]}/>
+              <Tooltip formatter={(v,n) => [fmt(v)+' €', n]}/>
               <Legend/>
-              <Line type="monotone" dataKey="Наем"    stroke="#16a34a" strokeWidth={2}   dot={false}/>
-              <Line type="monotone" dataKey="Вноски"  stroke="#ea580c" strokeWidth={2}   dot={false}/>
-              <Line type="monotone" dataKey="Разходи" stroke="#dc2626" strokeWidth={2}   dot={false} strokeDasharray="4 2"/>
-              <Line type="monotone" dataKey="Нет"     stroke="#2563eb" strokeWidth={2.5} dot={false}/>
+              <Line type="monotone" dataKey="Наем (нето)"     stroke="#16a34a" strokeWidth={2}   dot={false}/>
+              <Line type="monotone" dataKey="Вноски (график)" stroke="#ea580c" strokeWidth={2}   dot={false} strokeDasharray="4 2"/>
+              <Line type="monotone" dataKey="Разходи"          stroke="#dc2626" strokeWidth={2}   dot={false} strokeDasharray="4 2"/>
+              <Line type="monotone" dataKey="Нет (консолид.)" stroke="#2563eb" strokeWidth={2.5} dot={false}/>
             </LineChart>
           </ResponsiveContainer>
         </div>
@@ -726,26 +741,29 @@ function AnalysisTab({ API }) {
 
       {/* Monthly table */}
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-        <div className="px-5 py-3 border-b border-gray-100">
+        <div className="px-5 py-3 border-b border-gray-100 flex justify-between items-baseline">
           <h3 className="font-bold text-gray-800">Разбивка по месец</h3>
+          <div className="text-xs text-gray-400">Наем — без ДДС | Вноски — от модул Кредити по график</div>
         </div>
         <div className="overflow-x-auto max-h-[400px] overflow-y-auto">
           <table className="min-w-full divide-y divide-gray-100 text-sm">
             <thead className="bg-gray-50 sticky top-0">
               <tr>
-                {['Месец','Наем','Вноски','Разходи','НАП/ДДС','Нет'].map(h => (
+                {['Месец','Наем (нето)','Вноски (график)','Разходи','НАП/ДДС','Нет (консолид.)'].map(h => (
                   <th key={h} className="px-4 py-2 text-right text-xs font-semibold text-gray-500 uppercase first:text-left">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
               {[...monthly].reverse().map(r => {
-                const net = (r.наем_total||0)+(r.нап_ддс_total||0)-(r.вноска_total||0)-(r.разход_total||0)
+                const net = r.net_consolidated != null
+                  ? r.net_consolidated
+                  : (r.наем_net||0) + (r.нап_ддс_total||0) - (r.вноска_scheduled||0) - (r.разход_total||0)
                 return (
                   <tr key={r.месец} className="hover:bg-gray-50">
                     <td className="px-4 py-2 font-medium text-gray-700">{fmtMonth(r.месец)}</td>
-                    <td className="px-4 py-2 text-right text-green-700 font-medium">{fmt(r.наем_total)}</td>
-                    <td className="px-4 py-2 text-right text-orange-700">{fmt(r.вноска_total)}</td>
+                    <td className="px-4 py-2 text-right text-green-700 font-medium" title={`С ДДС от банка: ${fmt(r.наем_total)} €`}>{fmt(r.наем_net)}</td>
+                    <td className="px-4 py-2 text-right text-orange-700" title={r.вноска_total ? `От тази банка: ${fmt(r.вноска_total)} €` : 'Не са регистрирани вноски в банковите тx'}>{fmt(r.вноска_scheduled)}</td>
                     <td className="px-4 py-2 text-right text-red-700">{fmt(r.разход_total)}</td>
                     <td className="px-4 py-2 text-right text-purple-700">{fmt(r.нап_ддс_total)}</td>
                     <td className={`px-4 py-2 text-right font-bold ${net>=0?'text-green-700':'text-red-700'}`}>

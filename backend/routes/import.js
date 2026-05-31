@@ -475,6 +475,27 @@ module.exports = function(db) {
     }
   });
 
+  // Helpers — get issuer VAT rate + property VAT-exempt map
+  function getIssuerVatRate() {
+    const row = db.prepare("SELECT value FROM settings WHERE key='issuer'").get();
+    if (!row) return 0;
+    try { return Number(JSON.parse(row.value).vat_rate || 0); } catch { return 0; }
+  }
+  function getPropertyVatExemptMap() {
+    const rows = db.prepare('SELECT id, vat_exempt FROM properties').all();
+    const map = {};
+    rows.forEach(p => { map[p.id] = !!p.vat_exempt; });
+    return map;
+  }
+  function toNetRentEur(grossEur, propertyId, issuerVatRate, vatExemptMap) {
+    if (!issuerVatRate || issuerVatRate <= 0) return grossEur;
+    // No property → default treat as residential (exempt) to be conservative
+    if (propertyId == null) return grossEur;
+    const exempt = vatExemptMap[propertyId];
+    if (exempt) return grossEur;
+    return grossEur / (1 + issuerVatRate / 100);
+  }
+
   // ── GET /monthly ───────────────────────────────────────────
   router.get('/monthly', (req, res) => {
     try {
@@ -496,16 +517,53 @@ module.exports = function(db) {
         ORDER BY месец DESC
       `).all();
 
-      res.json(rows.map(r => ({
-        месец:                    r.месец,
-        наем_total:               r.наем_total               || 0,
-        вноска_total:             r.вноска_total             || 0,
-        разход_total:             r.разход_total             || 0,
-        нап_ддс_total:            r.нап_ддс_total            || 0,
-        equity_total:             r.equity_total             || 0,
-        задържан_депозит_total:   r.задържан_депозит_total   || 0,
-        net: (r.наем_total || 0) + (r.задържан_депозит_total || 0) - (r.вноска_total || 0) - (r.разход_total || 0),
-      })));
+      // Per-month NET rent (минус ДДС): извличаме всеки наем tx с property_id
+      const issuerVatRate = getIssuerVatRate();
+      const vatExemptMap  = getPropertyVatExemptMap();
+      const rentTxs = db.prepare(`
+        SELECT месец, property_id, сума, currency, дата
+        FROM transactions
+        WHERE категория='наем' AND месец IS NOT NULL AND месец != ''
+      `).all();
+      const netRentByMonth = {};
+      for (const t of rentTxs) {
+        const cur = t.currency || (t.месец < '2026-01' ? 'BGN' : 'EUR');
+        const eur = cur === 'BGN' ? (t.сума || 0) / BGN_RATE : (t.сума || 0);
+        const net = toNetRentEur(eur, t.property_id, issuerVatRate, vatExemptMap);
+        netRentByMonth[t.месец] = (netRentByMonth[t.месец] || 0) + net;
+      }
+
+      // Per-month scheduled loan installments (от модул Кредити)
+      const loans = db.prepare('SELECT вноска, краен, currency FROM loans').all();
+      const scheduledFor = (ym) => {
+        const y = Number(ym.slice(0, 4));
+        return loans.reduce((s, l) => {
+          if (l.краен && l.краен < y) return s;
+          const cur = (l.currency || 'EUR').toUpperCase();
+          const eur = cur === 'BGN' ? (l.вноска || 0) / BGN_RATE : (l.вноска || 0);
+          return s + eur;
+        }, 0);
+      };
+
+      res.json(rows.map(r => {
+        const наем_net  = netRentByMonth[r.месец] || 0;
+        const scheduled = scheduledFor(r.месец);
+        return {
+          месец:                    r.месец,
+          наем_total:               r.наем_total               || 0, // gross (както досега, за reference)
+          наем_net:                 наем_net,                         // без ДДС
+          вноска_total:             r.вноска_total             || 0, // bank-only (обикн. 0)
+          вноска_scheduled:         scheduled,                        // от модул Кредити
+          разход_total:             r.разход_total             || 0,
+          нап_ддс_total:            r.нап_ддс_total            || 0,
+          equity_total:             r.equity_total             || 0,
+          задържан_депозит_total:   r.задържан_депозит_total   || 0,
+          // Bank-only Net (както досега)
+          net: (r.наем_total || 0) + (r.задържан_депозит_total || 0) - (r.вноска_total || 0) - (r.разход_total || 0),
+          // Консолидиран Нет: net rent + НАП - график - разходи (отразява реалната икономика)
+          net_consolidated: наем_net + (r.задържан_депозит_total || 0) + (r.нап_ддс_total || 0) - scheduled - (r.разход_total || 0),
+        };
+      }));
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -566,6 +624,7 @@ module.exports = function(db) {
   // ── GET /stats — KPI aggregates ────────────────────────────
   router.get('/stats', (req, res) => {
     try {
+      const BGN_RATE = 1.95583;
       const now  = new Date();
       const pad  = n => String(n).padStart(2, '0');
       const cur  = `${now.getFullYear()}-${pad(now.getMonth() + 1)}`;
@@ -574,21 +633,83 @@ module.exports = function(db) {
       const ytdS = `${now.getFullYear()}-01`;
       const ly   = String(now.getFullYear() - 1);
 
-      const agg = (w, p) => db.prepare(`
-        SELECT
-          COALESCE(SUM(CASE WHEN категория='наем' THEN сума ELSE 0 END),0) as наем,
-          COALESCE(SUM(CASE WHEN категория='вноска' THEN сума ELSE 0 END),0) as вноска,
-          COALESCE(SUM(CASE WHEN категория IN ('разход','разход_друг') THEN сума ELSE 0 END),0) as разход,
-          COALESCE(SUM(CASE WHEN категория='нап_ддс' THEN сума ELSE 0 END),0) as нап_ддс,
-          COUNT(*) as cnt
-        FROM transactions ${w}
-      `).get(...p);
+      const issuerVatRate = getIssuerVatRate();
+      const vatExemptMap  = getPropertyVatExemptMap();
+      const loans         = db.prepare('SELECT вноска, краен, currency FROM loans').all();
+
+      const agg = (whereClause, params, periodMonths) => {
+        // Aggregate всичко в EUR (BGN→EUR за стари записи)
+        const sums = db.prepare(`
+          SELECT
+            COALESCE(SUM(CASE WHEN категория='наем'
+              THEN CASE WHEN COALESCE(currency, CASE WHEN месец < '2026-01' THEN 'BGN' ELSE 'EUR' END)='BGN'
+                THEN сума/${BGN_RATE} ELSE сума END ELSE 0 END), 0) as наем,
+            COALESCE(SUM(CASE WHEN категория='вноска'
+              THEN CASE WHEN COALESCE(currency, CASE WHEN месец < '2026-01' THEN 'BGN' ELSE 'EUR' END)='BGN'
+                THEN сума/${BGN_RATE} ELSE сума END ELSE 0 END), 0) as вноска,
+            COALESCE(SUM(CASE WHEN категория IN ('разход','разход_друг')
+              THEN CASE WHEN COALESCE(currency, CASE WHEN месец < '2026-01' THEN 'BGN' ELSE 'EUR' END)='BGN'
+                THEN сума/${BGN_RATE} ELSE сума END ELSE 0 END), 0) as разход,
+            COALESCE(SUM(CASE WHEN категория='нап_ддс'
+              THEN CASE WHEN COALESCE(currency, CASE WHEN месец < '2026-01' THEN 'BGN' ELSE 'EUR' END)='BGN'
+                THEN сума/${BGN_RATE} ELSE сума END ELSE 0 END), 0) as нап_ддс,
+            COUNT(*) as cnt
+          FROM transactions ${whereClause}
+        `).get(...params);
+
+        // Per-tx net rent (минус ДДС) за същия филтър
+        const rentTxs = db.prepare(`
+          SELECT месец, property_id, сума, currency
+          FROM transactions
+          WHERE категория='наем' AND месец IS NOT NULL AND месец != ''
+            AND ${whereClause.replace(/^WHERE /, '')}
+        `).all(...params);
+        let наем_net = 0;
+        for (const t of rentTxs) {
+          const ccy = t.currency || (t.месец < '2026-01' ? 'BGN' : 'EUR');
+          const eur = ccy === 'BGN' ? (t.сума || 0) / BGN_RATE : (t.сума || 0);
+          наем_net += toNetRentEur(eur, t.property_id, issuerVatRate, vatExemptMap);
+        }
+
+        // Scheduled loans за периода
+        const monthsList = periodMonths || [];
+        const scheduled = monthsList.reduce((s, ym) => {
+          const y = Number(ym.slice(0, 4));
+          return s + loans.reduce((ss, l) => {
+            if (l.краен && l.краен < y) return ss;
+            const ccy = (l.currency || 'EUR').toUpperCase();
+            const eur = ccy === 'BGN' ? (l.вноска || 0) / BGN_RATE : (l.вноска || 0);
+            return ss + eur;
+          }, 0);
+        }, 0);
+
+        return {
+          ...sums,
+          наем_net,
+          вноска_scheduled: scheduled,
+          net_consolidated: наем_net + (sums.нап_ддс || 0) - scheduled - (sums.разход || 0),
+        };
+      };
+
+      // Помощни за списък месеци
+      const monthsBetween = (from, to) => {
+        const out = [];
+        const [yF, mF] = from.split('-').map(Number);
+        const [yT, mT] = to.split('-').map(Number);
+        let y = yF, m = mF;
+        while (y < yT || (y === yT && m <= mT)) {
+          out.push(`${y}-${String(m).padStart(2, '0')}`);
+          m++; if (m > 12) { m = 1; y++; }
+        }
+        return out;
+      };
+      const monthsLike = (yearStr) => monthsBetween(`${yearStr}-01`, `${yearStr}-12`);
 
       res.json({
-        currentMonth: { label: cur,                   ...agg('WHERE месец = ?',    [cur])  },
-        last3months:  { label: `${m3} → ${cur}`,      ...agg('WHERE месец >= ?',   [m3])   },
-        ytd:          { label: `${now.getFullYear()} ГТД`, ...agg('WHERE месец >= ?', [ytdS]) },
-        lastYear:     { label: ly,                     ...agg('WHERE месец LIKE ?', [`${ly}-%`]) },
+        currentMonth: { label: cur,                       ...agg('WHERE месец = ?',    [cur],  [cur]) },
+        last3months:  { label: `${m3} → ${cur}`,          ...agg('WHERE месец >= ?',   [m3],   monthsBetween(m3, cur)) },
+        ytd:          { label: `${now.getFullYear()} ГТД`, ...agg('WHERE месец >= ?', [ytdS], monthsBetween(ytdS, cur)) },
+        lastYear:     { label: ly,                         ...agg('WHERE месец LIKE ?', [`${ly}-%`], monthsLike(ly)) },
       });
     } catch (err) {
       res.status(500).json({ error: err.message });

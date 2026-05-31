@@ -115,6 +115,13 @@ export default function Invoices({ API, role }) {
     }).then(() => load())
   }
 
+  const toggleStripeEnabled = (propId, enabled) => {
+    apiFetch(`${API}/api/properties/${propId}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stripe_enabled: enabled ? 1 : 0 }),
+    }).then(() => load())
+  }
+
   const openRecipient = (prop) => {
     let rec = {}
     try { rec = JSON.parse(prop.invoice_recipient || '{}') } catch {}
@@ -271,6 +278,12 @@ export default function Invoices({ API, role }) {
                       <span className="text-gray-600">Без ДДС</span>
                     </label>
                   )}
+                  <label className="text-xs flex items-center gap-1 cursor-pointer select-none" title="Ако е изключено, наемателят няма да вижда бутона 'Плати с карта' в портала и autopay се пропуска за този имот">
+                    <input type="checkbox" checked={prop.stripe_enabled !== 0}
+                      onChange={e => toggleStripeEnabled(prop.id, e.target.checked)}
+                      className="w-3 h-3 accent-blue-600 cursor-pointer" />
+                    <span className="text-gray-600">💳 Stripe</span>
+                  </label>
                   {prop.invoice_enabled && (
                     <button onClick={() => openRecipient(prop)}
                       className="text-xs px-2 py-1 bg-gray-100 hover:bg-blue-50 text-gray-600 hover:text-blue-700 rounded border border-gray-200">

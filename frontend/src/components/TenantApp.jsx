@@ -517,7 +517,8 @@ function Invoices() {
       {list.map(inv => {
         const isPaid     = !!inv.paid_at
         const isCN       = inv.type === 'credit_note'
-        const canPay     = !isPaid && !isCN
+        const stripeOff  = inv.stripe_enabled === 0
+        const canPay     = !isPaid && !isCN && !stripeOff
         const isPaying   = payingId === inv.id
         return (
           <Card key={inv.id}>
@@ -553,6 +554,11 @@ function Invoices() {
                   >
                     {isPaying ? '...' : '💳 Плати'}
                   </button>
+                )}
+                {!isPaid && !isCN && stripeOff && (
+                  <span className="text-[10px] text-slate-500 italic text-center max-w-[100px]">
+                    Само по банков път
+                  </span>
                 )}
                 {inv.pdf_path && (
                   <a
