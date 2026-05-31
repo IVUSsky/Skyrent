@@ -22,6 +22,9 @@ export default function TenantApp({ userName, onLogout, mustChangePassword }) {
   const [toast, setToast] = useState(null)
   const [installPrompt, setInstallPrompt] = useState(null)
   const [showInstallBanner, setShowInstallBanner] = useState(false)
+  const [chatPrefill, setChatPrefill] = useState('')
+
+  const askInChat = (text) => { setChatPrefill(text); setTab('chat') }
 
   // PWA install — capture beforeinstallprompt for Android/Chrome
   useEffect(() => {
@@ -185,8 +188,8 @@ export default function TenantApp({ userName, onLogout, mustChangePassword }) {
 
       {/* Body */}
       <main className="max-w-2xl mx-auto px-4 py-4">
-        {tab === 'home'        && <Home me={me} property={property} contract={activeContract} />}
-        {tab === 'chat'        && <Chat />}
+        {tab === 'home'        && <Home me={me} property={property} contract={activeContract} onAsk={askInChat} />}
+        {tab === 'chat'        && <Chat prefill={chatPrefill} onPrefillConsumed={() => setChatPrefill('')} />}
         {tab === 'photos'      && <Photos me={me} property={property} />}
         {tab === 'contract'    && <Contract contracts={me?.contracts || []} />}
         {tab === 'invoices'    && <Invoices />}
@@ -214,12 +217,13 @@ export default function TenantApp({ userName, onLogout, mustChangePassword }) {
   )
 }
 
-function Chat() {
+function Chat({ prefill = '', onPrefillConsumed }) {
   const [messages, setMessages] = useState([])
   const [input, setInput]       = useState('')
   const [sending, setSending]   = useState(false)
   const [toast, setToast]       = useState(null)
   const bottomRef = useRef(null)
+  const inputRef  = useRef(null)
 
   useEffect(() => {
     apiFetch(`${API}/api/tenant/chat/history`)
@@ -227,6 +231,14 @@ function Chat() {
       .then(data => Array.isArray(data) ? setMessages(data) : null)
       .catch(() => {})
   }, [])
+
+  useEffect(() => {
+    if (prefill) {
+      setInput(prefill)
+      onPrefillConsumed?.()
+      setTimeout(() => inputRef.current?.focus(), 0)
+    }
+  }, [prefill])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -305,6 +317,7 @@ function Chat() {
       {/* Input row */}
       <div className="mt-2 flex gap-2">
         <input
+          ref={inputRef}
           type="text"
           value={input}
           onChange={e => setInput(e.target.value)}
@@ -322,15 +335,48 @@ function Chat() {
   )
 }
 
-function Home({ me, property, contract }) {
+function Home({ me, property, contract, onAsk }) {
   if (!property) {
     return <Card>
       <p className="text-slate-600 text-sm">Все още няма активен договор за имот, свързан с Вашия профил.</p>
       <p className="text-slate-500 text-xs mt-2">Свържете се с екипа на Sky Capital за повече информация.</p>
     </Card>
   }
+  const suggestions = [
+    'Колко дължа?',
+    'Каква е WiFi паролата?',
+    'До кога е договорът?',
+    'Как да платя наема?',
+  ]
   return (
     <div className="space-y-4">
+      {/* Quick action: AI helper */}
+      <button
+        onClick={() => onAsk?.('')}
+        className="w-full text-left rounded-xl shadow-sm border border-blue-200 hover:border-blue-400 transition-colors p-4"
+        style={{ background: 'linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%)' }}
+      >
+        <div className="flex items-center gap-3 mb-2">
+          <span className="text-2xl">💬</span>
+          <div className="flex-1">
+            <div className="text-sm font-semibold text-slate-800">AI Помощник</div>
+            <div className="text-xs text-slate-600">Питай за апартамента, наема, плащане, уредите…</div>
+          </div>
+          <span className="text-slate-400">→</span>
+        </div>
+        <div className="flex gap-1.5 flex-wrap mt-3">
+          {suggestions.map(q => (
+            <span
+              key={q}
+              onClick={(e) => { e.stopPropagation(); onAsk?.(q) }}
+              className="text-xs bg-white border border-blue-200 hover:bg-blue-50 hover:border-blue-400 text-blue-700 px-2.5 py-1 rounded-full cursor-pointer transition-colors"
+            >
+              {q}
+            </span>
+          ))}
+        </div>
+      </button>
+
       <Card>
         <div className="flex items-start justify-between gap-2">
           <div>
