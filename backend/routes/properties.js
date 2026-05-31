@@ -198,6 +198,99 @@ module.exports = function(db) {
     }
   });
 
+  // Rent matrix — годишен преглед: ред=имот × колона=месец
+  router.get('/rent-matrix', (req, res) => {
+    try {
+      const year = String(req.query.year || new Date().getFullYear());
+      const monthFrom = `${year}-01`;
+      const monthTo   = `${year}-12`;
+
+      const props = db.prepare(
+        `SELECT id, адрес, район, наемател, наем
+         FROM properties
+         WHERE статус = '✅' AND наемател IS NOT NULL AND наемател != ''
+         ORDER BY адрес`
+      ).all();
+
+      const bank = db.prepare(
+        `SELECT property_id, месец, SUM(сума) as paid_amount, COUNT(*) as tx_count
+         FROM transactions
+         WHERE категория = 'наем' AND property_id IS NOT NULL
+           AND месец >= ? AND месец <= ?
+         GROUP BY property_id, месец`
+      ).all(monthFrom, monthTo);
+
+      const manual = db.prepare(
+        `SELECT property_id, month, amount, payment_type
+         FROM manual_rent_payments
+         WHERE month >= ? AND month <= ?`
+      ).all(monthFrom, monthTo);
+
+      // Index: key = `${property_id}-${YYYY-MM}`
+      const cellMap = {};
+      for (const r of bank) {
+        cellMap[`${r.property_id}-${r.месец}`] = {
+          bank_amount: r.paid_amount, tx_count: r.tx_count, manual_amount: 0,
+        };
+      }
+      for (const r of manual) {
+        const key = `${r.property_id}-${r.month}`;
+        if (!cellMap[key]) cellMap[key] = { bank_amount: 0, tx_count: 0, manual_amount: 0 };
+        cellMap[key].manual_amount = r.amount;
+        cellMap[key].manual_type   = r.payment_type;
+      }
+
+      // Build matrix
+      const now = new Date();
+      const curYM = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+      const properties = props.map(p => {
+        const cells = [];
+        for (let m = 1; m <= 12; m++) {
+          const ym = `${year}-${String(m).padStart(2, '0')}`;
+          const cell = cellMap[`${p.id}-${ym}`];
+          const paid_amount = cell ? (cell.bank_amount || 0) + (cell.manual_amount || 0) : 0;
+          const is_future = ym > curYM;
+          cells.push({
+            месец: ym,
+            paid_amount,
+            tx_count: cell?.tx_count || 0,
+            is_paid: !!cell && paid_amount > 0,
+            manual: !!cell?.manual_amount,
+            is_future,
+          });
+        }
+        const collected = cells.reduce((s, c) => s + c.paid_amount, 0);
+        const monthsActive = cells.filter(c => !c.is_future).length;
+        const expected = (p.наем || 0) * monthsActive;
+        return {
+          id: p.id, адрес: p.адрес, район: p.район, наемател: p.наемател, наем: p.наем,
+          cells, collected, expected,
+          paid_months:   cells.filter(c => c.is_paid && !c.is_future).length,
+          unpaid_months: cells.filter(c => !c.is_paid && !c.is_future).length,
+        };
+      });
+
+      const totalExpected  = properties.reduce((s, p) => s + p.expected, 0);
+      const totalCollected = properties.reduce((s, p) => s + p.collected, 0);
+      const totalUnpaidCells = properties.reduce((s, p) => s + p.unpaid_months, 0);
+
+      res.json({
+        year: Number(year),
+        currentMonth: curYM,
+        properties,
+        summary: {
+          totalExpected,
+          totalCollected,
+          totalUnpaidCells,
+          collectibility: totalExpected > 0 ? totalCollected / totalExpected : 0,
+        },
+      });
+    } catch (err) {
+      console.error('rent-matrix error:', err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // Mark rent as paid manually
   router.post('/:id/mark-paid', (req, res) => {
     try {

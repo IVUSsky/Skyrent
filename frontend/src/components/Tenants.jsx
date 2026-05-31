@@ -21,6 +21,11 @@ export default function Tenants({ API }) {
   const today = new Date()
   const defaultMonth = today.toISOString().slice(0, 7)
 
+  const [view, setView]   = useState('month') // 'month' | 'year'
+  const [year, setYear]   = useState(today.getFullYear())
+  const [matrix, setMatrix] = useState(null)
+  const [matrixLoading, setMatrixLoading] = useState(false)
+
   const [month, setMonth] = useState(defaultMonth)
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -58,6 +63,21 @@ export default function Tenants({ API }) {
   }, [API, month])
 
   useEffect(() => { load() }, [load])
+
+  const loadMatrix = useCallback(() => {
+    setMatrixLoading(true)
+    apiFetch(`${API}/api/properties/rent-matrix?year=${year}`)
+      .then(r => r.json())
+      .then(d => { setMatrix(d); setMatrixLoading(false) })
+      .catch(() => setMatrixLoading(false))
+  }, [API, year])
+
+  useEffect(() => { if (view === 'year') loadMatrix() }, [view, loadMatrix])
+
+  const jumpToMonth = (ym) => {
+    setMonth(ym)
+    setView('month')
+  }
 
   const acceptPrepaid = (prop) => {
     apiFetch(`${API}/api/properties/${prop.property_id}/mark-paid`, {
@@ -168,8 +188,8 @@ export default function Tenants({ API }) {
     window.open(`sms:${prop['телефон']}?body=${text}`)
   }
 
-  if (loading) return <div className="flex justify-center py-16 text-gray-500 text-lg">Зарежда...</div>
-  if (error) return <div className="bg-red-50 text-red-700 p-4 rounded-lg">Грешка: {error}</div>
+  if (view === 'month' && loading) return <div className="flex justify-center py-16 text-gray-500 text-lg">Зарежда...</div>
+  if (view === 'month' && error) return <div className="bg-red-50 text-red-700 p-4 rounded-lg">Грешка: {error}</div>
 
   const props = data?.properties || []
   const paid = props.filter(p => p.is_paid)
@@ -201,22 +221,55 @@ export default function Tenants({ API }) {
       <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
         <h2 className="text-2xl font-bold text-gray-800">Наематели — плащания</h2>
         <div className="flex items-center gap-3 flex-wrap">
-          <div className="flex items-center gap-2">
-            <label className="text-sm text-gray-600 font-medium">Месец:</label>
-            <input
-              type="month"
-              value={month}
-              onChange={e => setMonth(e.target.value)}
-              className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
+          <div className="inline-flex rounded-lg border border-gray-300 overflow-hidden text-sm">
+            <button onClick={() => setView('month')}
+              className={`px-3 py-1.5 ${view === 'month' ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-50'}`}>
+              📅 По месец
+            </button>
+            <button onClick={() => setView('year')}
+              className={`px-3 py-1.5 border-l border-gray-300 ${view === 'year' ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-50'}`}>
+              🗓️ Цяла година
+            </button>
           </div>
-          <button
-            onClick={sendReminderAll}
-            className="flex items-center gap-2 px-4 py-2 text-sm font-medium bg-orange-600 hover:bg-orange-700 text-white rounded-lg">
-            📧 Изпрати напомняния до всички
-          </button>
+
+          {view === 'month' ? (
+            <div className="flex items-center gap-2">
+              <label className="text-sm text-gray-600 font-medium">Месец:</label>
+              <input
+                type="month"
+                value={month}
+                onChange={e => setMonth(e.target.value)}
+                className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <label className="text-sm text-gray-600 font-medium">Година:</label>
+              <select value={year} onChange={e => setYear(Number(e.target.value))}
+                className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                {[today.getFullYear() + 1, today.getFullYear(), today.getFullYear() - 1, today.getFullYear() - 2, today.getFullYear() - 3].map(y => (
+                  <option key={y} value={y}>{y}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {view === 'month' && (
+            <button
+              onClick={sendReminderAll}
+              className="flex items-center gap-2 px-4 py-2 text-sm font-medium bg-orange-600 hover:bg-orange-700 text-white rounded-lg">
+              📧 Изпрати напомняния до всички
+            </button>
+          )}
         </div>
       </div>
+
+      {view === 'year' && (
+        <YearMatrix matrix={matrix} loading={matrixLoading} onCellClick={jumpToMonth} />
+      )}
+
+      {view === 'month' && (<>
+
 
       {/* Summary cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
@@ -402,6 +455,7 @@ export default function Tenants({ API }) {
           <div>Няма активни имоти с наематели.</div>
         </div>
       )}
+      </>)}
     </div>
   )
 }
@@ -600,6 +654,150 @@ function TenantTable({
           ))}
         </tbody>
       </table>
+    </div>
+  )
+}
+
+// ── Year matrix ────────────────────────────────────────────────
+const MONTH_SHORT = ['Яну','Фев','Мар','Апр','Май','Юни','Юли','Авг','Сеп','Окт','Ное','Дек']
+
+function YearMatrix({ matrix, loading, onCellClick }) {
+  if (loading)  return <div className="flex justify-center py-16 text-gray-500 text-lg">Зарежда...</div>
+  if (!matrix)  return <div className="py-12 text-center text-gray-400">Няма данни.</div>
+  if (!matrix.properties.length) return (
+    <div className="bg-gray-50 rounded-xl border border-gray-200 p-8 text-center text-gray-400">
+      <div className="text-3xl mb-2">🏠</div>
+      <div>Няма активни имоти с наематели.</div>
+    </div>
+  )
+
+  const cellClass = (c) => {
+    if (c.is_future) return 'bg-gray-50 text-gray-300'
+    if (c.is_paid) return c.manual ? 'bg-purple-100 text-purple-700' : 'bg-green-100 text-green-700'
+    return 'bg-red-50 text-red-700'
+  }
+  const cellIcon = (c) => {
+    if (c.is_future) return '·'
+    if (c.is_paid)   return c.manual ? '💵' : '✓'
+    return '✗'
+  }
+
+  const { summary } = matrix
+  const collectibilityPct = Math.round((summary.collectibility || 0) * 100)
+
+  // Per-month totals across all properties
+  const monthTotals = Array.from({ length: 12 }, (_, i) => {
+    const ym = `${matrix.year}-${String(i + 1).padStart(2, '0')}`
+    let paid = 0, unpaid = 0, isFuture = false
+    matrix.properties.forEach(p => {
+      const c = p.cells[i]
+      if (c.is_future) { isFuture = true; return }
+      if (c.is_paid) paid++; else unpaid++
+    })
+    return { ym, paid, unpaid, isFuture }
+  })
+
+  return (
+    <div>
+      {/* Year summary cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+        <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+          <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Очакван за {matrix.year}</div>
+          <div className="text-2xl font-bold text-blue-700 mt-1">{summary.totalExpected.toLocaleString('bg-BG', { maximumFractionDigits: 0 })} €</div>
+          <div className="text-xs text-gray-500">до момента</div>
+        </div>
+        <div className="bg-green-50 border border-green-200 rounded-xl p-4">
+          <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Събрано</div>
+          <div className="text-2xl font-bold text-green-700 mt-1">{summary.totalCollected.toLocaleString('bg-BG', { maximumFractionDigits: 0 })} €</div>
+        </div>
+        <div className="bg-red-50 border border-red-200 rounded-xl p-4">
+          <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Неплатени месеци</div>
+          <div className="text-2xl font-bold text-red-700 mt-1">{summary.totalUnpaidCells}</div>
+          <div className="text-xs text-gray-500">общо имот×месец</div>
+        </div>
+        <div className="bg-gray-50 border border-gray-200 rounded-xl p-4">
+          <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Събираемост</div>
+          <div className="text-2xl font-bold text-gray-700 mt-1">{collectibilityPct}%</div>
+          <div className="text-xs text-gray-500">{matrix.year}</div>
+        </div>
+      </div>
+
+      {/* Matrix */}
+      <div className="bg-white rounded-xl shadow overflow-x-auto">
+        <table className="min-w-full text-sm">
+          <thead className="bg-gray-50">
+            <tr>
+              <th className="sticky left-0 bg-gray-50 px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider z-10 border-r">Имот / Наемател</th>
+              {MONTH_SHORT.map((m, i) => (
+                <th key={m} className={`px-2 py-2 text-center text-xs font-semibold uppercase tracking-wider ${matrix.currentMonth === `${matrix.year}-${String(i + 1).padStart(2, '0')}` ? 'text-blue-700 bg-blue-50' : 'text-gray-500'}`}>
+                  {m}
+                </th>
+              ))}
+              <th className="px-3 py-2 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">Платено / Очакван</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {matrix.properties.map((p, i) => (
+              <tr key={p.id} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                <td className="sticky left-0 px-3 py-2 border-r text-xs max-w-[200px]"
+                  style={{ backgroundColor: i % 2 === 0 ? '#fff' : '#f9fafb' }}>
+                  <div className="font-medium text-gray-800 truncate">{p.адрес}</div>
+                  <div className="text-gray-400 truncate">{p.наемател}</div>
+                  <div className="text-blue-600 mt-0.5">{fmt(p.наем)} €/мес</div>
+                </td>
+                {p.cells.map((c) => (
+                  <td key={c.месец} className="px-1 py-1 text-center">
+                    <button
+                      onClick={() => !c.is_future && onCellClick(c.месец)}
+                      disabled={c.is_future}
+                      title={
+                        c.is_future ? 'Бъдещ месец'
+                        : c.is_paid
+                          ? `${c.месец}: ${c.paid_amount.toLocaleString('bg-BG', { minimumFractionDigits: 2 })} €${c.tx_count > 1 ? ` (${c.tx_count} тx)` : ''}${c.manual ? ' [ръчно]' : ''}`
+                          : `${c.месец}: НЕПЛАТЕН (очакван ${fmt(p.наем)} €)`
+                      }
+                      className={`w-8 h-7 rounded text-xs font-bold ${cellClass(c)} ${c.is_future ? 'cursor-default' : 'cursor-pointer hover:ring-2 hover:ring-blue-400'} ${c.tx_count > 1 ? 'ring-1 ring-amber-400' : ''}`}>
+                      {cellIcon(c)}
+                    </button>
+                  </td>
+                ))}
+                <td className="px-3 py-2 text-right whitespace-nowrap text-xs">
+                  <div className="font-bold text-green-700">{p.collected.toLocaleString('bg-BG', { maximumFractionDigits: 0 })} €</div>
+                  <div className="text-gray-500">от {p.expected.toLocaleString('bg-BG', { maximumFractionDigits: 0 })} €</div>
+                  {p.unpaid_months > 0 && (
+                    <div className="text-red-600 mt-0.5">⚠ {p.unpaid_months} неплат.</div>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot className="bg-gray-50 border-t-2 border-gray-200">
+            <tr>
+              <td className="sticky left-0 bg-gray-50 px-3 py-2 border-r text-xs font-bold text-gray-600 uppercase tracking-wider">Общо по месец</td>
+              {monthTotals.map(m => (
+                <td key={m.ym} className="px-1 py-2 text-center text-xs">
+                  {m.isFuture ? <span className="text-gray-300">—</span> : (
+                    <div>
+                      <div className="text-green-700 font-bold">{m.paid}</div>
+                      {m.unpaid > 0 && <div className="text-red-600">−{m.unpaid}</div>}
+                    </div>
+                  )}
+                </td>
+              ))}
+              <td className="px-3 py-2"></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+
+      {/* Legend */}
+      <div className="mt-3 flex flex-wrap gap-3 text-xs text-gray-600">
+        <span className="inline-flex items-center gap-1"><span className="inline-block w-5 h-5 bg-green-100 text-green-700 rounded text-center font-bold">✓</span> Платил (банков превод)</span>
+        <span className="inline-flex items-center gap-1"><span className="inline-block w-5 h-5 bg-purple-100 text-purple-700 rounded text-center">💵</span> Ръчно маркиран (брой / друга сметка)</span>
+        <span className="inline-flex items-center gap-1"><span className="inline-block w-5 h-5 bg-red-50 text-red-700 rounded text-center font-bold">✗</span> Неплатен</span>
+        <span className="inline-flex items-center gap-1"><span className="inline-block w-5 h-5 bg-green-100 ring-1 ring-amber-400 rounded text-center text-green-700 font-bold">✓</span> ≥2 транзакции (възможен дубликат)</span>
+        <span className="ml-auto text-gray-400">💡 Кликни клетка → отвори месеца за детайл</span>
+      </div>
     </div>
   )
 }
