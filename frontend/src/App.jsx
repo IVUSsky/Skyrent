@@ -15,8 +15,10 @@ import Expenses from './components/Expenses'
 import Smart from './components/Smart'
 import Investments from './components/Investments'
 import Addons from './components/Addons'
+import Support from './components/Support'
 import TenantApp from './components/TenantApp'
 import ChatLearning from './components/ChatLearning'
+import NotificationBell from './components/NotificationBell'
 import { apiFetch } from './api'
 
 const API = import.meta.env.VITE_API_URL || ''
@@ -30,6 +32,7 @@ const ALL_TABS = [
   { id: 'invoices',  label: '🧾 Фактури',     roles: ['admin', 'broker'] },
   { id: 'contracts', label: '📋 Договори',    roles: ['admin', 'broker'] },
   { id: 'addons',    label: '🛍️ Услуги',     roles: ['admin'] },
+  { id: 'support',   label: '🛟 Поддръжка',   roles: ['admin'] },
   { id: 'loans',     label: 'Кредити',        roles: ['admin'] },
   { id: 'analysis',  label: 'Анализ',         roles: ['admin'] },
   { id: 'expenses',    label: '💸 Разходи',     roles: ['admin'] },
@@ -135,6 +138,20 @@ export default function App() {
             ))}
           </nav>
           <div className="ml-auto flex items-center gap-3">
+            <NotificationBell
+              API={API}
+              basePath="/api/notifications"
+              darkHeader
+              onNavigate={(link) => {
+                if (link?.startsWith('tickets/')) {
+                  setActiveTab('support')
+                } else if (link === 'addons') {
+                  setActiveTab('addons')
+                } else if (link === 'invoices') {
+                  setActiveTab('invoices')
+                }
+              }}
+            />
             <button
               onClick={() => setShowLearning(true)}
               title="Учене от разговори (предложения от AI асистента)"
@@ -171,6 +188,7 @@ export default function App() {
         {validTab === 'invoices'  && <Invoices API={API} role={role} />}
         {validTab === 'contracts' && <Contracts API={API} role={role} />}
         {validTab === 'addons'    && <Addons API={API} />}
+        {validTab === 'support'   && <Support API={API} />}
         {validTab === 'loans'     && <Loans API={API} />}
         {validTab === 'history'   && <History API={API} />}
         {validTab === 'analysis'  && <Analysis API={API} />}

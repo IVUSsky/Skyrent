@@ -268,10 +268,30 @@ async function runAiExtract(db, ids) {
       if (!fp || !fs.existsSync(fp)) throw new Error('File missing: ' + fp);
 
       // STEP 1: Try XML parser first (instant, 100% accurate for e-invoice.bg)
-      const xmlResult = xmlParser.tryParseFile(fp);
-      if (xmlResult && xmlResult.ok) {
-        const result = applyParsedData(db, id, xmlResult.data, 'XML signed (e-invoice.bg)');
-        results.push(result);
+      // ZIP може да съдържа множество фактури → парсваме всички
+      const xmlResults = xmlParser.tryParseAllInvoices(fp);
+      const okResults = xmlResults.filter(r => r && r.ok);
+      if (okResults.length > 0) {
+        if (okResults.length === 1) {
+          // Single XML — apply директно към текущия expense_invoice
+          const result = applyParsedData(db, id, okResults[0].data, 'XML signed (e-invoice.bg)');
+          results.push(result);
+        } else {
+          // Multi-XML ZIP — първият към current row, останалите → нови expense_invoice rows
+          const firstResult = applyParsedData(db, id, okResults[0].data, `XML signed (e-invoice.bg, 1/${okResults.length})`);
+          results.push(firstResult);
+          for (let i = 1; i < okResults.length; i++) {
+            // Клонирай реда: copy filepath + основни полета, после applyParsedData
+            const newRow = db.prepare(
+              `INSERT INTO expense_invoices (filepath, filename, source, status, payment_type, expense_category, uploaded_at)
+               SELECT filepath, filename, source, 'processing', payment_type, expense_category, uploaded_at
+               FROM expense_invoices WHERE id = ?`
+            ).run(id);
+            const newId = newRow.lastInsertRowid;
+            const subResult = applyParsedData(db, newId, okResults[i].data, `XML signed (e-invoice.bg, ${i+1}/${okResults.length})`);
+            results.push(subResult);
+          }
+        }
         continue;
       }
 

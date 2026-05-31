@@ -1,4 +1,5 @@
 const express = require('express');
+const { notifyAdmin, notifyTenant } = require('../lib/notify');
 
 module.exports = function(db) {
   const router = express.Router();
@@ -106,21 +107,41 @@ module.exports = function(db) {
       const { action, admin_notes } = req.body;
       const now = new Date().toISOString();
 
+      const svc = db.prepare('SELECT name, icon FROM addon_services WHERE id=?').get(sub.service_id);
+      const svcLabel = `${svc?.icon || ''} ${svc?.name || 'услуга'}`.trim();
       switch (action) {
         case 'approve':
           if (sub.status !== 'pending') return res.status(400).json({ error: `Не може да се одобри (текущ статус: ${sub.status})` });
           db.prepare('UPDATE tenant_addons SET status=?, activated_at=?, admin_notes=? WHERE id=?')
             .run('active', now, admin_notes || sub.admin_notes, req.params.id);
+          notifyTenant(db, sub.user_id, {
+            kind: 'addon_approved',
+            title: `Заявката за ${svcLabel} е одобрена`,
+            body: 'Услугата ще се добави към следващата ви фактура' + (admin_notes ? ' · ' + admin_notes : ''),
+            link: 'addons', ref_type: 'addon', ref_id: sub.id,
+          });
           break;
         case 'reject':
           if (sub.status !== 'pending') return res.status(400).json({ error: `Не може да се отхвърли (текущ статус: ${sub.status})` });
           db.prepare('UPDATE tenant_addons SET status=?, admin_notes=? WHERE id=?')
             .run('rejected', admin_notes || sub.admin_notes, req.params.id);
+          notifyTenant(db, sub.user_id, {
+            kind: 'addon_rejected',
+            title: `Заявката за ${svcLabel} е отказана`,
+            body: admin_notes || null,
+            link: 'addons', ref_type: 'addon', ref_id: sub.id,
+          });
           break;
         case 'stop':
           if (sub.status !== 'active') return res.status(400).json({ error: `Не може да се спре (текущ статус: ${sub.status})` });
           db.prepare('UPDATE tenant_addons SET status=?, stopped_at=?, admin_notes=? WHERE id=?')
             .run('stopped', now, admin_notes || sub.admin_notes, req.params.id);
+          notifyTenant(db, sub.user_id, {
+            kind: 'addon_stopped',
+            title: `${svcLabel} е спряна`,
+            body: admin_notes || 'Услугата вече не се начислява.',
+            link: 'addons', ref_type: 'addon', ref_id: sub.id,
+          });
           break;
         case 'refund-deposit':
           if (!sub.deposit_charged) return res.status(400).json({ error: 'Депозитът не е удържан' });

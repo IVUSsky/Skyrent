@@ -1,6 +1,8 @@
 import React, { useEffect, useState, useRef } from 'react'
 import { apiFetch, authUrl } from '../api'
 import UtilityHistoryChart from './UtilityHistoryChart'
+import NotificationBell from './NotificationBell'
+import { TicketDetail } from './Support'
 
 const API = import.meta.env.VITE_API_URL || ''
 
@@ -11,6 +13,7 @@ const TABS = [
   { id: 'contract',     label: 'Договор',    icon: '📋' },
   { id: 'invoices',     label: 'Фактури',    icon: '🧾' },
   { id: 'addons',       label: 'Услуги',     icon: '🛍️' },
+  { id: 'support',      label: 'Поддръжка',  icon: '🛟' },
   { id: 'consumption',  label: 'Сметки',     icon: '📊' },
   { id: 'profile',      label: 'Профил',     icon: '👤' },
 ]
@@ -181,9 +184,21 @@ export default function TenantApp({ userName, onLogout, mustChangePassword }) {
               <div className="text-sm font-semibold">{userName || me?.user?.name || 'наемател'}</div>
             </div>
           </div>
-          <button onClick={onLogout} className="text-xs text-slate-300 hover:text-white px-2 py-1 rounded hover:bg-white/10">
-            Изход
-          </button>
+          <div className="flex items-center gap-2">
+            <NotificationBell
+              API={API}
+              basePath="/api/tenant/notifications"
+              darkHeader
+              onNavigate={(link) => {
+                if (link?.startsWith('tickets/')) setTab('support')
+                else if (link === 'addons')      setTab('addons')
+                else if (link === 'invoices')    setTab('invoices')
+              }}
+            />
+            <button onClick={onLogout} className="text-xs text-slate-300 hover:text-white px-2 py-1 rounded hover:bg-white/10">
+              Изход
+            </button>
+          </div>
         </div>
       </header>
 
@@ -195,13 +210,14 @@ export default function TenantApp({ userName, onLogout, mustChangePassword }) {
         {tab === 'contract'    && <Contract contracts={me?.contracts || []} />}
         {tab === 'invoices'    && <Invoices />}
         {tab === 'addons'      && <Addons />}
+        {tab === 'support'     && <TenantTickets />}
         {tab === 'consumption' && <Consumption property={property} />}
         {tab === 'profile'     && <Profile me={me} onChangePassword={() => setShowPwd(true)} />}
       </main>
 
       {/* Bottom nav */}
       <nav className="fixed bottom-0 inset-x-0 bg-white border-t shadow-lg z-20">
-        <div className="max-w-2xl mx-auto grid grid-cols-8">
+        <div className="max-w-2xl mx-auto grid grid-cols-9">
           {TABS.map(t => (
             <button
               key={t.id}
@@ -731,6 +747,188 @@ function Addons() {
           })}
         </div>
       </Card>
+    </div>
+  )
+}
+
+function TenantTickets() {
+  const [list, setList] = useState(null)
+  const [detail, setDetail] = useState(null) // ticket detail object
+  const [showNew, setShowNew] = useState(false)
+  const [form, setForm] = useState({ title: '', description: '', category: 'other', priority: 'normal' })
+  const [files, setFiles] = useState([])
+  const [submitting, setSubmitting] = useState(false)
+  const [err, setErr] = useState(null)
+  const fileRef = useRef(null)
+
+  const TICKET_CATS = [
+    ['plumbing',   '🚿 ВиК (теч, запушване)'],
+    ['electrical', '⚡ Електро (ток, осветление)'],
+    ['appliance',  '🔌 Уред (хладилник, перална)'],
+    ['heating',    '🔥 Отопление (бойлер, климатик)'],
+    ['internet',   '🌐 Интернет / TV'],
+    ['cleaning',   '🧹 Чистене / битови'],
+    ['other',      '📌 Друго'],
+  ]
+
+  const STATUS_BADGE = {
+    open:        { text: '⏳ Отворен',    cls: 'bg-red-100 text-red-700' },
+    in_progress: { text: '🔧 В процес',  cls: 'bg-yellow-100 text-yellow-800' },
+    resolved:    { text: '✓ Разрешен',   cls: 'bg-green-100 text-green-800' },
+    closed:      { text: '🔒 Затворен',  cls: 'bg-gray-200 text-gray-700' },
+  }
+
+  const load = () => {
+    apiFetch(`${API}/api/tenant/tickets`).then(r => r.json()).then(setList).catch(() => setList([]))
+  }
+  useEffect(load, [])
+
+  const openDetail = (id) => {
+    apiFetch(`${API}/api/tenant/tickets/${id}`).then(r => r.json()).then(setDetail)
+  }
+
+  const submit = async () => {
+    if (!form.title.trim()) { setErr('Заглавието е задължително'); return }
+    setSubmitting(true); setErr(null)
+    try {
+      const fd = new FormData()
+      fd.append('title', form.title.trim())
+      fd.append('description', form.description.trim())
+      fd.append('category', form.category)
+      fd.append('priority', form.priority)
+      files.forEach(f => fd.append('files', f))
+      const r = await apiFetch(`${API}/api/tenant/tickets`, { method: 'POST', body: fd })
+      const data = await r.json()
+      if (!r.ok) { setErr(data.error || 'Грешка'); return }
+      setShowNew(false)
+      setForm({ title: '', description: '', category: 'other', priority: 'normal' })
+      setFiles([]); if (fileRef.current) fileRef.current.value = ''
+      load()
+      openDetail(data.id)
+    } catch (e) { setErr('Сървърна грешка') }
+    finally { setSubmitting(false) }
+  }
+
+  if (detail) {
+    return (
+      <div>
+        <button onClick={() => { setDetail(null); load() }} className="text-xs text-blue-600 mb-2">← Към списъка</button>
+        <div className="bg-white rounded-xl shadow border border-gray-100 overflow-hidden">
+          <TicketDetail
+            API={API}
+            ticket={detail}
+            attachmentPath="/api/tenant/support-attachments"
+            postPath={`/api/tenant/tickets/${detail.id}/messages`}
+            onAfterReply={() => openDetail(detail.id)}
+          />
+        </div>
+      </div>
+    )
+  }
+
+  if (list === null) return <Card><p className="text-slate-500 text-sm">Зареждане...</p></Card>
+
+  return (
+    <div className="space-y-3">
+      {!showNew && (
+        <button onClick={() => setShowNew(true)}
+          className="w-full bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold py-3 rounded-xl shadow">
+          ➕ Нов сигнал за проблем
+        </button>
+      )}
+
+      {showNew && (
+        <Card>
+          <h3 className="font-bold text-slate-800 mb-3">Нов сигнал</h3>
+          {err && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded p-2 mb-3">{err}</div>}
+          <div className="space-y-2 text-sm">
+            <div>
+              <label className="text-xs text-slate-500 font-medium">Категория</label>
+              <select value={form.category} onChange={e => setForm({ ...form, category: e.target.value })}
+                className="w-full border border-gray-300 rounded px-2 py-1.5">
+                {TICKET_CATS.map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-slate-500 font-medium">Заглавие</label>
+              <input value={form.title} onChange={e => setForm({ ...form, title: e.target.value })}
+                placeholder="Кратко описание (пр. 'Тече кранът в банята')"
+                className="w-full border border-gray-300 rounded px-2 py-1.5" />
+            </div>
+            <div>
+              <label className="text-xs text-slate-500 font-medium">Описание (по желание)</label>
+              <textarea value={form.description} onChange={e => setForm({ ...form, description: e.target.value })}
+                placeholder="Кога започна? Колко често? Какво забелязахте?" rows={3}
+                className="w-full border border-gray-300 rounded px-2 py-1.5" />
+            </div>
+            <div>
+              <label className="text-xs text-slate-500 font-medium">Приоритет</label>
+              <div className="flex gap-2 flex-wrap">
+                {[
+                  ['low', '🟢 Ниско'],
+                  ['normal', '🔵 Нормално'],
+                  ['high', '🟠 Високо'],
+                  ['urgent', '🔴 Спешно'],
+                ].map(([k, v]) => (
+                  <button key={k} onClick={() => setForm({ ...form, priority: k })}
+                    className={`text-xs px-3 py-1.5 rounded-full border ${form.priority === k ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-gray-300'}`}>
+                    {v}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <label className="text-xs text-slate-500 font-medium">Снимки/файлове</label>
+              <input ref={fileRef} type="file" multiple accept="image/*,application/pdf"
+                onChange={e => setFiles(Array.from(e.target.files || []))}
+                className="w-full text-xs" />
+              {files.length > 0 && (
+                <div className="text-xs text-slate-500 mt-1">{files.length} файла избрани</div>
+              )}
+            </div>
+            <div className="flex gap-2 pt-2">
+              <button onClick={submit} disabled={submitting}
+                className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-semibold px-4 py-2 rounded-lg flex-1">
+                {submitting ? 'Изпраща...' : '📤 Изпрати сигнал'}
+              </button>
+              <button onClick={() => { setShowNew(false); setErr(null); setFiles([]) }}
+                className="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm px-4 py-2 rounded-lg">
+                Отказ
+              </button>
+            </div>
+          </div>
+        </Card>
+      )}
+
+      {list.length === 0
+        ? <Card><p className="text-slate-500 text-sm">Все още няма подадени сигнали.</p></Card>
+        : list.map(t => {
+            const st = STATUS_BADGE[t.status] || { text: t.status, cls: 'bg-gray-100' }
+            return (
+              <button key={t.id} onClick={() => openDetail(t.id)} className="w-full text-left">
+                <Card>
+                  <div className="flex items-baseline justify-between gap-2">
+                    <div className="font-semibold text-slate-800 flex-1 min-w-0 truncate">#{t.id} {t.title}</div>
+                    {t.unread_for_tenant > 0 && (
+                      <span className="bg-blue-500 text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] px-1 flex items-center justify-center">
+                        {t.unread_for_tenant}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center justify-between mt-1">
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full ${st.cls}`}>{st.text}</span>
+                    <span className="text-[10px] text-slate-400">{(t.updated_at || '').slice(0, 16).replace('T', ' ')}</span>
+                  </div>
+                  {t.last_message && (
+                    <div className="text-xs text-slate-500 mt-1 italic truncate">
+                      {t.last_message_role === 'admin' ? '👤 Управителят: ' : '🗣️ Вие: '}{t.last_message}
+                    </div>
+                  )}
+                </Card>
+              </button>
+            )
+          })
+      }
     </div>
   )
 }

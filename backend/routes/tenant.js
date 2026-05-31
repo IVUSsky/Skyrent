@@ -2,12 +2,30 @@ const express = require('express');
 const path    = require('path');
 const fs      = require('fs');
 const bcrypt  = require('bcryptjs');
+const multer  = require('multer');
 const { askAgent } = require('../lib/tenantAgent');
+const { notifyAdmin } = require('../lib/notify');
+const supportMod = require('./support');
 
 const DATA_DIR     = process.env.DATA_DIR || path.join(__dirname, '../data');
 const CONTRACTS_DIR = path.join(DATA_DIR, 'contracts');
 const INVOICES_DIR  = path.join(DATA_DIR, 'invoices');
 const PHOTOS_DIR    = path.join(DATA_DIR, 'property_photos');
+const TICKETS_DIR   = supportMod.TICKETS_DIR;
+
+const ticketStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const tid = req.params.id || req._created_ticket_id || 'new';
+    const dir = path.join(TICKETS_DIR, String(tid));
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    cb(null, dir);
+  },
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname);
+    cb(null, `${Date.now()}_${Math.random().toString(36).slice(2, 8)}${ext}`);
+  },
+});
+const ticketUpload = multer({ storage: ticketStorage, limits: { fileSize: 10 * 1024 * 1024 } });
 
 module.exports = function(db) {
   const router = express.Router();
@@ -206,6 +224,16 @@ module.exports = function(db) {
         INSERT INTO tenant_addons (user_id, service_id, property_id, status)
         VALUES (?, ?, ?, 'pending')
       `).run(req.user.id, service_id, propId);
+
+      const user = db.prepare('SELECT name, username FROM users WHERE id=?').get(req.user.id);
+      const prop = propId ? db.prepare('SELECT адрес FROM properties WHERE id=?').get(propId) : null;
+      notifyAdmin(db, {
+        kind: 'addon_request',
+        title: `${user?.name || user?.username || 'наемател'} заяви услуга: ${svc.icon || ''} ${svc.name}`.trim(),
+        body: prop ? prop['адрес'] : null,
+        link: 'addons', ref_type: 'addon', ref_id: r.lastInsertRowid,
+      });
+
       res.json({ ok: true, id: r.lastInsertRowid });
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -223,6 +251,194 @@ module.exports = function(db) {
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
+  });
+
+  // ── Support tickets (tenant side) ──────────────────────────
+  router.get('/tickets', (req, res) => {
+    const rows = db.prepare(`
+      SELECT t.*,
+        (SELECT COUNT(*) FROM support_messages m WHERE m.ticket_id = t.id) AS message_count,
+        (SELECT m.message FROM support_messages m WHERE m.ticket_id = t.id ORDER BY m.created_at DESC LIMIT 1) AS last_message,
+        (SELECT m.author_role FROM support_messages m WHERE m.ticket_id = t.id ORDER BY m.created_at DESC LIMIT 1) AS last_message_role,
+        CASE
+          WHEN t.last_tenant_read_at IS NULL THEN
+            (SELECT COUNT(*) FROM support_messages m WHERE m.ticket_id = t.id AND m.author_role='admin')
+          ELSE
+            (SELECT COUNT(*) FROM support_messages m WHERE m.ticket_id = t.id AND m.author_role='admin' AND m.created_at > t.last_tenant_read_at)
+        END AS unread_for_tenant
+      FROM support_tickets t
+      WHERE t.user_id = ?
+      ORDER BY
+        CASE t.status WHEN 'open' THEN 0 WHEN 'in_progress' THEN 1 WHEN 'resolved' THEN 2 WHEN 'closed' THEN 3 ELSE 4 END,
+        t.updated_at DESC
+    `).all(req.user.id);
+    res.json(rows);
+  });
+
+  router.get('/tickets/:id', (req, res) => {
+    const t = supportMod.fetchTicketWithDetails(db, req.params.id);
+    if (!t || t.user_id !== req.user.id) return res.status(404).json({ error: 'Не е намерен' });
+    db.prepare("UPDATE support_tickets SET last_tenant_read_at = datetime('now') WHERE id=?").run(req.params.id);
+    res.json(t);
+  });
+
+  router.post('/tickets', ticketUpload.array('files', 5), (req, res) => {
+    try {
+      const { title, description, category, priority } = req.body;
+      if (!title || !title.trim()) return res.status(400).json({ error: 'Заглавието е задължително' });
+      // Determine property
+      const contract = db.prepare(`
+        SELECT property_id FROM contracts
+        WHERE tenant_user_id=? AND status='active' AND property_id IS NOT NULL
+        ORDER BY created_at DESC LIMIT 1
+      `).get(req.user.id);
+      const propId = contract ? contract.property_id : null;
+
+      const r = db.prepare(`
+        INSERT INTO support_tickets (user_id, property_id, category, priority, title, description, status, last_tenant_read_at)
+        VALUES (?, ?, ?, ?, ?, ?, 'open', datetime('now'))
+      `).run(
+        req.user.id, propId,
+        category || 'other',
+        priority || 'normal',
+        title.trim(),
+        description || ''
+      );
+      const ticketId = r.lastInsertRowid;
+
+      // First message = description
+      let firstMsgId = null;
+      if (description && description.trim()) {
+        const mr = db.prepare(`
+          INSERT INTO support_messages (ticket_id, author_role, author_user_id, message)
+          VALUES (?, 'tenant', ?, ?)
+        `).run(ticketId, req.user.id, description.trim());
+        firstMsgId = mr.lastInsertRowid;
+      }
+
+      // Move uploaded files to /tickets/<ticketId>/ — multer already stored them
+      // but under 'new' if id wasn't known. Move now.
+      if (req.files && req.files.length) {
+        const newDir = path.join(TICKETS_DIR, String(ticketId));
+        if (!fs.existsSync(newDir)) fs.mkdirSync(newDir, { recursive: true });
+        for (const f of req.files) {
+          const oldPath = f.path;
+          const newPath = path.join(newDir, f.filename);
+          try {
+            if (oldPath !== newPath) fs.renameSync(oldPath, newPath);
+          } catch (e) { console.warn('move attachment failed:', e.message); }
+          db.prepare(`
+            INSERT INTO support_attachments (ticket_id, message_id, filename, original_name, mime_type, size, uploaded_by_role, uploaded_by_user_id)
+            VALUES (?, ?, ?, ?, ?, ?, 'tenant', ?)
+          `).run(ticketId, firstMsgId, f.filename, f.originalname, f.mimetype, f.size, req.user.id);
+        }
+      }
+
+      // Notify admin
+      const user = db.prepare('SELECT name, username FROM users WHERE id=?').get(req.user.id);
+      const prop = propId ? db.prepare('SELECT адрес FROM properties WHERE id=?').get(propId) : null;
+      notifyAdmin(db, {
+        kind: 'ticket_new',
+        title: `Нов сигнал от ${user?.name || user?.username || 'наемател'}`,
+        body: `${title}${prop ? ` (${prop['адрес']})` : ''}`,
+        link: `tickets/${ticketId}`,
+        ref_type: 'ticket', ref_id: ticketId,
+      });
+
+      res.json({ ok: true, id: ticketId });
+    } catch (err) {
+      console.error('tenant create ticket error:', err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.post('/tickets/:id/messages', ticketUpload.array('files', 5), (req, res) => {
+    try {
+      const ticket = db.prepare('SELECT * FROM support_tickets WHERE id=? AND user_id=?').get(req.params.id, req.user.id);
+      if (!ticket) return res.status(404).json({ error: 'Не е намерен' });
+      const message = (req.body.message || '').trim();
+      if (!message && !(req.files && req.files.length)) return res.status(400).json({ error: 'Празно съобщение' });
+
+      const r = db.prepare(`
+        INSERT INTO support_messages (ticket_id, author_role, author_user_id, message)
+        VALUES (?, 'tenant', ?, ?)
+      `).run(req.params.id, req.user.id, message || '');
+
+      if (req.files) for (const f of req.files) {
+        db.prepare(`
+          INSERT INTO support_attachments (ticket_id, message_id, filename, original_name, mime_type, size, uploaded_by_role, uploaded_by_user_id)
+          VALUES (?, ?, ?, ?, ?, ?, 'tenant', ?)
+        `).run(req.params.id, r.lastInsertRowid, f.filename, f.originalname, f.mimetype, f.size, req.user.id);
+      }
+      db.prepare(`
+        UPDATE support_tickets SET updated_at=datetime('now'), last_tenant_read_at=datetime('now'),
+          status = CASE WHEN status='resolved' THEN 'in_progress' ELSE status END
+        WHERE id=?
+      `).run(req.params.id);
+
+      const user = db.prepare('SELECT name, username FROM users WHERE id=?').get(req.user.id);
+      notifyAdmin(db, {
+        kind: 'ticket_reply',
+        title: `Нов отговор по сигнал #${ticket.id} от ${user?.name || user?.username || 'наемател'}`,
+        body: message ? message.slice(0, 120) : '(прикачен файл)',
+        link: `tickets/${ticket.id}`,
+        ref_type: 'ticket', ref_id: ticket.id,
+      });
+
+      res.json({ ok: true, id: r.lastInsertRowid });
+    } catch (err) {
+      console.error('tenant reply error:', err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.post('/tickets/:id/close', (req, res) => {
+    const ticket = db.prepare('SELECT * FROM support_tickets WHERE id=? AND user_id=?').get(req.params.id, req.user.id);
+    if (!ticket) return res.status(404).json({ error: 'Не е намерен' });
+    db.prepare("UPDATE support_tickets SET status='closed', resolved_at=COALESCE(resolved_at, datetime('now')), updated_at=datetime('now') WHERE id=?").run(req.params.id);
+    res.json({ ok: true });
+  });
+
+  // Tenant attachment download — гард по ticket.user_id
+  router.get('/support-attachments/:id', (req, res) => {
+    const att = db.prepare(`
+      SELECT a.*, t.user_id AS ticket_user_id
+      FROM support_attachments a
+      LEFT JOIN support_tickets t ON t.id = a.ticket_id
+      WHERE a.id = ?
+    `).get(req.params.id);
+    if (!att || att.ticket_user_id !== req.user.id) return res.status(404).json({ error: 'Не е намерен' });
+    const fp = path.join(TICKETS_DIR, String(att.ticket_id), att.filename);
+    if (!fs.existsSync(fp)) return res.status(404).json({ error: 'Файлът липсва' });
+    if (att.mime_type) res.setHeader('Content-Type', att.mime_type);
+    res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(att.original_name || att.filename)}"`);
+    res.sendFile(fp);
+  });
+
+  // ── In-app notifications (tenant) ─────────────────────────
+  router.get('/notifications', (req, res) => {
+    const rows = db.prepare(`
+      SELECT id, kind, title, body, link, ref_type, ref_id, read_at, created_at
+      FROM notifications
+      WHERE recipient_type='tenant_user' AND recipient_user_id=?
+      ORDER BY created_at DESC
+      LIMIT 50
+    `).all(req.user.id);
+    const unread = db.prepare(`
+      SELECT COUNT(*) AS cnt FROM notifications
+      WHERE recipient_type='tenant_user' AND recipient_user_id=? AND read_at IS NULL
+    `).get(req.user.id).cnt;
+    res.json({ items: rows, unread });
+  });
+
+  router.post('/notifications/mark-read', (req, res) => {
+    const { id, all } = req.body || {};
+    if (all) {
+      db.prepare("UPDATE notifications SET read_at=datetime('now') WHERE recipient_type='tenant_user' AND recipient_user_id=? AND read_at IS NULL").run(req.user.id);
+    } else if (id) {
+      db.prepare("UPDATE notifications SET read_at=datetime('now') WHERE id=? AND recipient_type='tenant_user' AND recipient_user_id=?").run(id, req.user.id);
+    }
+    res.json({ ok: true });
   });
 
   // GET /api/tenant/invoices/:id/pdf

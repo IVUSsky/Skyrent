@@ -20,38 +20,49 @@ const parser = new XMLParser({
 });
 
 /**
- * Извлечи XML съдържание от buffer.
+ * Извлечи XML съдържание от buffer (само първия XML — backward compat).
  * @param {Buffer|string} input — buffer или filepath
  * @returns {string|null} XML съдържание или null ако няма XML
  */
 function extractXml(input) {
+  const all = extractAllXmls(input);
+  return all.length > 0 ? all[0] : null;
+}
+
+/**
+ * Извлечи ВСИЧКИ XML файлове от buffer (ZIP може да съдържа множество фактури).
+ * @param {Buffer|string} input — buffer или filepath
+ * @returns {string[]} Array от XML текст strings; празен array ако няма XML
+ */
+function extractAllXmls(input) {
   let buf = input;
   if (typeof input === 'string') {
-    if (!fs.existsSync(input)) return null;
+    if (!fs.existsSync(input)) return [];
     buf = fs.readFileSync(input);
   }
 
   // Direct XML
   const headBytes = buf.slice(0, 100).toString('utf8').trimStart();
   if (headBytes.startsWith('<?xml') || headBytes.startsWith('<Invoice')) {
-    return buf.toString('utf8');
+    return [buf.toString('utf8')];
   }
 
-  // ZIP signature: PK\x03\x04
+  // ZIP signature: PK\x03\x04 — extract всички .xml entries
   if (buf.length >= 4 && buf[0] === 0x50 && buf[1] === 0x4b && buf[2] === 0x03 && buf[3] === 0x04) {
     try {
       const zip = new AdmZip(buf);
-      const entries = zip.getEntries();
-      for (const e of entries) {
+      const out = [];
+      for (const e of zip.getEntries()) {
         if (e.entryName.toLowerCase().endsWith('.xml')) {
-          return e.getData().toString('utf8');
+          out.push(e.getData().toString('utf8'));
         }
       }
+      return out;
     } catch (err) {
-      return null;
+      return [];
     }
   }
-  return null;
+  return [];
 }
 
 /**
@@ -248,7 +259,7 @@ function parseInvoiceXml(xmlText) {
 }
 
 /**
- * Главна функция: вземи file path → опитай да парснеш като XML.
+ * Главна функция: вземи file path → опитай да парснеш като XML (само първия — backward compat).
  * Връща null ако не е XML/ZIP-с-XML.
  */
 function tryParseFile(filepath) {
@@ -257,4 +268,13 @@ function tryParseFile(filepath) {
   return parseInvoiceXml(xml);
 }
 
-module.exports = { tryParseFile, parseInvoiceXml, extractXml };
+/**
+ * Парсва ВСИЧКИ XML файлове в ZIP/file → array от parsed invoices.
+ * @returns {Array<{ok, data?, reason?}>} празен array ако няма XML
+ */
+function tryParseAllInvoices(filepath) {
+  const xmls = extractAllXmls(filepath);
+  return xmls.map(xml => parseInvoiceXml(xml));
+}
+
+module.exports = { tryParseFile, tryParseAllInvoices, parseInvoiceXml, extractXml, extractAllXmls };

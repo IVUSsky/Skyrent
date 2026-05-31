@@ -4,6 +4,7 @@ const path = require('path');
 const fs = require('fs');
 const nodemailer = require('nodemailer');
 const { getAddonChargesForProperty, markDepositsCharged } = require('../lib/addonCharges');
+const { notifyTenant } = require('../lib/notify');
 
 const FONT_REGULAR = path.join(__dirname, '../fonts/arial.ttf');
 const FONT_BOLD    = path.join(__dirname, '../fonts/arialbd.ttf');
@@ -418,6 +419,21 @@ module.exports = function(db) {
 
       // Маркирай удържаните депозити
       markDepositsCharged(db, r.lastInsertRowid, addons.items);
+
+      // Известие към наемателя за нова фактура
+      const tenantUser = db.prepare(`
+        SELECT tenant_user_id FROM contracts
+        WHERE property_id=? AND status='active' AND tenant_user_id IS NOT NULL
+        ORDER BY created_at DESC LIMIT 1
+      `).get(property_id);
+      if (tenantUser?.tenant_user_id) {
+        notifyTenant(db, tenantUser.tenant_user_id, {
+          kind: 'invoice_new',
+          title: `Нова фактура № ${invoice_number}`,
+          body: `${total.toLocaleString('bg-BG', { minimumFractionDigits: 2 })} EUR за ${month}`,
+          link: 'invoices', ref_type: 'invoice', ref_id: r.lastInsertRowid,
+        });
+      }
 
       res.json({ ok: true, id: r.lastInsertRowid, invoice_number, filename, addons_total });
     } catch (err) {

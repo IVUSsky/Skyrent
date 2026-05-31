@@ -363,6 +363,59 @@ async function main() {
   }
   console.log('addon_services + tenant_addons ready');
 
+  // Support tickets + messages + attachments + notifications
+  db.exec(`CREATE TABLE IF NOT EXISTS support_tickets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    property_id INTEGER REFERENCES properties(id),
+    category TEXT,
+    priority TEXT DEFAULT 'normal',
+    title TEXT NOT NULL,
+    description TEXT,
+    status TEXT NOT NULL DEFAULT 'open',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    resolved_at DATETIME,
+    last_admin_read_at DATETIME,
+    last_tenant_read_at DATETIME
+  )`);
+  db.exec(`CREATE TABLE IF NOT EXISTS support_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ticket_id INTEGER NOT NULL REFERENCES support_tickets(id),
+    author_role TEXT NOT NULL,
+    author_user_id INTEGER,
+    message TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+  db.exec(`CREATE TABLE IF NOT EXISTS support_attachments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ticket_id INTEGER REFERENCES support_tickets(id),
+    message_id INTEGER REFERENCES support_messages(id),
+    filename TEXT NOT NULL,
+    original_name TEXT,
+    mime_type TEXT,
+    size INTEGER,
+    uploaded_by_role TEXT,
+    uploaded_by_user_id INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+  db.exec(`CREATE TABLE IF NOT EXISTS notifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    recipient_type TEXT NOT NULL,
+    recipient_user_id INTEGER,
+    kind TEXT NOT NULL,
+    title TEXT NOT NULL,
+    body TEXT,
+    link TEXT,
+    ref_type TEXT,
+    ref_id INTEGER,
+    read_at DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+  try { db.exec("CREATE INDEX IF NOT EXISTS idx_notif_recipient ON notifications(recipient_type, recipient_user_id, read_at, created_at DESC)"); } catch(_) {}
+  try { db.exec("CREATE INDEX IF NOT EXISTS idx_tickets_status ON support_tickets(status, updated_at DESC)"); } catch(_) {}
+  console.log('support_tickets + notifications ready');
+
   // Stripe payment records
   db.exec(`CREATE TABLE IF NOT EXISTS stripe_payments (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -620,6 +673,8 @@ async function main() {
   app.use('/api/tenant', require('./routes/tenant')(db));
   app.use('/api/chat-learning', require('./routes/chatLearning')(db));
   app.use('/api/addons', require('./routes/addons')(db));
+  app.use('/api/support', require('./routes/support')(db));
+  app.use('/api/notifications', require('./routes/notifications')(db));
 
   // Stripe payments — tenant-facing endpoints mounted under /api/tenant (auth + tenant guard inside)
   const { tenantPaymentsRouter, webhookHandler } = require('./routes/payments');
