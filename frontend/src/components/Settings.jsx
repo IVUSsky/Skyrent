@@ -1,5 +1,6 @@
 import { apiFetch } from '../api'
 import React, { useState, useEffect } from 'react'
+import TwoFactorSetup from './TwoFactorSetup'
 
 export default function Settings({ API }) {
   const [settings, setSettings] = useState(null)
@@ -116,6 +117,11 @@ export default function Settings({ API }) {
           {toast.msg}
         </div>
       )}
+
+      {/* 2FA — security section comes first */}
+      <div className="mb-6">
+        <TwoFactorSetup API={API} />
+      </div>
 
       {/* Users */}
       <div className="bg-white rounded-xl shadow border border-gray-100 p-5 mb-6">

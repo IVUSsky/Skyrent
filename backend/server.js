@@ -478,6 +478,11 @@ async function main() {
   try { db.exec("ALTER TABLE users ADD COLUMN autopay_enabled INTEGER DEFAULT 0"); console.log('Migration: added users.autopay_enabled'); }        catch(_) {}
   try { db.exec("ALTER TABLE users ADD COLUMN autopay_activated_at DATETIME");   console.log('Migration: added users.autopay_activated_at'); }    catch(_) {}
   try { db.exec("ALTER TABLE users ADD COLUMN autopay_day INTEGER DEFAULT 5");   console.log('Migration: added users.autopay_day'); }              catch(_) {}
+  // TOTP 2FA — totp_secret stored once enabled, totp_backup_codes is a JSON
+  // array of SHA-256 hashes (consumed on use).
+  try { db.exec("ALTER TABLE users ADD COLUMN totp_secret TEXT");           console.log('Migration: added users.totp_secret'); }       catch(_) {}
+  try { db.exec("ALTER TABLE users ADD COLUMN totp_enabled INTEGER DEFAULT 0"); console.log('Migration: added users.totp_enabled'); } catch(_) {}
+  try { db.exec("ALTER TABLE users ADD COLUMN totp_backup_codes TEXT");     console.log('Migration: added users.totp_backup_codes'); } catch(_) {}
   // Seed first admin from env vars if no users exist
   const userCount = db.prepare('SELECT COUNT(*) as c FROM users').get().c;
   if (userCount === 0) {
