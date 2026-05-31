@@ -783,6 +783,7 @@ function ImportTab({ API, onSaved }) {
   const [showUnmatched, setSU]    = useState(false)
   const [clearConfirm, setClearConfirm] = useState(false)
   const [clearResult, setClearResult]   = useState(null)
+  const [coverage, setCoverage]         = useState(null)
   const fileInputRef = useRef()
 
   const clearAllTransactions = async () => {
@@ -794,6 +795,7 @@ function ImportTab({ API, onSaved }) {
       setTx([])
       setSaveResult(null)
       loadUnmatched()
+      loadCoverage()
       onSaved && onSaved()
       setClearResult(`✅ Изтрити: ${data.deleted} транзакции`)
       setTimeout(() => setClearResult(null), 4000)
@@ -806,9 +808,13 @@ function ImportTab({ API, onSaved }) {
   const loadUnmatched = () =>
     apiFetch(`${API}/api/import/unmatched`).then(r => r.json()).then(setUnmatched).catch(() => {})
 
+  const loadCoverage = () =>
+    apiFetch(`${API}/api/import/coverage`).then(r => r.json()).then(setCoverage).catch(() => {})
+
   useEffect(() => {
     apiFetch(`${API}/api/properties`).then(r => r.json()).then(setProperties).catch(() => {})
     loadUnmatched()
+    loadCoverage()
   }, [API])
 
   const showToastMsg = (msg, type = 'success') => {
@@ -883,6 +889,7 @@ function ImportTab({ API, onSaved }) {
           setTx([])
           setFileNames([])
           loadUnmatched()
+          loadCoverage()
           onSaved && onSaved()
         } else throw new Error(data.error)
       })
@@ -982,6 +989,50 @@ function ImportTab({ API, onSaved }) {
           </button>
         )}
       </div>
+
+      {/* Coverage — какво е вече импортирано */}
+      {!transactions.length && coverage && coverage.count > 0 && (() => {
+        const fmtDate = iso => {
+          if (!iso) return '—'
+          const [y, m, d] = iso.split('-')
+          return `${d}.${m}.${y}`
+        }
+        const daysSince = (() => {
+          if (!coverage.lastDate) return null
+          const last = new Date(coverage.lastDate + 'T00:00:00')
+          return Math.floor((Date.now() - last.getTime()) / 86400000)
+        })()
+        const maxCnt = Math.max(1, ...coverage.byMonth.map(m => m.cnt))
+        return (
+          <div className="mb-4 bg-blue-50 border border-blue-200 rounded-xl p-4">
+            <div className="flex flex-wrap items-baseline justify-between gap-3 mb-3">
+              <div className="text-sm text-blue-900">
+                <span className="font-semibold">Последна импортирана транзакция:</span>{' '}
+                <span className="font-bold text-blue-700">{fmtDate(coverage.lastDate)}</span>
+                {daysSince !== null && (
+                  <span className="ml-2 text-xs text-blue-600">
+                    (преди {daysSince === 0 ? 'днес' : daysSince === 1 ? '1 ден' : `${daysSince} дни`})
+                  </span>
+                )}
+              </div>
+              <div className="text-xs text-blue-700">
+                Период: <strong>{fmtDate(coverage.firstDate)} → {fmtDate(coverage.lastDate)}</strong>
+                {' · '}общо <strong>{coverage.count.toLocaleString('bg-BG')}</strong> транзакции
+              </div>
+            </div>
+            <div className="text-xs text-blue-600 mb-1.5">Транзакции по месец (последни 6):</div>
+            <div className="flex items-end gap-2">
+              {coverage.byMonth.map(m => (
+                <div key={m.месец} className="flex-1 flex flex-col items-center" title={`${m.cnt} транзакции · до ${fmtDate(m.lastDate)}`}>
+                  <div className="text-[10px] text-blue-700 font-semibold mb-0.5">{m.cnt}</div>
+                  <div className="w-full bg-blue-200 rounded-t" style={{ height: `${Math.max(4, (m.cnt / maxCnt) * 40)}px` }} />
+                  <div className="text-[10px] text-blue-600 mt-1">{fmtMonth(m.месец)}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )
+      })()}
 
       {/* Drop zone */}
       {!transactions.length && (

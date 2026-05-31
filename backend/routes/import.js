@@ -531,6 +531,38 @@ module.exports = function(db) {
     }
   });
 
+  // ── GET /coverage — first/last imported date + last 6 months counts ─
+  router.get('/coverage', (req, res) => {
+    try {
+      const totals = db.prepare(`
+        SELECT
+          MIN(дата) as firstDate,
+          MAX(дата) as lastDate,
+          COUNT(*)  as count
+        FROM transactions
+        WHERE дата IS NOT NULL AND дата != ''
+      `).get();
+
+      const byMonth = db.prepare(`
+        SELECT месец, COUNT(*) as cnt, MAX(дата) as lastDate
+        FROM transactions
+        WHERE месец IS NOT NULL AND месец != ''
+        GROUP BY месец
+        ORDER BY месец DESC
+        LIMIT 6
+      `).all();
+
+      res.json({
+        firstDate: totals?.firstDate || null,
+        lastDate:  totals?.lastDate  || null,
+        count:     totals?.count     || 0,
+        byMonth:   byMonth.reverse(),
+      });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // ── GET /stats — KPI aggregates ────────────────────────────
   router.get('/stats', (req, res) => {
     try {
