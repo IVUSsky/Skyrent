@@ -31,7 +31,7 @@ module.exports = function(db) {
       `SELECT * FROM properties WHERE статус = '✅' AND наемател IS NOT NULL AND наемател != '' ORDER BY адрес`
     ).all();
 
-    // Bank-imported payments
+    // Bank-imported payments — aggregate + per-tx detail
     const bankPaid = db.prepare(
       `SELECT property_id, SUM(сума) as paid_amount, COUNT(*) as tx_count
        FROM transactions WHERE категория = 'наем' AND месец = ?
@@ -39,6 +39,19 @@ module.exports = function(db) {
     ).all(month);
     const bankMap = {};
     bankPaid.forEach(p => { bankMap[p.property_id] = p; });
+
+    const bankTxRows = db.prepare(
+      `SELECT id, property_id, дата, сума, контрагент
+       FROM transactions
+       WHERE категория = 'наем' AND месец = ? AND property_id IS NOT NULL
+       ORDER BY дата ASC`
+    ).all(month);
+    const bankTxMap = {};
+    bankTxRows.forEach(t => {
+      (bankTxMap[t.property_id] = bankTxMap[t.property_id] || []).push({
+        id: t.id, дата: t.дата, сума: t.сума, контрагент: t.контрагент,
+      });
+    });
 
     // Manual payments (cash / other bank)
     const manualPaid = db.prepare(
@@ -56,12 +69,133 @@ module.exports = function(db) {
         ...p,
         paid_amount,
         tx_count:      bank   ? bank.tx_count      : 0,
+        bank_txs:      bankTxMap[p.id] || [],
         is_paid:       !!(bank || manual),
         manual_payment: manual || null,
       };
     });
 
     res.json({ month, properties: result });
+  });
+
+  // Rent diagnostics — възможни проблеми за избран месец
+  router.get('/rent-diagnostics', (req, res) => {
+    try {
+      const month = req.query.month || new Date().toISOString().slice(0, 7);
+      // Previous month string (YYYY-MM)
+      const [y, m] = month.split('-').map(Number);
+      const prevDate = new Date(y, m - 2, 1);
+      const prevMonth = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, '0')}`;
+
+      const activeProps = db.prepare(
+        `SELECT id, адрес, наем, наемател FROM properties
+         WHERE статус = '✅' AND наемател IS NOT NULL AND наемател != ''`
+      ).all();
+      const propMap = {};
+      activeProps.forEach(p => { propMap[p.id] = p; });
+
+      // 1. Duplicates — ≥2 'наем' txs same property + month
+      const dupRows = db.prepare(
+        `SELECT property_id, COUNT(*) as cnt, SUM(сума) as total
+         FROM transactions
+         WHERE категория = 'наем' AND месец = ? AND property_id IS NOT NULL
+         GROUP BY property_id
+         HAVING cnt >= 2`
+      ).all(month);
+      const dupTxsStmt = db.prepare(
+        `SELECT id, дата, сума, контрагент, основание FROM transactions
+         WHERE категория = 'наем' AND месец = ? AND property_id = ?
+         ORDER BY дата ASC`
+      );
+      const duplicates = dupRows.map(r => {
+        const prop = propMap[r.property_id];
+        if (!prop) return null;
+        return {
+          property_id: r.property_id,
+          адрес: prop.адрес,
+          наемател: prop.наемател,
+          expected: prop.наем,
+          total: r.total,
+          tx_count: r.cnt,
+          over_expected: r.total > (prop.наем || 0) * 1.05,
+          txs: dupTxsStmt.all(month, r.property_id),
+        };
+      }).filter(Boolean);
+
+      // 2. Prepaid — unpaid this month, but has rent tx in PREVIOUS month matching expected amount
+      const paidThisMonth = new Set(db.prepare(
+        `SELECT DISTINCT property_id FROM transactions
+         WHERE категория = 'наем' AND месец = ? AND property_id IS NOT NULL`
+      ).all(month).map(r => r.property_id));
+      const manualThisMonth = new Set(db.prepare(
+        `SELECT property_id FROM manual_rent_payments WHERE month = ?`
+      ).all(month).map(r => r.property_id));
+
+      const prevTxs = db.prepare(
+        `SELECT id, property_id, дата, сума, контрагент FROM transactions
+         WHERE категория = 'наем' AND месец = ? AND property_id IS NOT NULL`
+      ).all(prevMonth);
+
+      const prepaid = [];
+      for (const tx of prevTxs) {
+        if (paidThisMonth.has(tx.property_id) || manualThisMonth.has(tx.property_id)) continue;
+        const prop = propMap[tx.property_id];
+        if (!prop) continue;
+        const expected = prop.наем || 0;
+        if (expected <= 0) continue;
+        const diffPct = Math.abs(tx.сума - expected) / expected;
+        if (diffPct <= 0.1) {
+          prepaid.push({
+            property_id: tx.property_id,
+            адрес: prop.адрес,
+            наемател: prop.наемател,
+            expected,
+            tx_id: tx.id, дата: tx.дата, сума: tx.сума, контрагент: tx.контрагент,
+          });
+        }
+      }
+
+      // 3. Unassigned 'наем' txs (no property_id) for the month
+      const unassigned = db.prepare(
+        `SELECT id, дата, сума, контрагент, основание FROM transactions
+         WHERE категория = 'наем' AND месец = ? AND (property_id IS NULL)
+         ORDER BY дата ASC`
+      ).all(month);
+
+      // 4. Mis-categorized — Кт tx categorized as приход_друг/друго from a counterparty whose name matches an active tenant
+      const otherCredits = db.prepare(
+        `SELECT id, дата, сума, контрагент, основание, категория FROM transactions
+         WHERE operation = 'Кт' AND категория IN ('приход_друг','друго')
+           AND месец = ? AND контрагент IS NOT NULL AND контрагент != ''`
+      ).all(month);
+      const tenantNames = activeProps
+        .map(p => ({ id: p.id, адрес: p.адрес, name: (p.наемател || '').trim().toLowerCase() }))
+        .filter(t => t.name.length >= 3);
+      const miscategorized = [];
+      for (const tx of otherCredits) {
+        const kont = tx.контрагент.toLowerCase();
+        const hit = tenantNames.find(t => kont.includes(t.name) || t.name.includes(kont));
+        if (hit) miscategorized.push({
+          tx_id: tx.id, дата: tx.дата, сума: tx.сума, контрагент: tx.контрагент,
+          основание: tx.основание, категория: tx.категория,
+          suggest_property_id: hit.id, suggest_адрес: hit.адрес,
+        });
+      }
+
+      res.json({
+        month, prevMonth,
+        duplicates, prepaid, unassigned, miscategorized,
+        summary: {
+          duplicates_count: duplicates.length,
+          prepaid_count: prepaid.length,
+          unassigned_count: unassigned.length,
+          miscategorized_count: miscategorized.length,
+        },
+      });
+    } catch (err) {
+      console.error('rent-diagnostics error:', err);
+      res.status(500).json({ error: err.message });
+    }
   });
 
   // Mark rent as paid manually

@@ -37,6 +37,8 @@ export default function Tenants({ API }) {
   const [savingMark, setSavingMark] = useState(false)
 
   const [toast, setToast] = useState(null)
+  const [diag, setDiag]   = useState(null)
+  const [showDiag, setShowDiag] = useState(false)
 
   const showToast = (msg, type = 'success') => {
     setToast({ msg, type })
@@ -49,9 +51,29 @@ export default function Tenants({ API }) {
       .then(r => r.json())
       .then(d => { setData(d); setLoading(false) })
       .catch(e => { setError(e.message); setLoading(false) })
+    apiFetch(`${API}/api/properties/rent-diagnostics?month=${month}`)
+      .then(r => r.json())
+      .then(setDiag)
+      .catch(() => setDiag(null))
   }, [API, month])
 
   useEffect(() => { load() }, [load])
+
+  const acceptPrepaid = (prop) => {
+    apiFetch(`${API}/api/properties/${prop.property_id}/mark-paid`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        month,
+        amount: prop.expected,
+        payment_type: 'друга_сметка',
+        notes: `Платил предварително на ${prop.дата} (банков превод ${prop.сума}€)`,
+      }),
+    })
+      .then(r => r.json())
+      .then(() => { load(); showToast(`✅ ${prop.адрес} — маркиран като платен`) })
+      .catch(e => showToast('Грешка: ' + e.message, 'error'))
+  }
 
   const openContact = (prop) => {
     setEditingContact(prop.id)
@@ -222,6 +244,140 @@ export default function Tenants({ API }) {
         </div>
       </div>
 
+      {/* Diagnostics */}
+      {diag && (diag.summary.duplicates_count + diag.summary.prepaid_count + diag.summary.unassigned_count + diag.summary.miscategorized_count) > 0 && (
+        <div className="mb-6 border border-amber-300 bg-amber-50 rounded-xl overflow-hidden">
+          <button onClick={() => setShowDiag(v => !v)}
+            className="w-full flex items-center justify-between px-5 py-3 text-left hover:bg-amber-100 transition-colors">
+            <div className="flex items-center gap-2">
+              <span className="text-lg">🔍</span>
+              <span className="font-semibold text-amber-800">Диагностика — {monthLabel(month)}</span>
+              <span className="text-xs text-amber-700">
+                {diag.summary.duplicates_count > 0    && <span className="ml-2 px-2 py-0.5 rounded-full bg-red-100 text-red-700">⚠ {diag.summary.duplicates_count} възможен дубликат</span>}
+                {diag.summary.prepaid_count > 0       && <span className="ml-2 px-2 py-0.5 rounded-full bg-green-100 text-green-700">⏪ {diag.summary.prepaid_count} платил предварително</span>}
+                {diag.summary.unassigned_count > 0    && <span className="ml-2 px-2 py-0.5 rounded-full bg-yellow-100 text-yellow-700">❓ {diag.summary.unassigned_count} неприсвоени</span>}
+                {diag.summary.miscategorized_count > 0 && <span className="ml-2 px-2 py-0.5 rounded-full bg-orange-100 text-orange-700">🔀 {diag.summary.miscategorized_count} сбъркана категория</span>}
+              </span>
+            </div>
+            <span className="text-amber-600 text-sm">{showDiag ? '▲ Скрий' : '▼ Покажи'}</span>
+          </button>
+
+          {showDiag && (
+            <div className="px-5 pb-5 space-y-4">
+              {/* Duplicates */}
+              {diag.duplicates.length > 0 && (
+                <div className="bg-white border border-red-200 rounded-lg overflow-hidden">
+                  <div className="px-3 py-2 bg-red-50 border-b border-red-200 text-sm font-semibold text-red-800">
+                    ⚠ Възможен дубликат — {diag.duplicates.length} имот(а) с ≥2 плащания за този месец
+                  </div>
+                  <div className="divide-y divide-gray-100 text-sm">
+                    {diag.duplicates.map(d => (
+                      <div key={d.property_id} className="px-3 py-2">
+                        <div className="flex justify-between items-baseline">
+                          <div>
+                            <span className="font-medium text-gray-800">{d.адрес}</span>
+                            <span className="text-gray-500 text-xs ml-2">{d.наемател}</span>
+                          </div>
+                          <div className="text-xs">
+                            Очакван: <strong>{fmt(d.expected)} €</strong>
+                            <span className="mx-2">·</span>
+                            Платено: <strong className={d.over_expected ? 'text-red-700' : 'text-gray-700'}>
+                              {d.total.toLocaleString('bg-BG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                            </strong>
+                            <span className="ml-1 text-gray-400">({d.tx_count} тx)</span>
+                          </div>
+                        </div>
+                        <div className="mt-1 ml-3 text-xs text-gray-600 space-y-0.5">
+                          {d.txs.map(t => (
+                            <div key={t.id}>
+                              • <span className="text-gray-500">{t.дата}</span>{' '}
+                              <strong>{t.сума.toLocaleString('bg-BG', { minimumFractionDigits: 2 })} €</strong>
+                              {' — '}<span className="text-gray-500">{t.контрагент}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Prepaid */}
+              {diag.prepaid.length > 0 && (
+                <div className="bg-white border border-green-200 rounded-lg overflow-hidden">
+                  <div className="px-3 py-2 bg-green-50 border-b border-green-200 text-sm font-semibold text-green-800">
+                    ⏪ Платил предварително — {diag.prepaid.length} имот(а) платили в {diag.prevMonth} за {month}
+                  </div>
+                  <div className="divide-y divide-gray-100 text-sm">
+                    {diag.prepaid.map(p => (
+                      <div key={p.property_id} className="px-3 py-2 flex justify-between items-center">
+                        <div>
+                          <div>
+                            <span className="font-medium text-gray-800">{p.адрес}</span>
+                            <span className="text-gray-500 text-xs ml-2">{p.наемател}</span>
+                          </div>
+                          <div className="text-xs text-gray-600 mt-0.5">
+                            Платен на <strong>{p.дата}</strong> — {p.сума.toLocaleString('bg-BG', { minimumFractionDigits: 2 })} €
+                            <span className="text-gray-400 ml-1">(очакван {fmt(p.expected)} €)</span>
+                          </div>
+                        </div>
+                        <button onClick={() => acceptPrepaid(p)}
+                          className="px-3 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700 whitespace-nowrap">
+                          ✅ Маркирай платил
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Unassigned */}
+              {diag.unassigned.length > 0 && (
+                <div className="bg-white border border-yellow-300 rounded-lg overflow-hidden">
+                  <div className="px-3 py-2 bg-yellow-50 border-b border-yellow-300 text-sm font-semibold text-yellow-800">
+                    ❓ Неприсвоени — {diag.unassigned.length} наемни транзакции без имот
+                  </div>
+                  <div className="divide-y divide-gray-100 text-sm">
+                    {diag.unassigned.map(t => (
+                      <div key={t.id} className="px-3 py-2 text-xs">
+                        <span className="text-gray-500">{t.дата}</span>{' '}
+                        <strong className="text-gray-700">{t.сума.toLocaleString('bg-BG', { minimumFractionDigits: 2 })} €</strong>
+                        {' — '}<strong className="text-gray-800">{t.контрагент}</strong>
+                        <div className="text-gray-500 truncate">{t.основание}</div>
+                      </div>
+                    ))}
+                    <div className="px-3 py-2 text-xs text-gray-500 bg-gray-50">
+                      💡 Открий ги в Tab Импорт и им присвой имот.
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Miscategorized */}
+              {diag.miscategorized.length > 0 && (
+                <div className="bg-white border border-orange-300 rounded-lg overflow-hidden">
+                  <div className="px-3 py-2 bg-orange-50 border-b border-orange-300 text-sm font-semibold text-orange-800">
+                    🔀 Възможно сбъркана категория — {diag.miscategorized.length} тx от контрагент който прилича на наемател
+                  </div>
+                  <div className="divide-y divide-gray-100 text-sm">
+                    {diag.miscategorized.map(t => (
+                      <div key={t.tx_id} className="px-3 py-2 text-xs">
+                        <span className="text-gray-500">{t.дата}</span>{' '}
+                        <strong className="text-gray-700">{t.сума.toLocaleString('bg-BG', { minimumFractionDigits: 2 })} €</strong>
+                        {' — '}<strong className="text-gray-800">{t.контрагент}</strong>
+                        <span className="ml-2 px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">{t.категория}</span>
+                        <div className="text-gray-500 truncate">{t.основание}</div>
+                        <div className="text-blue-600 mt-0.5">→ Препоръка: имот <strong>{t.suggest_адрес}</strong> (промени категорията на "наем" в Tab Импорт)</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       {unpaid.length > 0 && (
         <div className="mb-6">
           <h3 className="text-base font-bold text-red-700 mb-3 flex items-center gap-2">
@@ -289,10 +445,22 @@ function TenantTable({
 
                 {/* Платено */}
                 <td className="px-3 py-3 text-right font-medium whitespace-nowrap">
-                  {prop.is_paid
-                    ? <span className="text-green-700 font-bold">{(prop.paid_amount || 0).toLocaleString('bg-BG')} €</span>
-                    : <span className="text-gray-300">—</span>
-                  }
+                  {prop.is_paid ? (
+                    <div className="flex flex-col items-end">
+                      <span className="text-green-700 font-bold">{(prop.paid_amount || 0).toLocaleString('bg-BG')} €</span>
+                      {prop.tx_count >= 2 && (
+                        <span
+                          className="mt-0.5 text-[10px] text-amber-700 bg-amber-100 border border-amber-300 px-1.5 py-0.5 rounded-full cursor-help"
+                          title={
+                            (prop.bank_txs || [])
+                              .map(t => `${t.дата}: ${Number(t.сума).toLocaleString('bg-BG',{minimumFractionDigits:2})} €  (${t.контрагент})`)
+                              .join('\n')
+                          }>
+                          ⚠ {prop.tx_count} плащания
+                        </span>
+                      )}
+                    </div>
+                  ) : <span className="text-gray-300">—</span>}
                 </td>
 
                 {/* Начин на плащане */}
