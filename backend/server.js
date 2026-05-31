@@ -195,7 +195,34 @@ async function main() {
     позиции_json TEXT
   )`);
   try { db.exec("CREATE INDEX IF NOT EXISTS idx_t212_snapshots_date ON t212_snapshots(дата DESC)"); } catch(_) {}
-  console.log('investments tables ready (multi-metal: gold/silver/platinum + agent_signals + t212_snapshots)');
+
+  // Net Wealth daily snapshots (имоти equity + metals + T212 NAV → общо)
+  db.exec(`CREATE TABLE IF NOT EXISTS wealth_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    дата DATETIME DEFAULT CURRENT_TIMESTAMP,
+    общо REAL,
+    имоти_equity REAL,
+    имоти_asset REAL,
+    имоти_debt REAL,
+    имоти_брой INTEGER,
+    злато REAL,
+    сребро REAL,
+    t212 REAL,
+    разпределение_json TEXT
+  )`);
+  try { db.exec("CREATE INDEX IF NOT EXISTS idx_wealth_snapshots_date ON wealth_snapshots(дата DESC)"); } catch(_) {}
+
+  // Net Wealth goals — точкови цели с дата (например "€500K до 31.12.2026")
+  db.exec(`CREATE TABLE IF NOT EXISTS wealth_goals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    име TEXT NOT NULL,
+    цел_сума REAL NOT NULL,
+    цел_дата DATE NOT NULL,
+    бележка TEXT,
+    активна INTEGER DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+  console.log('investments tables ready (multi-metal + t212_snapshots + wealth_snapshots + wealth_goals)');
 
   // Contract templates & contracts
   db.exec(`CREATE TABLE IF NOT EXISTS contract_templates (

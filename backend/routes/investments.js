@@ -401,97 +401,159 @@ module.exports = function(db) {
   });
 
   // ── Net Worth: aggregates properties + metals + T212 ─────────────────────
+  const wealth = require('../lib/wealthSnapshot');
+
   router.get('/wealth/summary', async (req, res) => {
     try {
-      // Properties
-      const properties = db.prepare('SELECT * FROM properties').all();
-      const loans = db.prepare('SELECT * FROM loans').all();
-      const property_asset = properties.reduce((s, p) => {
-        const v = p.market_val != null && p.market_val > 0 ? p.market_val : (p['покупна'] || 0) + (p['ремонт'] || 0);
-        return s + v;
-      }, 0);
-      const property_debt = loans.reduce((s, l) => s + (l['остатък'] || 0), 0);
-      const property_equity = property_asset - property_debt;
-      const property_invested = properties.reduce((s, p) => s + (p['покупна'] || 0) + (p['ремонт'] || 0), 0);
-
-      // Metals: gold + silver portfolios
-      const gold = computePortfolioSnapshot(db, 'gold');
-      const silver = computePortfolioSnapshot(db, 'silver');
-
-      // T212: prefer fresh cash + portfolio; fall back to latest snapshot
-      let t212Data = null;
-      if (t212.isConfigured()) {
-        try {
-          const [info, cash, pf] = await Promise.all([t212.getAccountInfo(), t212.getCash(), t212.getPortfolio()]);
-          const positions = pf.items || [];
-          const invested = positions.reduce((s, p) => s + (Number(p.quantity) || 0) * (Number(p.averagePrice) || 0), 0);
-          const value = positions.reduce((s, p) => s + (Number(p.quantity) || 0) * (Number(p.currentPrice) || 0), 0);
-          t212Data = {
-            валута: info.currencyCode,
-            обща_стойност: Number((cash.total || 0).toFixed(2)),  // NAV
-            кеш_свободен: Number((cash.free || 0).toFixed(2)),
-            блокиран: Number((cash.blocked || 0).toFixed(2)),
-            инвестирано: Number(invested.toFixed(2)),
-            позиции_стойност: Number(value.toFixed(2)),
-            печалба: Number((value - invested).toFixed(2)),
-            брой_позиции: positions.length,
-            източник: 'live',
-          };
-        } catch (err) {
-          const last = db.prepare('SELECT * FROM t212_snapshots ORDER BY дата DESC LIMIT 1').get();
-          if (last) {
-            t212Data = {
-              валута: last.валута,
-              обща_стойност: last.кеш_общо,
-              кеш_свободен: last.кеш_свободен,
-              блокиран: last.блокиран,
-              инвестирано: last.инвестирано,
-              позиции_стойност: last.текуща_стойност,
-              печалба: last.печалба,
-              брой_позиции: last.брой_позиции,
-              източник: 'snapshot',
-              snapshot_date: last.дата,
-              live_error: err.message,
-            };
-          } else {
-            t212Data = { error: err.message };
-          }
-        }
-      }
-
-      // Totals
-      const metals_value = (gold.текуща_стойност || 0) + (silver.текуща_стойност || 0);
-      const t212_value = t212Data?.обща_стойност || 0;
-      const total_wealth = property_equity + metals_value + t212_value;
-
-      // Allocation %
-      const allocation = total_wealth > 0 ? {
-        имоти_equity: Number(((property_equity / total_wealth) * 100).toFixed(2)),
-        злато:        Number((((gold.текуща_стойност || 0) / total_wealth) * 100).toFixed(2)),
-        сребро:       Number((((silver.текуща_стойност || 0) / total_wealth) * 100).toFixed(2)),
-        t212:         Number(((t212_value / total_wealth) * 100).toFixed(2)),
-      } : null;
-
-      res.json({
-        общо: Number(total_wealth.toFixed(2)),
-        валута: 'EUR',
-        разпределение: allocation,
-        имоти: {
-          asset_value: Number(property_asset.toFixed(2)),
-          debt:        Number(property_debt.toFixed(2)),
-          equity:      Number(property_equity.toFixed(2)),
-          инвестирано: Number(property_invested.toFixed(2)),
-          брой:        properties.length,
-        },
-        злато:  gold,
-        сребро: silver,
-        t212:   t212Data,
-        изчислено_на: new Date().toISOString(),
-      });
+      const data = await wealth.computeWealth(db);
+      res.json(data);
     } catch (err) {
       console.error('wealth/summary error:', err);
       res.status(500).json({ error: err.message });
     }
+  });
+
+  router.get('/wealth/history', (req, res) => {
+    const days = Math.min(3650, Math.max(1, Number(req.query.days) || 90));
+    const rows = db.prepare(`
+      SELECT id, дата, общо, имоти_equity, имоти_asset, имоти_debt, имоти_брой,
+             злато, сребро, t212
+      FROM wealth_snapshots
+      WHERE дата >= datetime('now', ?)
+      ORDER BY дата ASC
+    `).all(`-${days} days`);
+    res.json(rows);
+  });
+
+  router.post('/wealth/snapshot', async (req, res) => {
+    try {
+      const id = await wealth.takeWealthSnapshot(db);
+      const row = db.prepare('SELECT * FROM wealth_snapshots WHERE id=?').get(id);
+      res.status(201).json(row);
+    } catch (err) {
+      console.error('wealth/snapshot error:', err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // GET /wealth/at?date=YYYY-MM-DD → стойност в най-близкия snapshot ≤ date
+  router.get('/wealth/at', (req, res) => {
+    const date = req.query.date;
+    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return res.status(400).json({ error: 'date=YYYY-MM-DD задължително' });
+    }
+    const row = db.prepare(`
+      SELECT * FROM wealth_snapshots
+      WHERE date(дата) <= date(?)
+      ORDER BY дата DESC LIMIT 1
+    `).get(date);
+    if (!row) return res.status(404).json({ error: `Няма snapshot преди или на ${date}` });
+    res.json(row);
+  });
+
+  // GET /wealth/monthly?months=24 → end-of-month стойности за последните N месеца
+  router.get('/wealth/monthly', (req, res) => {
+    const months = Math.min(120, Math.max(1, Number(req.query.months) || 24));
+    // За всеки месец взимаме последния snapshot
+    const rows = db.prepare(`
+      SELECT strftime('%Y-%m', дата) AS месец,
+             MAX(дата) AS дата,
+             общо, имоти_equity, имоти_asset, имоти_debt, имоти_брой,
+             злато, сребро, t212
+      FROM wealth_snapshots
+      WHERE дата >= datetime('now', ?)
+      GROUP BY strftime('%Y-%m', дата)
+      ORDER BY месец ASC
+    `).all(`-${months} months`);
+    // Изчисли месечна промяна
+    let prev = null;
+    const enriched = rows.map(r => {
+      const delta = prev !== null ? r.общо - prev : null;
+      const pct = (prev !== null && prev > 0) ? (delta / prev) * 100 : null;
+      prev = r.общо;
+      return {
+        ...r,
+        промяна: delta !== null ? Number(delta.toFixed(2)) : null,
+        промяна_pct: pct !== null ? Number(pct.toFixed(2)) : null,
+      };
+    });
+    res.json(enriched);
+  });
+
+  // ── Goals CRUD ────────────────────────────────────────────────────────────
+  router.get('/wealth/goals', (req, res) => {
+    const goals = db.prepare(`
+      SELECT g.*,
+             (SELECT общо FROM wealth_snapshots ORDER BY дата DESC LIMIT 1) AS текущо
+      FROM wealth_goals g
+      WHERE g.активна = 1
+      ORDER BY g.цел_дата ASC
+    `).all();
+    res.json(goals.map(g => {
+      const текущо = Number(g.текущо || 0);
+      const цел = Number(g.цел_сума || 0);
+      const прогрес_pct = цел > 0 ? Math.min(100, (текущо / цел) * 100) : 0;
+      // ETA based on growth rate from first to last snapshot
+      const first = db.prepare('SELECT дата, общо FROM wealth_snapshots ORDER BY дата ASC LIMIT 1').get();
+      const last  = db.prepare('SELECT дата, общо FROM wealth_snapshots ORDER BY дата DESC LIMIT 1').get();
+      let eta = null, нужно_месечно = null;
+      if (first && last && first.id !== last.id) {
+        const days = Math.max(1, (new Date(last.дата) - new Date(first.дата)) / 86400000);
+        const dailyGrowth = (last.общо - first.общо) / days;
+        if (dailyGrowth > 0 && цел > текущо) {
+          const daysToGoal = (цел - текущо) / dailyGrowth;
+          eta = new Date(Date.now() + daysToGoal * 86400000).toISOString().slice(0, 10);
+        }
+      }
+      const targetDate = new Date(g.цел_дата);
+      const daysRemaining = Math.max(1, Math.ceil((targetDate - Date.now()) / 86400000));
+      if (цел > текущо) {
+        нужно_месечно = ((цел - текущо) / (daysRemaining / 30.44));
+        нужно_месечно = Number(нужно_месечно.toFixed(2));
+      }
+      return {
+        ...g,
+        текущо: Number(текущо.toFixed(2)),
+        прогрес_pct: Number(прогрес_pct.toFixed(2)),
+        оставащо: Number((цел - текущо).toFixed(2)),
+        дни_до_цел: daysRemaining,
+        прогнозна_дата: eta,
+        нужно_месечно: нужно_месечно,
+      };
+    }));
+  });
+
+  router.post('/wealth/goals', (req, res) => {
+    const { име, цел_сума, цел_дата, бележка } = req.body || {};
+    if (!име || !цел_сума || !цел_дата) {
+      return res.status(400).json({ error: 'име, цел_сума и цел_дата са задължителни' });
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(цел_дата)) {
+      return res.status(400).json({ error: 'цел_дата формат YYYY-MM-DD' });
+    }
+    const r = db.prepare(`INSERT INTO wealth_goals (име, цел_сума, цел_дата, бележка)
+      VALUES (?,?,?,?)`).run(име, Number(цел_сума), цел_дата, бележка || '');
+    res.status(201).json({ id: r.lastInsertRowid });
+  });
+
+  router.put('/wealth/goals/:id', (req, res) => {
+    const existing = db.prepare('SELECT * FROM wealth_goals WHERE id=?').get(req.params.id);
+    if (!existing) return res.status(404).json({ error: 'Not found' });
+    const b = req.body || {};
+    db.prepare(`UPDATE wealth_goals SET име=?, цел_сума=?, цел_дата=?, бележка=?, активна=? WHERE id=?`).run(
+      b.име ?? existing.име,
+      b.цел_сума !== undefined ? Number(b.цел_сума) : existing.цел_сума,
+      b.цел_дата ?? existing.цел_дата,
+      b.бележка ?? existing.бележка,
+      b.активна !== undefined ? (b.активна ? 1 : 0) : existing.активна,
+      req.params.id
+    );
+    res.json({ ok: true });
+  });
+
+  router.delete('/wealth/goals/:id', (req, res) => {
+    db.prepare('DELETE FROM wealth_goals WHERE id=?').run(req.params.id);
+    res.json({ ok: true });
   });
 
   router.get('/broker/t212/history', (req, res) => {

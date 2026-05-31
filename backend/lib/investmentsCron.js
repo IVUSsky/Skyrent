@@ -7,6 +7,7 @@ const { getMetalPriceEUR } = require('./goldPrice');
 const { buildReport, SUPPORTED_METALS, METAL_LABEL_BG } = require('../routes/investments');
 const { runAgent } = require('./newsAgent');
 const t212 = require('./trading212');
+const wealthLib = require('./wealthSnapshot');
 
 const SIGNAL_EMOJI = { 'купи': '🟢', 'продай': '🔴', 'задръж': '⚪', 'наблюдавай': '🟡' };
 const CONFIDENCE_THRESHOLD = 60;
@@ -233,7 +234,24 @@ function startInvestmentsCron(db) {
     } catch (e) { console.error('[t212 cron] boot snapshot error:', e.message); }
   }, 90 * 1000);
 
-  console.log('[metals cron] schedules installed for', SUPPORTED_METALS.join(', '), '(Mon-Fri 08:00+20:00 price, 09:30 agent, Mon 09:00 weekly, 1st 08:00 monthly) + T212 daily 18:30');
+  // ── 5) Net Wealth daily snapshot — 19:00 всеки ден ───────────────────────
+  // След T212 snapshot-а (18:30), за да включи последния NAV.
+  cron.schedule('0 19 * * *', async () => {
+    try {
+      const id = await wealthLib.takeWealthSnapshot(db);
+      console.log('[wealth cron] snapshot saved id=' + id);
+    } catch (e) { console.error('[wealth cron] daily snapshot error:', e.message); }
+  });
+
+  // Boot snapshot ~120s след старт (изчаква T212 snapshot-а да приключи).
+  setTimeout(async () => {
+    try {
+      const id = await wealthLib.takeWealthSnapshot(db);
+      console.log('[wealth cron] boot snapshot saved id=' + id);
+    } catch (e) { console.error('[wealth cron] boot snapshot error:', e.message); }
+  }, 120 * 1000);
+
+  console.log('[metals cron] schedules installed for', SUPPORTED_METALS.join(', '), '(Mon-Fri 08:00+20:00 price, 09:30 agent, Mon 09:00 weekly, 1st 08:00 monthly) + T212 daily 18:30 + Wealth daily 19:00');
 }
 
 module.exports = { startInvestmentsCron };

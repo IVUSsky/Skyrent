@@ -1087,21 +1087,59 @@ const WEALTH_LABELS = {
 
 function WealthDashboard({ API }) {
   const [data, setData] = useState(null)
+  const [history, setHistory] = useState([])
+  const [monthly, setMonthly] = useState([])
+  const [goals, setGoals] = useState([])
+  const [view, setView] = useState('overview') // overview | compare | goals | monthly
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [snapping, setSnapping] = useState(false)
   const [refreshedAt, setRefreshedAt] = useState(null)
+  const [compareDate, setCompareDate] = useState('')
+  const [comparePoint, setComparePoint] = useState(null)
+  const [showGoalForm, setShowGoalForm] = useState(false)
+  const [editGoal, setEditGoal] = useState(null)
 
   const load = async () => {
     setLoading(true); setError(null)
     try {
-      const r = await apiFetch(`${API}/api/investments/wealth/summary`)
-      const d = await r.json()
-      if (!r.ok) throw new Error(d.error || 'грешка')
-      setData(d); setRefreshedAt(new Date())
+      const [sR, hR, mR, gR] = await Promise.all([
+        apiFetch(`${API}/api/investments/wealth/summary`),
+        apiFetch(`${API}/api/investments/wealth/history?days=365`),
+        apiFetch(`${API}/api/investments/wealth/monthly?months=24`),
+        apiFetch(`${API}/api/investments/wealth/goals`),
+      ])
+      const [d, h, m, g] = await Promise.all([sR.json(), hR.json(), mR.json(), gR.json()])
+      if (!sR.ok) throw new Error(d.error || 'грешка')
+      setData(d)
+      setHistory(Array.isArray(h) ? h : [])
+      setMonthly(Array.isArray(m) ? m : [])
+      setGoals(Array.isArray(g) ? g : [])
+      setRefreshedAt(new Date())
     } catch (e) { setError(e.message) }
     finally { setLoading(false) }
   }
   useEffect(() => { load() }, [])
+
+  const snapshotNow = async () => {
+    setSnapping(true)
+    try {
+      const r = await apiFetch(`${API}/api/investments/wealth/snapshot`, { method: 'POST' })
+      if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || 'snapshot') }
+      await load()
+    } catch (e) { setError(e.message) }
+    finally { setSnapping(false) }
+  }
+
+  const loadCompare = async (date) => {
+    setCompareDate(date)
+    if (!date) { setComparePoint(null); return }
+    try {
+      const r = await apiFetch(`${API}/api/investments/wealth/at?date=${date}`)
+      const d = await r.json()
+      setComparePoint(r.ok ? d : { error: d.error })
+    } catch (e) { setComparePoint({ error: e.message }) }
+  }
 
   if (loading && !data) return <div className="text-center py-12 text-gray-400">⏳ Изчислявам нетното богатство…</div>
   if (error)            return <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-red-700">⚠️ {error}</div>
@@ -1130,11 +1168,18 @@ function WealthDashboard({ API }) {
       <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
         <div className="text-xs text-gray-500">
           {refreshedAt && <>Обновено {refreshedAt.toLocaleTimeString('bg-BG')}</>}
+          {history.length > 0 && <> · {history.length} snapshot(s)</>}
         </div>
-        <button onClick={load} disabled={loading}
-          className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs px-3 py-1.5 rounded-lg">
-          {loading ? '⏳' : '🔄'} Преизчисли
-        </button>
+        <div className="flex gap-2">
+          <button onClick={snapshotNow} disabled={snapping || loading}
+            className="bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white text-xs px-3 py-1.5 rounded-lg">
+            {snapping ? '⏳' : '📸'} Snapshot
+          </button>
+          <button onClick={load} disabled={loading}
+            className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs px-3 py-1.5 rounded-lg">
+            {loading ? '⏳' : '🔄'} Преизчисли
+          </button>
+        </div>
       </div>
 
       {/* Hero — total wealth */}
@@ -1144,6 +1189,50 @@ function WealthDashboard({ API }) {
         <div className="text-xs opacity-80 mt-2">
           Equity в имоти + злато + сребро + Trading 212 (NAV)
         </div>
+        {history.length > 1 && (() => {
+          const first = history[0]
+          const delta = data.общо - (first.общо || 0)
+          const pct = first.общо > 0 ? (delta / first.общо) * 100 : 0
+          const days = Math.max(1, Math.ceil((Date.now() - new Date(first.дата).getTime()) / 86400000))
+          return (
+            <div className="text-xs opacity-90 mt-1">
+              {delta >= 0 ? '▲' : '▼'} {cur} {fmtMoney(Math.abs(delta), 0)} ({delta >= 0 ? '+' : ''}{pct.toFixed(2)}%) за последните {days} дни
+            </div>
+          )
+        })()}
+      </div>
+
+      {/* Historical chart */}
+      <div className="bg-white rounded-xl shadow border border-gray-100 p-4 mb-5">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-semibold text-gray-700">📈 Нетно богатство във времето</h3>
+          <span className="text-xs text-gray-400">{cur}</span>
+        </div>
+        {history.length > 1 ? (
+          <ResponsiveContainer width="100%" height={260}>
+            <LineChart data={history.map(h => ({
+              дата: new Date(h.дата).toLocaleDateString('bg-BG', { day: '2-digit', month: '2-digit' }),
+              Общо: Number(h.общо || 0),
+              Имоти: Number(h.имоти_equity || 0),
+              T212: Number(h.t212 || 0),
+              Метали: Number((h.злато || 0) + (h.сребро || 0)),
+            }))}>
+              <XAxis dataKey="дата" tick={{ fontSize: 11 }} />
+              <YAxis domain={['auto', 'auto']} tick={{ fontSize: 11 }} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} />
+              <Tooltip formatter={v => `${cur} ${fmtMoney(v, 0)}`} />
+              <Legend />
+              <Line type="monotone" dataKey="Общо"   stroke="#059669" strokeWidth={2.5} dot={false} />
+              <Line type="monotone" dataKey="Имоти"  stroke="#10b981" strokeWidth={1} strokeDasharray="3 3" dot={false} />
+              <Line type="monotone" dataKey="T212"   stroke="#2563eb" strokeWidth={1} dot={false} />
+              <Line type="monotone" dataKey="Метали" stroke="#f59e0b" strokeWidth={1} dot={false} />
+            </LineChart>
+          </ResponsiveContainer>
+        ) : (
+          <div className="text-center text-gray-400 py-12 text-sm">
+            Все още няма достатъчно snapshots за chart ({history.length}/2 минимум).<br/>
+            <span className="text-xs">Cron-ът записва snapshot в 19:00 всеки ден. Натисни 📸 Snapshot за ad-hoc запис.</span>
+          </div>
+        )}
       </div>
 
       {/* Pie + cards */}
@@ -1183,7 +1272,7 @@ function WealthDashboard({ API }) {
       </div>
 
       {/* Asset class cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
         {cards.map(c => (
           <div key={c.key} className="bg-white rounded-xl shadow border border-gray-100 p-4">
             <div className="flex items-center justify-between mb-1">
@@ -1196,11 +1285,256 @@ function WealthDashboard({ API }) {
         ))}
       </div>
 
+      {/* Sub-view switcher */}
+      <div className="flex gap-2 mb-4 flex-wrap">
+        {[
+          ['compare', '⏪ Сравни с минала дата'],
+          ['goals',   '🎯 Цели'],
+          ['monthly', '📅 Месечен отчет'],
+        ].map(([id, label]) => (
+          <button key={id} onClick={() => setView(view === id ? 'overview' : id)}
+            className={`px-3 py-1.5 text-sm rounded-lg border ${view === id ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-gray-700 border-gray-300'}`}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {/* Compare with past date */}
+      {view === 'compare' && (() => {
+        const comp = comparePoint && !comparePoint.error ? comparePoint : null
+        const delta = comp ? data.общо - (comp.общо || 0) : 0
+        const pct = comp && comp.общо > 0 ? (delta / comp.общо) * 100 : 0
+        const days = comp ? Math.max(1, Math.ceil((Date.now() - new Date(comp.дата).getTime()) / 86400000)) : 0
+        return (
+          <div className="bg-white rounded-xl shadow border border-gray-100 p-4 mb-5">
+            <div className="flex items-center gap-3 mb-3 flex-wrap">
+              <label className="text-sm font-semibold text-gray-700">Сравни с дата:</label>
+              <input type="date" value={compareDate}
+                max={new Date().toISOString().slice(0,10)}
+                onChange={e => loadCompare(e.target.value)}
+                className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm" />
+            </div>
+            {comparePoint?.error && (
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 text-xs text-yellow-800">
+                ⚠️ {comparePoint.error}
+              </div>
+            )}
+            {comp && (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className="bg-gray-50 border border-gray-200 rounded-xl p-3">
+                  <div className="text-xs text-gray-500 uppercase font-semibold">На {fmtDate(comp.дата)}</div>
+                  <div className="text-2xl font-bold text-gray-800 mt-1">{cur} {fmtMoney(comp.общо, 0)}</div>
+                  <div className="text-xs text-gray-500 mt-1">{comp.имоти_брой} имота · преди {days} дни</div>
+                </div>
+                <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3">
+                  <div className="text-xs text-emerald-700 uppercase font-semibold">Сега</div>
+                  <div className="text-2xl font-bold text-emerald-800 mt-1">{cur} {fmtMoney(data.общо, 0)}</div>
+                </div>
+                <div className={`rounded-xl p-3 border ${delta >= 0 ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
+                  <div className={`text-xs uppercase font-semibold ${delta >= 0 ? 'text-green-700' : 'text-red-700'}`}>Промяна</div>
+                  <div className={`text-2xl font-bold mt-1 ${delta >= 0 ? 'text-green-800' : 'text-red-800'}`}>
+                    {delta >= 0 ? '+' : ''}{cur} {fmtMoney(delta, 0)}
+                  </div>
+                  <div className={`text-xs mt-1 ${pct >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+                    {pct >= 0 ? '▲' : '▼'} {Math.abs(pct).toFixed(2)}% ≈ {cur} {fmtMoney(delta / (days / 30.44), 0)}/мес
+                  </div>
+                </div>
+              </div>
+            )}
+            {comp && (
+              <div className="mt-4">
+                <h4 className="text-xs font-semibold text-gray-500 uppercase mb-2">Принос по asset class</h4>
+                <div className="space-y-2">
+                  {[
+                    ['🏠 Имоти equity', comp.имоти_equity || 0, data.имоти?.equity || 0],
+                    ['🥇 Злато',        comp.злато || 0,        data.злато?.текуща_стойност || 0],
+                    ['🥈 Сребро',       comp.сребро || 0,       data.сребро?.текуща_стойност || 0],
+                    ['🏦 Trading 212',  comp.t212 || 0,         data.t212?.обща_стойност || 0],
+                  ].map(([name, then, now]) => {
+                    const d = now - then
+                    return (
+                      <div key={name} className="flex items-center justify-between text-sm">
+                        <span className="text-gray-700">{name}</span>
+                        <span className="text-gray-500">{cur} {fmtMoney(then, 0)} → {cur} {fmtMoney(now, 0)}</span>
+                        <span className={`font-semibold ${d >= 0 ? 'text-green-700' : 'text-red-700'}`}>{d >= 0 ? '+' : ''}{cur} {fmtMoney(d, 0)}</span>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        )
+      })()}
+
+      {/* Goals */}
+      {view === 'goals' && (
+        <div className="bg-white rounded-xl shadow border border-gray-100 p-4 mb-5">
+          <div className="flex justify-between items-center mb-3">
+            <h3 className="text-sm font-semibold text-gray-700">🎯 Цели за нетно богатство</h3>
+            <button onClick={() => { setEditGoal(null); setShowGoalForm(true) }}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white text-sm px-3 py-1.5 rounded-lg">
+              + Нова цел
+            </button>
+          </div>
+          {goals.length === 0 ? (
+            <div className="text-center text-gray-400 py-8 text-sm">
+              Все още няма зададени цели. Натисни "+ Нова цел" за първата.
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {goals.map(g => (
+                <div key={g.id} className="border border-gray-200 rounded-lg p-3">
+                  <div className="flex items-start justify-between gap-3 flex-wrap mb-2">
+                    <div>
+                      <div className="font-semibold text-gray-800">{g.име}</div>
+                      <div className="text-xs text-gray-500">{cur} {fmtMoney(g.цел_сума, 0)} до {fmtDate(g.цел_дата)}</div>
+                      {g.бележка && <div className="text-xs text-gray-600 italic mt-0.5">"{g.бележка}"</div>}
+                    </div>
+                    <div className="flex gap-1">
+                      <button onClick={() => { setEditGoal(g); setShowGoalForm(true) }} className="text-xs px-2 py-1 text-blue-700 hover:bg-blue-50 rounded">✏️</button>
+                      <button onClick={async () => {
+                        if (!window.confirm(`Изтриване на целта "${g.име}"?`)) return
+                        await apiFetch(`${API}/api/investments/wealth/goals/${g.id}`, { method: 'DELETE' })
+                        load()
+                      }} className="text-xs px-2 py-1 text-red-600 hover:bg-red-50 rounded">🗑️</button>
+                    </div>
+                  </div>
+                  <div className="h-3 bg-gray-100 rounded-full overflow-hidden mb-1">
+                    <div className={`h-full rounded-full transition-all ${g.прогрес_pct >= 100 ? 'bg-emerald-600' : 'bg-emerald-500'}`} style={{ width: `${Math.min(100, g.прогрес_pct)}%` }} />
+                  </div>
+                  <div className="flex flex-wrap gap-3 text-xs text-gray-600 mt-2">
+                    <span><strong>{g.прогрес_pct.toFixed(1)}%</strong> от целта</span>
+                    <span>·</span>
+                    <span>{cur} {fmtMoney(g.текущо, 0)} / {cur} {fmtMoney(g.цел_сума, 0)}</span>
+                    {g.оставащо > 0 && <><span>·</span><span>Остават {cur} {fmtMoney(g.оставащо, 0)} за {g.дни_до_цел} дни</span></>}
+                    {g.нужно_месечно > 0 && <><span>·</span><span className="font-medium">≈ {cur} {fmtMoney(g.нужно_месечно, 0)}/мес</span></>}
+                    {g.прогнозна_дата && <><span>·</span><span className={new Date(g.прогнозна_дата) <= new Date(g.цел_дата) ? 'text-green-700' : 'text-orange-700'}>📅 при сегашен темп: {fmtDate(g.прогнозна_дата)}</span></>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          {goals.length > 0 && history.length < 7 && (
+            <div className="mt-3 text-xs text-gray-500 italic">
+              ℹ️ Прогнозите за дата и нужна месечна спестявания изискват поне 7 snapshots в историята за смислен темп. Сега имаме {history.length}.
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Monthly table */}
+      {view === 'monthly' && (
+        <div className="bg-white rounded-xl shadow border border-gray-100 p-4 mb-5">
+          <h3 className="text-sm font-semibold text-gray-700 mb-3">📅 Месечен отчет (последни {monthly.length} мес.)</h3>
+          {monthly.length === 0 ? (
+            <div className="text-center text-gray-400 py-8 text-sm">Все още няма достатъчно snapshots.</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-sm divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    {['Месец','Общо','Имоти equity','Злато','Сребро','T212','Промяна','%'].map(h => (
+                      <th key={h} className="px-2 py-2 text-left text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {[...monthly].reverse().map(m => (
+                    <tr key={m.месец} className="hover:bg-emerald-50/40">
+                      <td className="px-2 py-1.5 text-xs font-mono">{m.месец}</td>
+                      <td className="px-2 py-1.5 text-xs font-semibold">{cur} {fmtMoney(m.общо, 0)}</td>
+                      <td className="px-2 py-1.5 text-xs">{cur} {fmtMoney(m.имоти_equity, 0)}</td>
+                      <td className="px-2 py-1.5 text-xs">{cur} {fmtMoney(m.злато, 0)}</td>
+                      <td className="px-2 py-1.5 text-xs">{cur} {fmtMoney(m.сребро, 0)}</td>
+                      <td className="px-2 py-1.5 text-xs">{cur} {fmtMoney(m.t212, 0)}</td>
+                      <td className={`px-2 py-1.5 text-xs font-semibold ${(m.промяна || 0) >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+                        {m.промяна === null ? '—' : `${m.промяна >= 0 ? '+' : ''}${cur} ${fmtMoney(m.промяна, 0)}`}
+                      </td>
+                      <td className={`px-2 py-1.5 text-xs ${(m.промяна_pct || 0) >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+                        {m.промяна_pct === null ? '—' : `${m.промяна_pct >= 0 ? '▲' : '▼'} ${Math.abs(m.промяна_pct).toFixed(2)}%`}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {showGoalForm && (
+        <GoalForm API={API} initial={editGoal} cur={cur}
+          onClose={() => { setShowGoalForm(false); setEditGoal(null) }}
+          onSaved={() => { setShowGoalForm(false); setEditGoal(null); load() }} />
+      )}
+
       {data.t212?.live_error && (
         <div className="mt-4 bg-yellow-50 border border-yellow-200 rounded-xl p-3 text-xs text-yellow-800">
           ⚠️ Trading 212 live API недостъпен — ползвам последния snapshot ({fmtDate(data.t212.snapshot_date)}). Грешка: {data.t212.live_error}
         </div>
       )}
+    </div>
+  )
+}
+
+function GoalForm({ API, initial, cur, onClose, onSaved }) {
+  const [name, setName] = useState(initial?.име || '')
+  const [amount, setAmount] = useState(initial?.цел_сума || '')
+  const [date, setDate] = useState(initial?.цел_дата || '')
+  const [note, setNote] = useState(initial?.бележка || '')
+  const [saving, setSaving] = useState(false)
+  const [err, setErr] = useState(null)
+
+  const save = async () => {
+    if (!name || !amount || !date) { setErr('Попълни име, сума и дата'); return }
+    setSaving(true); setErr(null)
+    try {
+      const body = JSON.stringify({ име: name, цел_сума: Number(amount), цел_дата: date, бележка: note })
+      const url = initial ? `${API}/api/investments/wealth/goals/${initial.id}` : `${API}/api/investments/wealth/goals`
+      const r = await apiFetch(url, { method: initial ? 'PUT' : 'POST', body })
+      if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || 'грешка') }
+      onSaved()
+    } catch (e) { setErr(e.message) }
+    finally { setSaving(false) }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div className="bg-white rounded-xl shadow-2xl max-w-md w-full p-5" onClick={e => e.stopPropagation()}>
+        <h3 className="text-lg font-bold text-gray-800 mb-4">{initial ? '✏️ Редакция на цел' : '🎯 Нова цел'}</h3>
+        {err && <div className="bg-red-50 border border-red-200 rounded p-2 text-xs text-red-700 mb-3">{err}</div>}
+        <div className="space-y-3">
+          <div>
+            <label className="text-xs font-semibold text-gray-600 uppercase">Име *</label>
+            <input value={name} onChange={e => setName(e.target.value)} placeholder="напр. €1 милион до 2030"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mt-1" />
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-gray-600 uppercase">Целева сума ({cur}) *</label>
+            <input type="number" value={amount} onChange={e => setAmount(e.target.value)} placeholder="1000000"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mt-1" />
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-gray-600 uppercase">Целева дата *</label>
+            <input type="date" value={date} onChange={e => setDate(e.target.value)}
+              min={new Date().toISOString().slice(0,10)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mt-1" />
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-gray-600 uppercase">Бележка</label>
+            <textarea value={note} onChange={e => setNote(e.target.value)} rows={2} placeholder="опционално"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mt-1" />
+          </div>
+        </div>
+        <div className="flex justify-end gap-2 mt-5">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Откажи</button>
+          <button onClick={save} disabled={saving}
+            className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-sm px-4 py-2 rounded-lg">
+            {saving ? '⏳' : (initial ? 'Запази' : 'Създай')}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
