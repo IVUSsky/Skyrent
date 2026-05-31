@@ -15,6 +15,8 @@ import Expenses from './components/Expenses'
 import Smart from './components/Smart'
 import Investments from './components/Investments'
 import TenantApp from './components/TenantApp'
+import ChatLearning from './components/ChatLearning'
+import { apiFetch } from './api'
 
 const API = import.meta.env.VITE_API_URL || ''
 
@@ -50,6 +52,23 @@ export default function App() {
   const [role, setRole]                 = useState(parseRole)
   const [userName, setUserName]         = useState(localStorage.getItem('skyrent_name') || '')
   const [mustChangePwd, setMustChangePwd] = useState(localStorage.getItem('skyrent_must_change_pwd') === '1')
+  const [learningCount, setLearningCount] = useState(0)
+  const [showLearning, setShowLearning]   = useState(false)
+
+  const refreshLearningCount = () => {
+    if (!authenticated || role === 'tenant') return
+    apiFetch(`${API}/api/chat-learning/pending-count`)
+      .then(r => r.json())
+      .then(d => setLearningCount(Number(d?.count) || 0))
+      .catch(() => {})
+  }
+
+  useEffect(() => {
+    refreshLearningCount()
+    if (!authenticated || role === 'tenant') return
+    const id = setInterval(refreshLearningCount, 5 * 60 * 1000)
+    return () => clearInterval(id)
+  }, [authenticated, role])
 
   const handleLogin = (data) => {
     if (data?.role) {
@@ -114,6 +133,18 @@ export default function App() {
             ))}
           </nav>
           <div className="ml-auto flex items-center gap-3">
+            <button
+              onClick={() => setShowLearning(true)}
+              title="Учене от разговори (предложения от AI асистента)"
+              className="relative text-slate-300 hover:text-white px-2 py-1 rounded hover:bg-white/10 transition-colors text-sm"
+            >
+              🎓
+              {learningCount > 0 && (
+                <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold rounded-full min-w-[16px] h-[16px] px-1 flex items-center justify-center">
+                  {learningCount}
+                </span>
+              )}
+            </button>
             {userName && <span className="text-xs text-slate-400">{userName}</span>}
             {role === 'broker' && <span className="text-xs bg-blue-800 text-blue-200 px-2 py-0.5 rounded-full">Брокер</span>}
             <button
@@ -125,6 +156,10 @@ export default function App() {
           </div>
         </div>
       </header>
+
+      {showLearning && (
+        <ChatLearning API={API} onClose={() => setShowLearning(false)} onChanged={refreshLearningCount} />
+      )}
 
       <main className="max-w-7xl mx-auto px-4 py-6">
         {validTab === 'dashboard' && <Dashboard API={API} />}

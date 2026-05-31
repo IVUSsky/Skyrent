@@ -350,6 +350,38 @@ async function main() {
   )`);
   console.log('property_photos table ready');
 
+  // Chat learning queue — weekly digest of tenant Q&A patterns that aren't
+  // well-answered yet. Admin reviews each row and either approves (promoted
+  // into chat_learned_faqs) or rejects. See [[skyrent-tenant-chat-agent]].
+  db.exec(`CREATE TABLE IF NOT EXISTS chat_learning_queue (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    question TEXT NOT NULL,
+    proposed_answer TEXT NOT NULL,
+    scope TEXT NOT NULL DEFAULT 'per-apartment',
+    property_ids TEXT,
+    reasoning TEXT DEFAULT '',
+    sample_count INTEGER DEFAULT 1,
+    status TEXT DEFAULT 'pending',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    reviewed_at DATETIME,
+    reviewed_by INTEGER REFERENCES users(id)
+  )`);
+  try { db.exec("CREATE INDEX IF NOT EXISTS idx_chat_learning_status ON chat_learning_queue(status, created_at DESC)"); } catch(_) {}
+  console.log('chat_learning_queue table ready');
+
+  // Approved learned FAQs — read by the tenant agent in addition to
+  // apartment_knowledge. property_id NULL means global (all apartments).
+  db.exec(`CREATE TABLE IF NOT EXISTS chat_learned_faqs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    property_id INTEGER REFERENCES properties(id),
+    question TEXT NOT NULL,
+    answer TEXT NOT NULL,
+    source_queue_id INTEGER REFERENCES chat_learning_queue(id),
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+  try { db.exec("CREATE INDEX IF NOT EXISTS idx_chat_learned_faqs_property ON chat_learned_faqs(property_id)"); } catch(_) {}
+  console.log('chat_learned_faqs table ready');
+
   // Tenant chat history — AI assistant in Tenant Portal (Phase 2)
   db.exec(`CREATE TABLE IF NOT EXISTS tenant_chat_messages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -468,6 +500,7 @@ async function main() {
   app.use('/api/inventory', require('./routes/inventory')(db));
   app.use('/api/investments', require('./routes/investments')(db));
   app.use('/api/tenant', require('./routes/tenant')(db));
+  app.use('/api/chat-learning', require('./routes/chatLearning')(db));
 
   // Stripe payments — tenant-facing endpoints mounted under /api/tenant (auth + tenant guard inside)
   const { tenantPaymentsRouter, webhookHandler } = require('./routes/payments');
@@ -516,6 +549,27 @@ async function main() {
     startInvestmentsCron(db);
   } catch (e) {
     console.error('Failed to start investments cron:', e.message);
+  }
+
+  // ─── Tenant chat learner — weekly digest (Sun 02:00 Europe/Sofia) ─────────
+  try {
+    const cron = require('node-cron');
+    const { runWeeklyAnalysis } = require('./lib/tenantChatLearner');
+    cron.schedule('0 2 * * 0', async () => {
+      if (!process.env.ANTHROPIC_API_KEY) {
+        console.warn('[chat-learner cron] skipping — no ANTHROPIC_API_KEY');
+        return;
+      }
+      try {
+        const result = await runWeeklyAnalysis(db);
+        console.log('[chat-learner cron] result:', JSON.stringify(result));
+      } catch (e) {
+        console.error('[chat-learner cron] failed:', e.message);
+      }
+    });
+    console.log('chat-learner cron registered (Sun 02:00)');
+  } catch (e) {
+    console.error('Failed to register chat-learner cron:', e.message);
   }
 
   // ─── SEPA Autopay daily cron ──────────────────────────────────────────────

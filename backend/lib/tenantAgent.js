@@ -51,10 +51,17 @@ function loadApartmentContext(db, userId) {
      ORDER BY property_id, sort_order, name`
   ).all(...propertyIds);
 
-  return { properties, knowledge, inventory };
+  // Approved learned FAQs — per-property + global (property_id IS NULL)
+  const learnedFaqs = db.prepare(
+    `SELECT property_id, question, answer FROM chat_learned_faqs
+     WHERE property_id IN (${placeholders}) OR property_id IS NULL
+     ORDER BY (property_id IS NULL), id DESC`
+  ).all(...propertyIds);
+
+  return { properties, knowledge, inventory, learnedFaqs };
 }
 
-function formatApartmentContext({ properties, knowledge, inventory = [] }) {
+function formatApartmentContext({ properties, knowledge, inventory = [], learnedFaqs = [] }) {
   if (properties.length === 0) {
     return 'Наемателят още няма свързан имот в системата.';
   }
@@ -67,7 +74,17 @@ function formatApartmentContext({ properties, knowledge, inventory = [] }) {
     invByProp[item.property_id].push(item);
   }
 
-  return properties.map(p => {
+  const faqByProp = {};
+  const globalFaqs = [];
+  for (const f of learnedFaqs) {
+    if (f.property_id == null) globalFaqs.push(f);
+    else {
+      if (!faqByProp[f.property_id]) faqByProp[f.property_id] = [];
+      faqByProp[f.property_id].push(f);
+    }
+  }
+
+  const propertyBlocks = properties.map(p => {
     const kb = kbByProp[p.id] || {};
     let appliances = [];
     let contacts = [];
@@ -137,8 +154,26 @@ function formatApartmentContext({ properties, knowledge, inventory = [] }) {
     if (kb.payment_instructions) lines.push('', `ПЛАЩАНЕ: ${kb.payment_instructions}`);
     if (kb.free_faq)             lines.push('', `ДОПЪЛНИТЕЛНА ИНФОРМАЦИЯ: ${kb.free_faq}`);
 
+    const propFaqs = faqByProp[p.id] || [];
+    if (propFaqs.length) {
+      lines.push('', 'НАУЧЕНИ FAQ (одобрени от админ):');
+      for (const f of propFaqs) {
+        lines.push(`  Q: ${f.question}`);
+        lines.push(`  A: ${f.answer}`);
+      }
+    }
+
     return lines.filter(Boolean).join('\n');
   }).join('\n\n────────────────────────\n\n');
+
+  let out = propertyBlocks;
+  if (globalFaqs.length) {
+    out += '\n\n════════════════════════\n\nОБЩИ FAQ (за всички имоти):\n';
+    for (const f of globalFaqs) {
+      out += `\n  Q: ${f.question}\n  A: ${f.answer}\n`;
+    }
+  }
+  return out;
 }
 
 // ── Tool definitions sent to Claude ───────────────────────────────────
