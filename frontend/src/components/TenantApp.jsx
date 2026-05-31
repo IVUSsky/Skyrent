@@ -10,6 +10,7 @@ const TABS = [
   { id: 'photos',       label: 'Снимки',     icon: '📷' },
   { id: 'contract',     label: 'Договор',    icon: '📋' },
   { id: 'invoices',     label: 'Фактури',    icon: '🧾' },
+  { id: 'addons',       label: 'Услуги',     icon: '🛍️' },
   { id: 'consumption',  label: 'Сметки',     icon: '📊' },
   { id: 'profile',      label: 'Профил',     icon: '👤' },
 ]
@@ -193,13 +194,14 @@ export default function TenantApp({ userName, onLogout, mustChangePassword }) {
         {tab === 'photos'      && <Photos me={me} property={property} />}
         {tab === 'contract'    && <Contract contracts={me?.contracts || []} />}
         {tab === 'invoices'    && <Invoices />}
+        {tab === 'addons'      && <Addons />}
         {tab === 'consumption' && <Consumption property={property} />}
         {tab === 'profile'     && <Profile me={me} onChangePassword={() => setShowPwd(true)} />}
       </main>
 
       {/* Bottom nav */}
       <nav className="fixed bottom-0 inset-x-0 bg-white border-t shadow-lg z-20">
-        <div className="max-w-2xl mx-auto grid grid-cols-7">
+        <div className="max-w-2xl mx-auto grid grid-cols-8">
           {TABS.map(t => (
             <button
               key={t.id}
@@ -539,6 +541,17 @@ function Invoices() {
                   <strong>{Number(inv.total || inv.amount).toLocaleString('bg-BG')}</strong>{' '}
                   <span className="text-xs text-slate-500">EUR</span>
                 </div>
+                {(inv.addons_total || 0) > 0 && Array.isArray(inv.addons) && inv.addons.length > 0 && (
+                  <div className="mt-1 text-[11px] text-slate-600 bg-slate-50 rounded px-2 py-1 border border-slate-200">
+                    <div className="font-semibold text-slate-700 mb-0.5">Включва (доп. услуги):</div>
+                    {inv.addons.map((a, i) => (
+                      <div key={i} className="flex justify-between">
+                        <span>{a.name}{a.kind === 'deposit' ? ' (депозит)' : ''}</span>
+                        <span className="ml-2">{Number(a.amount).toLocaleString('bg-BG')} €</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 {inv.due_date && !isPaid && (
                   <div className="text-xs text-slate-500 mt-0.5">
                     Падеж: {fmtDate(inv.due_date)}
@@ -575,6 +588,149 @@ function Invoices() {
           </Card>
         )
       })}
+    </div>
+  )
+}
+
+function Addons() {
+  const [catalog, setCatalog] = useState(null)
+  const [mine, setMine]       = useState(null)
+  const [busy, setBusy]       = useState(null) // service_id while submitting
+  const [err, setErr]         = useState(null)
+  const [msg, setMsg]         = useState(null)
+
+  const load = async () => {
+    setErr(null)
+    try {
+      const [c, m] = await Promise.all([
+        apiFetch(`${API}/api/tenant/addons/catalog`).then(r => r.json()),
+        apiFetch(`${API}/api/tenant/addons/mine`).then(r => r.json()),
+      ])
+      setCatalog(c); setMine(m)
+    } catch (e) { setErr('Грешка при зареждане') }
+  }
+  useEffect(() => { load() }, [])
+
+  const request = async (svc) => {
+    setBusy(svc.id); setErr(null); setMsg(null)
+    try {
+      const r = await apiFetch(`${API}/api/tenant/addons/request`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ service_id: svc.id }),
+      })
+      const data = await r.json()
+      if (!r.ok) { setErr(data.error || 'Грешка'); return }
+      setMsg(`✓ Заявката за "${svc.name}" е изпратена. Управителят ще я прегледа.`)
+      load()
+    } catch (e) { setErr('Сървърна грешка') }
+    finally { setBusy(null) }
+  }
+
+  const cancel = async (sub) => {
+    if (!confirm(`Да отменя ли заявката за ${sub.service_name}?`)) return
+    try {
+      const r = await apiFetch(`${API}/api/tenant/addons/mine/${sub.id}`, { method: 'DELETE' })
+      const data = await r.json()
+      if (!r.ok) { setErr(data.error || 'Грешка'); return }
+      load()
+    } catch (e) { setErr('Сървърна грешка') }
+  }
+
+  if (catalog === null || mine === null) return <Card><p className="text-slate-500 text-sm">Зареждане...</p></Card>
+
+  // Map: which services have an active/pending sub
+  const subByService = {}
+  for (const s of mine) {
+    if (s.status === 'pending' || s.status === 'active') subByService[s.service_id] = s
+  }
+
+  const fmt = n => Number(n || 0).toLocaleString('bg-BG', { minimumFractionDigits: 0 })
+
+  const STATUS_LABEL = {
+    pending:  { text: '⏳ Чакаща',   cls: 'bg-yellow-100 text-yellow-800' },
+    active:   { text: '✓ Активна',   cls: 'bg-green-100 text-green-800' },
+    stopped:  { text: '⏹ Спряна',    cls: 'bg-gray-200 text-gray-700' },
+    rejected: { text: '✗ Отказана',  cls: 'bg-red-100 text-red-700' },
+  }
+
+  return (
+    <div className="space-y-3">
+      {err && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg p-3">{err}</div>}
+      {msg && <div className="bg-green-50 border border-green-200 text-green-700 text-sm rounded-lg p-3">{msg}</div>}
+
+      {/* My subscriptions */}
+      {mine.length > 0 && (
+        <Card title="Моите услуги">
+          <div className="space-y-2">
+            {mine.map(s => {
+              const st = STATUS_LABEL[s.status] || { text: s.status, cls: 'bg-gray-100 text-gray-700' }
+              return (
+                <div key={s.id} className="flex items-center justify-between gap-3 py-2 border-b last:border-0">
+                  <div className="min-w-0 flex-1">
+                    <div className="font-semibold text-slate-800">
+                      <span className="mr-1">{s.service_icon}</span>{s.service_name}
+                    </div>
+                    <div className="text-xs text-slate-500">
+                      {fmt(s.service_monthly_price)} €/мес
+                      {s.service_deposit_amount > 0 && (
+                        <> · депозит {fmt(s.service_deposit_amount)} €{s.deposit_charged ? (s.deposit_refunded ? ' (върнат)' : ' (удържан)') : ' (предстои)'}</>
+                      )}
+                    </div>
+                  </div>
+                  <span className={`text-xs px-2 py-1 rounded-full font-medium whitespace-nowrap ${st.cls}`}>{st.text}</span>
+                  {s.status === 'pending' && (
+                    <button onClick={() => cancel(s)} className="text-xs text-red-600 hover:text-red-800 px-2 py-1">Отмени</button>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </Card>
+      )}
+
+      {/* Catalog */}
+      <Card title="Налични услуги">
+        <p className="text-xs text-slate-500 mb-3">
+          Заявката отива до управителя. След одобрение услугата се добавя към следващата ви фактура.
+          {catalog.some(c => c.deposit_amount > 0) && ' Някои услуги изискват еднократен депозит, който се връща при прекратяване.'}
+        </p>
+        <div className="space-y-2">
+          {catalog.map(svc => {
+            const sub = subByService[svc.id]
+            const disabled = !!sub || busy === svc.id
+            return (
+              <div key={svc.id} className="flex items-center justify-between gap-3 py-2 border-b last:border-0">
+                <div className="min-w-0 flex-1">
+                  <div className="font-semibold text-slate-800">
+                    <span className="mr-1 text-lg">{svc.icon}</span>{svc.name}
+                  </div>
+                  {svc.description && (
+                    <div className="text-xs text-slate-500">{svc.description}</div>
+                  )}
+                  <div className="text-xs text-slate-600 mt-0.5">
+                    <strong>{fmt(svc.monthly_price)} €/мес</strong>
+                    {svc.deposit_amount > 0 && (
+                      <span className="text-orange-700 ml-2">+ депозит {fmt(svc.deposit_amount)} €</span>
+                    )}
+                  </div>
+                </div>
+                {sub ? (
+                  <span className="text-xs text-slate-500 italic">{sub.status === 'active' ? 'активна' : 'заявена'}</span>
+                ) : (
+                  <button
+                    onClick={() => request(svc)}
+                    disabled={disabled}
+                    className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-semibold px-3 py-2 rounded-lg whitespace-nowrap"
+                  >
+                    {busy === svc.id ? '...' : 'Заяви'}
+                  </button>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      </Card>
     </div>
   )
 }

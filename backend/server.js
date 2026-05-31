@@ -312,7 +312,56 @@ async function main() {
   try { db.exec("ALTER TABLE rent_invoices ADD COLUMN due_date DATE"); } catch(_) {}
   try { db.exec("ALTER TABLE rent_invoices ADD COLUMN paid_at DATETIME"); console.log('Migration: added rent_invoices.paid_at'); } catch(_) {}
   try { db.exec("ALTER TABLE rent_invoices ADD COLUMN payment_method TEXT"); console.log('Migration: added rent_invoices.payment_method'); } catch(_) {}
+  try { db.exec("ALTER TABLE rent_invoices ADD COLUMN addons_total REAL DEFAULT 0"); console.log('Migration: added rent_invoices.addons_total'); } catch(_) {}
+  try { db.exec("ALTER TABLE rent_invoices ADD COLUMN addons_json TEXT"); console.log('Migration: added rent_invoices.addons_json'); } catch(_) {}
   console.log('rent_invoices table ready');
+
+  // Addon services catalog + tenant subscriptions
+  db.exec(`CREATE TABLE IF NOT EXISTS addon_services (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    description TEXT,
+    icon TEXT,
+    monthly_price REAL NOT NULL DEFAULT 0,
+    deposit_amount REAL NOT NULL DEFAULT 0,
+    currency TEXT DEFAULT 'EUR',
+    active INTEGER DEFAULT 1,
+    sort_order INTEGER DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+  db.exec(`CREATE TABLE IF NOT EXISTS tenant_addons (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    service_id INTEGER NOT NULL REFERENCES addon_services(id),
+    property_id INTEGER REFERENCES properties(id),
+    status TEXT NOT NULL DEFAULT 'pending',
+    requested_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    activated_at DATETIME,
+    stopped_at DATETIME,
+    deposit_charged INTEGER DEFAULT 0,
+    deposit_charged_invoice_id INTEGER,
+    deposit_refunded INTEGER DEFAULT 0,
+    admin_notes TEXT
+  )`);
+  // Seed initial catalog only if empty
+  const addonCount = db.prepare('SELECT COUNT(*) as cnt FROM addon_services').get();
+  if (addonCount.cnt === 0) {
+    const ins = db.prepare(`
+      INSERT INTO addon_services (name, description, icon, monthly_price, deposit_amount, sort_order)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `);
+    const seed = [
+      ['Интернет', 'Wi-Fi 300 Mbps, фиксиран месечен абонамент', '🌐', 15, 0, 10],
+      ['Кафемашина', 'Кафемашина за еспресо', '☕', 10, 0, 20],
+      ['Прахосмукачка', 'Безжична прахосмукачка', '🧹', 8, 0, 30],
+      ['Робот-прахосмукачка', 'Роботизирана прахосмукачка', '🤖', 15, 50, 40],
+      ['Микровълнова', 'Микровълнова фурна', '🍱', 5, 0, 50],
+      ['PlayStation 5', 'Конзола с контролер и 2 игри', '🎮', 30, 200, 60],
+    ];
+    for (const s of seed) ins.run(...s);
+    console.log('Seeded addon_services catalog with', seed.length, 'items');
+  }
+  console.log('addon_services + tenant_addons ready');
 
   // Stripe payment records
   db.exec(`CREATE TABLE IF NOT EXISTS stripe_payments (
@@ -570,6 +619,7 @@ async function main() {
   app.use('/api/investments', require('./routes/investments')(db));
   app.use('/api/tenant', require('./routes/tenant')(db));
   app.use('/api/chat-learning', require('./routes/chatLearning')(db));
+  app.use('/api/addons', require('./routes/addons')(db));
 
   // Stripe payments — tenant-facing endpoints mounted under /api/tenant (auth + tenant guard inside)
   const { tenantPaymentsRouter, webhookHandler } = require('./routes/payments');

@@ -3,6 +3,7 @@ const PDFDocument = require('pdfkit');
 const path = require('path');
 const fs = require('fs');
 const nodemailer = require('nodemailer');
+const { getAddonChargesForProperty, markDepositsCharged } = require('../lib/addonCharges');
 
 const FONT_REGULAR = path.join(__dirname, '../fonts/arial.ttf');
 const FONT_BOLD    = path.join(__dirname, '../fonts/arialbd.ttf');
@@ -367,10 +368,19 @@ module.exports = function(db) {
       // Per-property vat_exempt overrides issuer's VAT rate (e.g. residential
       // rentals are exempt under чл. 45 ЗДДС even if issuer is VAT-registered).
       const vat_rate  = prop.vat_exempt ? 0 : (issuer.vat_rate ? Number(issuer.vat_rate) : 0);
-      const total     = Number(prop['наем'] || 0);
-      const amount    = vat_rate > 0 ? Math.round(total / (1 + vat_rate / 100) * 100) / 100 : total;
-      const vat_amount = Math.round((total - amount) * 100) / 100;
+      const rent      = Number(prop['наем'] || 0);
+      const rent_net  = vat_rate > 0 ? Math.round(rent / (1 + vat_rate / 100) * 100) / 100 : rent;
+      const vat_amount = Math.round((rent - rent_net) * 100) / 100;
       const issued_at = new Date().toISOString().slice(0, 10);
+
+      // Addon charges за активни абонаменти на наемателя
+      const addons = getAddonChargesForProperty(db, property_id, month);
+      const addons_total = addons.total;
+      const total        = Math.round((rent + addons_total) * 100) / 100;
+      const amount       = rent_net;
+      const addonsNote   = addons.items.length
+        ? 'Включва: ' + addons.items.map(i => `${i.name} ${i.amount} EUR${i.kind === 'deposit' ? ' (депозит)' : '/мес'}`).join(', ')
+        : null;
 
       const inv = {
         invoice_number, type: 'invoice',
@@ -384,7 +394,8 @@ module.exports = function(db) {
         payment_type: payment_type || 'банков превод',
         tax_event_date: tax_event_date || issued_at,
         due_date:       due_date       || null,
-        issued_at, notes: notes || null,
+        issued_at,
+        notes: [notes, addonsNote].filter(Boolean).join(' | ') || null,
       };
 
       const { filepath, filename } = await generatePDF(inv, issuer);
@@ -393,17 +404,22 @@ module.exports = function(db) {
         INSERT INTO rent_invoices
           (invoice_number, type, property_id, month, tenant_name, recipient_name,
            recipient_address, recipient_eik, recipient_mol, amount, vat_rate, vat_amount,
-           total, payment_type, tax_event_date, due_date, issued_at, pdf_path, notes)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+           total, payment_type, tax_event_date, due_date, issued_at, pdf_path, notes,
+           addons_total, addons_json)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       `).run(
         invoice_number, 'invoice', property_id, month, inv.tenant_name,
         inv.recipient_name, inv.recipient_address, inv.recipient_eik, inv.recipient_mol,
         amount, vat_rate, vat_amount, total,
         inv.payment_type, inv.tax_event_date, inv.due_date,
-        issued_at, filename, inv.notes
+        issued_at, filename, inv.notes,
+        addons_total, addons.items.length ? JSON.stringify(addons.items) : null
       );
 
-      res.json({ ok: true, id: r.lastInsertRowid, invoice_number, filename });
+      // Маркирай удържаните депозити
+      markDepositsCharged(db, r.lastInsertRowid, addons.items);
+
+      res.json({ ok: true, id: r.lastInsertRowid, invoice_number, filename, addons_total });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }

@@ -98,6 +98,7 @@ module.exports = function(db) {
     const invs = db.prepare(`
       SELECT i.id, i.invoice_number, i.type, i.month, i.amount, i.vat_amount, i.total,
              i.due_date, i.issued_at, i.pdf_path, i.paid_at, i.payment_method,
+             i.addons_total, i.addons_json,
              p.адрес AS property_address,
              COALESCE(p.stripe_enabled, 1) AS stripe_enabled
       FROM rent_invoices i
@@ -108,6 +109,15 @@ module.exports = function(db) {
       )
       ORDER BY i.issued_at DESC, i.id DESC
     `).all(req.user.id);
+    // Parse addons_json for frontend
+    for (const inv of invs) {
+      if (inv.addons_json) {
+        try { inv.addons = JSON.parse(inv.addons_json); } catch { inv.addons = []; }
+      } else {
+        inv.addons = [];
+      }
+      delete inv.addons_json;
+    }
     res.json(invs);
   });
 
@@ -137,6 +147,79 @@ module.exports = function(db) {
         LIMIT 50
       `).all(req.user.id);
       res.json(rows.reverse());
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Addons (tenant side) ──────────────────────────────────────
+  // Helper: current property for tenant (от активен договор)
+  function tenantPropertyId(userId) {
+    const row = db.prepare(`
+      SELECT property_id FROM contracts
+      WHERE tenant_user_id=? AND status='active' AND property_id IS NOT NULL
+      ORDER BY created_at DESC LIMIT 1
+    `).get(userId);
+    return row ? row.property_id : null;
+  }
+
+  router.get('/addons/catalog', (req, res) => {
+    const rows = db.prepare(`
+      SELECT id, name, description, icon, monthly_price, deposit_amount, currency
+      FROM addon_services
+      WHERE active = 1
+      ORDER BY sort_order ASC, id ASC
+    `).all();
+    res.json(rows);
+  });
+
+  router.get('/addons/mine', (req, res) => {
+    const rows = db.prepare(`
+      SELECT ta.*,
+        s.name AS service_name, s.icon AS service_icon, s.description AS service_description,
+        s.monthly_price AS service_monthly_price, s.deposit_amount AS service_deposit_amount, s.currency
+      FROM tenant_addons ta
+      LEFT JOIN addon_services s ON s.id = ta.service_id
+      WHERE ta.user_id = ?
+      ORDER BY
+        CASE ta.status WHEN 'active' THEN 0 WHEN 'pending' THEN 1 WHEN 'stopped' THEN 2 WHEN 'rejected' THEN 3 ELSE 4 END,
+        ta.requested_at DESC
+    `).all(req.user.id);
+    res.json(rows);
+  });
+
+  router.post('/addons/request', (req, res) => {
+    try {
+      const { service_id } = req.body;
+      if (!service_id) return res.status(400).json({ error: 'service_id е задължително' });
+      const svc = db.prepare('SELECT * FROM addon_services WHERE id=? AND active=1').get(service_id);
+      if (!svc) return res.status(404).json({ error: 'Услугата не е намерена или е деактивирана' });
+      // Block duplicate pending/active requests for same service
+      const existing = db.prepare(`
+        SELECT id, status FROM tenant_addons
+        WHERE user_id=? AND service_id=? AND status IN ('pending','active')
+      `).get(req.user.id, service_id);
+      if (existing) return res.status(400).json({ error: `Вече имате ${existing.status === 'active' ? 'активна' : 'чакаща'} заявка за тази услуга` });
+
+      const propId = tenantPropertyId(req.user.id);
+      const r = db.prepare(`
+        INSERT INTO tenant_addons (user_id, service_id, property_id, status)
+        VALUES (?, ?, ?, 'pending')
+      `).run(req.user.id, service_id, propId);
+      res.json({ ok: true, id: r.lastInsertRowid });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Tenant може да отмени само pending заявка
+  router.delete('/addons/mine/:id', (req, res) => {
+    try {
+      const sub = db.prepare('SELECT * FROM tenant_addons WHERE id=? AND user_id=?').get(req.params.id, req.user.id);
+      if (!sub) return res.status(404).json({ error: 'Не е намерена' });
+      if (sub.status !== 'pending') return res.status(400).json({ error: 'Може да се отменя само чакаща заявка' });
+      db.prepare('DELETE FROM tenant_addons WHERE id=?').run(req.params.id);
+      res.json({ ok: true });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }

@@ -14,6 +14,7 @@ import Settings from './components/Settings'
 import Expenses from './components/Expenses'
 import Smart from './components/Smart'
 import Investments from './components/Investments'
+import Addons from './components/Addons'
 import TenantApp from './components/TenantApp'
 import ChatLearning from './components/ChatLearning'
 import { apiFetch } from './api'
@@ -28,6 +29,7 @@ const ALL_TABS = [
   { id: 'tenants',   label: '👥 Наематели',   roles: ['admin'] },
   { id: 'invoices',  label: '🧾 Фактури',     roles: ['admin', 'broker'] },
   { id: 'contracts', label: '📋 Договори',    roles: ['admin', 'broker'] },
+  { id: 'addons',    label: '🛍️ Услуги',     roles: ['admin'] },
   { id: 'loans',     label: 'Кредити',        roles: ['admin'] },
   { id: 'analysis',  label: 'Анализ',         roles: ['admin'] },
   { id: 'expenses',    label: '💸 Разходи',     roles: ['admin'] },
@@ -168,6 +170,7 @@ export default function App() {
         {validTab === 'tenants'   && <Tenants API={API} />}
         {validTab === 'invoices'  && <Invoices API={API} role={role} />}
         {validTab === 'contracts' && <Contracts API={API} role={role} />}
+        {validTab === 'addons'    && <Addons API={API} />}
         {validTab === 'loans'     && <Loans API={API} />}
         {validTab === 'history'   && <History API={API} />}
         {validTab === 'analysis'  && <Analysis API={API} />}

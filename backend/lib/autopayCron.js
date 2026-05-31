@@ -13,6 +13,7 @@
 
 const path = require('path');
 const fs = require('fs');
+const { getAddonChargesForProperty, markDepositsCharged } = require('./addonCharges');
 
 let stripeSingleton = null;
 function getStripe() {
@@ -56,10 +57,19 @@ function ensureInvoiceForMonth(db, property, month, generatePDF) {
   const issuer = getIssuer(db);
   const invoice_number = nextInvoiceNumber(db);
   const vat_rate  = property.vat_exempt ? 0 : (issuer.vat_rate ? Number(issuer.vat_rate) : 0);
-  const total     = Number(property['наем'] || 0);
-  const amount    = vat_rate > 0 ? Math.round(total / (1 + vat_rate / 100) * 100) / 100 : total;
-  const vat_amount = Math.round((total - amount) * 100) / 100;
+  const rent      = Number(property['наем'] || 0);
+  const rent_net  = vat_rate > 0 ? Math.round(rent / (1 + vat_rate / 100) * 100) / 100 : rent;
+  const vat_amount = Math.round((rent - rent_net) * 100) / 100;
   const issued_at = new Date().toISOString().slice(0, 10);
+
+  // Addons
+  const addons = getAddonChargesForProperty(db, property.id, month);
+  const addons_total = addons.total;
+  const total        = Math.round((rent + addons_total) * 100) / 100;
+  const amount       = rent_net;
+  const addonsNote   = addons.items.length
+    ? 'Включва: ' + addons.items.map(i => `${i.name} ${i.amount} EUR${i.kind === 'deposit' ? ' (депозит)' : '/мес'}`).join(', ')
+    : null;
 
   let recipient = {};
   try { recipient = JSON.parse(property.invoice_recipient || '{}'); } catch {}
@@ -75,7 +85,8 @@ function ensureInvoiceForMonth(db, property, month, generatePDF) {
     amount, vat_rate, vat_amount, total,
     payment_type: 'банков превод',
     tax_event_date: issued_at, due_date: null,
-    issued_at, notes: 'Автоматично издадена за SEPA автоплащане',
+    issued_at,
+    notes: ['Автоматично издадена за SEPA автоплащане', addonsNote].filter(Boolean).join(' | '),
   };
 
   if (generatePDF) {
@@ -87,15 +98,18 @@ function ensureInvoiceForMonth(db, property, month, generatePDF) {
     INSERT INTO rent_invoices
       (invoice_number, type, property_id, month, tenant_name, recipient_name,
        recipient_address, recipient_eik, recipient_mol, amount, vat_rate, vat_amount,
-       total, payment_type, tax_event_date, due_date, issued_at, notes)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+       total, payment_type, tax_event_date, due_date, issued_at, notes,
+       addons_total, addons_json)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
   `).run(
     invoice_number, 'invoice', property.id, month, draft.tenant_name,
     draft.recipient_name, draft.recipient_address, draft.recipient_eik, draft.recipient_mol,
     amount, vat_rate, vat_amount, total,
     draft.payment_type, draft.tax_event_date, draft.due_date,
-    issued_at, draft.notes
+    issued_at, draft.notes,
+    addons_total, addons.items.length ? JSON.stringify(addons.items) : null
   );
+  markDepositsCharged(db, r.lastInsertRowid, addons.items);
   return db.prepare('SELECT * FROM rent_invoices WHERE id=?').get(r.lastInsertRowid);
 }
 
