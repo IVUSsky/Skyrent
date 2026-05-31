@@ -218,9 +218,6 @@ function Chat() {
   const [messages, setMessages] = useState([])
   const [input, setInput]       = useState('')
   const [sending, setSending]   = useState(false)
-  const [escalating, setEscalating] = useState(false)
-  const [escalateOpen, setEscalateOpen] = useState(false)
-  const [escalateNote, setEscalateNote] = useState('')
   const [toast, setToast]       = useState(null)
   const bottomRef = useRef(null)
 
@@ -260,30 +257,6 @@ function Chat() {
       setToast({ type: 'error', text: 'Грешка: ' + e.message })
     } finally {
       setSending(false)
-    }
-  }
-
-  const escalate = async () => {
-    setEscalating(true)
-    try {
-      const r = await apiFetch(`${API}/api/tenant/chat/escalate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ note: escalateNote }),
-      })
-      const data = await r.json()
-      if (!r.ok) throw new Error(data.error || 'Грешка')
-      if (data.sent) {
-        setToast({ type: 'success', text: '✅ Изпратихме съобщение до управителя. Ще се свържат с теб скоро.' })
-        setEscalateOpen(false)
-        setEscalateNote('')
-      } else {
-        setToast({ type: 'error', text: 'Имейлът към управителя не може да бъде изпратен (липсва конфигурация).' })
-      }
-    } catch (e) {
-      setToast({ type: 'error', text: 'Грешка: ' + e.message })
-    } finally {
-      setEscalating(false)
     }
   }
 
@@ -329,30 +302,6 @@ function Chat() {
         <div ref={bottomRef} />
       </div>
 
-      {/* Escalate panel */}
-      {escalateOpen && (
-        <div className="mt-2 bg-amber-50 border border-amber-200 rounded-lg p-3">
-          <div className="text-sm font-semibold text-amber-900 mb-2">🙋 Свържи ме с управителя</div>
-          <textarea
-            value={escalateNote}
-            onChange={e => setEscalateNote(e.target.value)}
-            placeholder="Опиши накратко какво имаш нужда (по избор)…"
-            rows={2}
-            className="w-full text-sm border border-amber-300 rounded p-2 focus:outline-none focus:ring-2 focus:ring-amber-400 bg-white"
-          />
-          <div className="flex gap-2 mt-2 justify-end">
-            <button onClick={() => { setEscalateOpen(false); setEscalateNote('') }}
-              className="text-xs text-slate-600 hover:text-slate-800 px-3 py-1">
-              Отказ
-            </button>
-            <button onClick={escalate} disabled={escalating}
-              className="bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold px-3 py-1.5 rounded disabled:opacity-50">
-              {escalating ? 'Изпраща…' : 'Изпрати'}
-            </button>
-          </div>
-        </div>
-      )}
-
       {/* Input row */}
       <div className="mt-2 flex gap-2">
         <input
@@ -369,14 +318,6 @@ function Chat() {
           {sending ? '…' : '➤'}
         </button>
       </div>
-
-      {/* Escalate trigger */}
-      {!escalateOpen && (
-        <button onClick={() => setEscalateOpen(true)}
-          className="mt-2 text-xs text-amber-700 hover:text-amber-900 self-start">
-          🙋 Свържи ме с управителя
-        </button>
-      )}
     </div>
   )
 }
