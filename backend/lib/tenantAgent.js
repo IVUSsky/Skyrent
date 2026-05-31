@@ -198,7 +198,23 @@ const TOOLS = [
     description: 'Връща наличните начини за плащане на наема — IBAN на наемодателя и дали е достъпно картово плащане. Използвай когато наемателят пита как да плати.',
     input_schema: { type: 'object', properties: {}, required: [] },
   },
+  // Server-side tool — Anthropic runs the search and feeds results to the
+  // model inline. max_uses caps cost (~$10 per 1000 searches).
+  {
+    type: 'web_search_20250305',
+    name: 'web_search',
+    max_uses: 2,
+  },
 ];
+
+// Custom (client-executed) tools — used to distinguish from server tools
+// like web_search in the tool-use loop.
+const CUSTOM_TOOL_NAMES = new Set([
+  'get_unpaid_invoices',
+  'get_contract_details',
+  'get_deposit_info',
+  'get_payment_methods',
+]);
 
 // ── Tool runners — internal queries ───────────────────────────────────
 function runTool(db, userId, name) {
@@ -317,7 +333,14 @@ async function askAgent(db, userId, userMessage) {
 - Ако информацията наистина не е в контекста ИЛИ в данните от tools — кажи кратко какво нямаш и предложи КЪДЕ В ПОРТАЛА сам да я провери (раздел Фактури, Договор, Сметки, Снимки) или какво друго можеш да направиш с наличните данни.
 - Не измисляй данни. Не давай юридически или счетоводни съвети.
 - Когато наемателят пита за пари, дати, договор — ВИНАГИ извикай съответния tool, не разчитай на паметта.
-- Когато даваш суми, винаги слагай валутата.`,
+- Когато даваш суми, винаги слагай валутата.
+
+КОГА ДА ТЪРСИШ В НЕТА (web_search):
+- САМО когато наемателят пита как да оправи / използва / настрои конкретен уред И в контекста на апартамента имаш марка+модел (виж секциите УРЕДИ и ИНВЕНТАР).
+- Формирай заявката с марка+модел+проблема (напр. "Daikin FTXM35K error code A3 troubleshooting").
+- НЕ търси в нета за общи въпроси (политика, наем, договор, валута, време и т.н.).
+- НЕ търси ако нямаш конкретен модел — попитай наемателя кой е моделът, ако сам не го е написал.
+- След като намериш отговор, преведи го на езика на наемателя и дай 2-4 кратки конкретни стъпки, не дълъг текст.`,
     },
     {
       type: 'text',
@@ -350,7 +373,9 @@ async function askAgent(db, userId, userMessage) {
     if (response.stop_reason === 'tool_use') {
       const toolResults = [];
       for (const block of response.content) {
-        if (block.type === 'tool_use') {
+        // Only handle our custom tools — server tools (web_search) are
+        // executed by Anthropic and their results are already in the response.
+        if (block.type === 'tool_use' && CUSTOM_TOOL_NAMES.has(block.name)) {
           let result;
           try {
             result = runTool(db, userId, block.name);
@@ -364,6 +389,7 @@ async function askAgent(db, userId, userMessage) {
           });
         }
       }
+      if (toolResults.length === 0) break;   // nothing more we can do
       messages.push({ role: 'user', content: toolResults });
       continue;
     }
