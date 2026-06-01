@@ -386,6 +386,62 @@ module.exports = function(db) {
     });
   });
 
+  // POST /recategorize-by-keywords
+  // Ретро update на категория на съществуващи tx-те според keywords.
+  // Полезно когато имаш импортирани приход_друг/разход_друг които всъщност
+  // имат specific keyword (заплати, Trading 212, и т.н.) и са били импортирани
+  // преди keyword-овата логика да е добавена.
+  // Body: { rules: [{ keyword, target_category, operation?, target_scope? }, ...] }
+  router.post('/recategorize-by-keywords', (req, res) => {
+    const rules = (req.body && Array.isArray(req.body.rules)) ? req.body.rules : [];
+    if (!rules.length) return res.status(400).json({ error: 'rules array required' });
+
+    const results = [];
+    for (const rule of rules) {
+      const kw = (rule.keyword || '').toLowerCase();
+      const cat = rule.target_category;
+      const op = rule.operation;
+      const scope = rule.target_scope;
+      if (!kw || !cat) continue;
+      const conds = [`(LOWER(контрагент) LIKE ? OR LOWER(основание) LIKE ?)`];
+      const params = [scope || 'business', cat, `%${kw}%`, `%${kw}%`];
+      let sql = `UPDATE transactions SET scope = ?, категория = ? WHERE `;
+      if (op) { conds.push('operation = ?'); params.push(op); }
+      sql += conds.join(' AND ');
+      // scope param order: scope, cat, kw, kw, op?
+      if (!scope) {
+        // ако не е подаден scope → запази текущия
+        sql = sql.replace('scope = ?, ', '');
+        params.shift(); // премахни първия placeholder (scope)
+      }
+      const r = db.prepare(sql).run(...params);
+      results.push({ keyword: kw, target_category: cat, updated: r.changes });
+    }
+
+    // Rebuild personal_income за новите 'заплата'/'управление'/'sky_capital'/'наем' tx-те
+    const ktRows = db.prepare(`
+      SELECT t.* FROM transactions t
+      WHERE t.operation = 'Кт'
+        AND t.scope = 'personal'
+        AND t.категория IN ('заплата','управление','наем','sky_capital')
+        AND NOT EXISTS (SELECT 1 FROM personal_income pi WHERE pi.bank_tx_id = t.id)
+    `).all();
+    const insertPi = db.prepare(`INSERT INTO personal_income
+      (дата, тип, сума, валута, източник, бележка, bank_tx_id) VALUES (?,?,?,?,?,?,?)`);
+    let createdIncome = 0;
+    for (const t of ktRows) {
+      let pincomeType = 'друго';
+      if (t.категория === 'заплата')          pincomeType = 'заплата';
+      else if (t.категория === 'управление')  pincomeType = 'управление';
+      else if (t.категория === 'sky_capital') pincomeType = 'sky_capital';
+      insertPi.run(t.дата, pincomeType, t.сума, t.currency || 'EUR',
+                   t.контрагент || '', t.основание || '', t.id);
+      createdIncome++;
+    }
+
+    res.json({ rules_applied: results, personal_income_created: createdIncome });
+  });
+
   // POST /scope/by-keyword  { keyword, scope: 'personal'|'business', operation? }
   // Ретро-маркира всички transactions match-ващи keyword като желания scope.
   // Полезно когато не си посочил account scope при импорта.

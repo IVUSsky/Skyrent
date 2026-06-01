@@ -33,11 +33,13 @@ module.exports = function(db) {
     let scope = defaultScope;
 
     const isDeposit = ['депозит','deposit','гаранция','garantion'].some(kw => kontLower.includes(kw) || osnLower.includes(kw));
-    // Personal income keywords (Кт): заплата, договор за управление, ДУ, salary
-    const isSalary  = ['заплата','salary','net salary','net pay'].some(kw => kontLower.includes(kw) || osnLower.includes(kw));
+    // Personal income keywords (Кт): заплата(и), договор за управление, ДУ, salary
+    const isSalary  = ['заплата','заплати','salary','net salary','net pay'].some(kw => kontLower.includes(kw) || osnLower.includes(kw));
     const isMgmtFee = ['договор за управление','договор управление','управителски','дог. упр.','ду възнагр'].some(kw => osnLower.includes(kw) || kontLower.includes(kw));
     // Sky Capital — приходи от собствените имоти / прехвърления от Sky фирмата
     const isSkyCap  = ['sky capital','skycapital','sky кап','скай капитал','скай кап','skayrent','skyrent','sky-rent'].some(kw => kontLower.includes(kw) || osnLower.includes(kw));
+    // Инвестиции (Дт): Trading 212, brokers, crypto exchanges → category='инвестиция'
+    const isInvest  = ['trading 212','trading212','t212','revolut invest','binance','coinbase','kraken','interactive brokers','etoro','xtb','degiro'].some(kw => kontLower.includes(kw) || osnLower.includes(kw));
     // Personal expense keywords (Дт): супермаркети, аптеки, горива, ресторанти и т.н.
     const HOUSEHOLD_KW = [
       'kaufland','lidl','billa','fantastico','t-market','metro','praktis','praktiker','ikea','jumbo',
@@ -76,8 +78,10 @@ module.exports = function(db) {
     } else if (operation === 'Дт') {
       if (isDeposit) {
         категория = 'депозит_върнат';
+      } else if (isInvest) {
+        категория = 'инвестиция';
+        // scope остава defaultScope — инвестиция е capital flow, не personal expense
       } else if (isSkyCap) {
-        // Прехвърляне ОТ лична сметка КЪМ Sky Capital — capital injection
         категория = 'заем_sky';
         scope = 'personal';
       } else if (isHousehold) {
