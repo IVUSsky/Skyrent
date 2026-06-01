@@ -680,6 +680,102 @@ module.exports = function(db) {
     res.json(list);
   });
 
+  // GET /debug/duplicates — намира групи tx с еднаква дата+сума+operation
+  // но различен контрагент (потенциално duplicate-нати поради whitespace
+  // или вариации в име).
+  router.get('/debug/duplicates', (req, res) => {
+    const groups = db.prepare(`
+      SELECT дата, ROUND(сума,2) AS сума, operation, COUNT(*) AS брой,
+             GROUP_CONCAT(id) AS ids,
+             GROUP_CONCAT(контрагент, '|') AS contractors,
+             GROUP_CONCAT(session_id) AS sessions
+      FROM transactions
+      WHERE дата IS NOT NULL AND сума > 0
+      GROUP BY дата, ROUND(сума, 2), operation
+      HAVING COUNT(*) > 1
+      ORDER BY сума DESC, дата DESC
+      LIMIT 100
+    `).all();
+    res.json({
+      groups,
+      total_dup_groups: groups.length,
+      total_dup_tx: groups.reduce((s, g) => s + g.брой, 0),
+      total_dup_amount: groups.reduce((s, g) => s + g.сума * (g.брой - 1), 0),
+    });
+  });
+
+  // GET /debug/tx?amount=X&date=Y → tx-те match-ващи сумата/датата
+  router.get('/debug/tx', (req, res) => {
+    const conds = ['1=1'];
+    const params = [];
+    if (req.query.amount) {
+      conds.push('ABS(сума - ?) < 1');
+      params.push(Number(req.query.amount));
+    }
+    if (req.query.date) {
+      conds.push('дата = ?');
+      params.push(req.query.date);
+    }
+    if (req.query.contractor) {
+      conds.push('LOWER(контрагент) LIKE ?');
+      params.push(`%${req.query.contractor.toLowerCase()}%`);
+    }
+    const rows = db.prepare(`
+      SELECT id, session_id, дата, контрагент, основание, сума, operation,
+             категория, scope
+      FROM transactions
+      WHERE ${conds.join(' AND ')}
+      ORDER BY дата DESC, id DESC
+      LIMIT 100
+    `).all(...params);
+    res.json({ count: rows.length, transactions: rows });
+  });
+
+  // GET /debug/personal-income → списък личн доходи
+  router.get('/debug/personal-income', (req, res) => {
+    const rows = db.prepare(`
+      SELECT pi.id, pi.дата, pi.тип, pi.сума, pi.валута, pi.източник,
+             pi.bank_tx_id, t.контрагент AS tx_контрагент, t.session_id
+      FROM personal_income pi
+      LEFT JOIN transactions t ON t.id = pi.bank_tx_id
+      ORDER BY pi.дата DESC, pi.id DESC
+      LIMIT 100
+    `).all();
+    res.json({ count: rows.length, incomes: rows });
+  });
+
+  // POST /debug/delete-duplicates — изтрива дубликати (запазва най-стария id)
+  // Връща списък изтрити. Преди delete прави cleanup на свързаните
+  // personal_income/expense_invoices.
+  router.post('/debug/delete-duplicates', (req, res) => {
+    const groups = db.prepare(`
+      SELECT дата, ROUND(сума,2) AS сума, operation, COUNT(*) AS брой,
+             MIN(id) AS keep_id,
+             GROUP_CONCAT(id) AS all_ids,
+             GROUP_CONCAT(контрагент, '|') AS contractors
+      FROM transactions
+      WHERE дата IS NOT NULL AND сума > 0
+      GROUP BY дата, ROUND(сума, 2), operation
+      HAVING COUNT(*) > 1
+    `).all();
+
+    const deletedIds = [];
+    const doDelete = db.transaction(() => {
+      for (const g of groups) {
+        const ids = g.all_ids.split(',').map(Number);
+        const toDelete = ids.filter(id => id !== g.keep_id);
+        for (const id of toDelete) {
+          db.prepare('DELETE FROM personal_income WHERE bank_tx_id = ?').run(id);
+          db.prepare('DELETE FROM expense_invoices WHERE bank_tx_id = ?').run(id);
+          db.prepare('DELETE FROM transactions WHERE id = ?').run(id);
+          deletedIds.push(id);
+        }
+      }
+    });
+    doDelete();
+    res.json({ deleted_count: deletedIds.length, deleted_ids: deletedIds });
+  });
+
   return router;
 };
 
