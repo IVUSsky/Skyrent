@@ -15,17 +15,19 @@ module.exports = function(db) {
 
   router.post('/catalog', (req, res) => {
     try {
-      const { name, description, icon, monthly_price, deposit_amount, currency, active, sort_order } = req.body;
+      const { name, description, icon, monthly_price, deposit_amount, currency, active, sort_order, property_scope } = req.body;
       if (!name) return res.status(400).json({ error: 'name е задължително' });
+      const scope = ['all', 'residential', 'storage'].includes(property_scope) ? property_scope : 'all';
       const r = db.prepare(`
-        INSERT INTO addon_services (name, description, icon, monthly_price, deposit_amount, currency, active, sort_order)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO addon_services (name, description, icon, monthly_price, deposit_amount, currency, active, sort_order, property_scope)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         name, description || '', icon || '',
         Number(monthly_price) || 0, Number(deposit_amount) || 0,
         currency || 'EUR',
         active !== undefined ? (active ? 1 : 0) : 1,
-        Number(sort_order) || 0
+        Number(sort_order) || 0,
+        scope
       );
       res.json({ id: r.lastInsertRowid, ok: true });
     } catch (err) {
@@ -38,11 +40,14 @@ module.exports = function(db) {
       const cur = db.prepare('SELECT * FROM addon_services WHERE id=?').get(req.params.id);
       if (!cur) return res.status(404).json({ error: 'Услугата не е намерена' });
       const b = req.body;
+      const scope = b.property_scope !== undefined
+        ? (['all', 'residential', 'storage'].includes(b.property_scope) ? b.property_scope : cur.property_scope || 'all')
+        : (cur.property_scope || 'all');
       db.prepare(`
         UPDATE addon_services SET
           name = ?, description = ?, icon = ?,
           monthly_price = ?, deposit_amount = ?, currency = ?,
-          active = ?, sort_order = ?
+          active = ?, sort_order = ?, property_scope = ?
         WHERE id = ?
       `).run(
         b.name !== undefined ? b.name : cur.name,
@@ -53,6 +58,7 @@ module.exports = function(db) {
         b.currency || cur.currency,
         b.active !== undefined ? (b.active ? 1 : 0) : cur.active,
         b.sort_order !== undefined ? Number(b.sort_order) : cur.sort_order,
+        scope,
         req.params.id
       );
       res.json({ ok: true });

@@ -13,6 +13,8 @@ function getAddonChargesForProperty(db, propertyId, invoiceMonth) {
 
   if (!contract) return { items: [], total: 0 };
 
+  // Включваме само addons, които са прикачени към ТОЗИ имот, плюс legacy subs
+  // без property_id (преди мulti-property scope-овете).
   const subs = db.prepare(`
     SELECT ta.*,
       s.name AS service_name, s.icon AS service_icon,
@@ -23,7 +25,8 @@ function getAddonChargesForProperty(db, propertyId, invoiceMonth) {
     LEFT JOIN addon_services s ON s.id = ta.service_id
     WHERE ta.user_id = ?
       AND ta.status = 'active'
-  `).all(contract.tenant_user_id);
+      AND (ta.property_id = ? OR ta.property_id IS NULL)
+  `).all(contract.tenant_user_id, propertyId);
 
   const items = [];
   for (const sub of subs) {

@@ -10,7 +10,13 @@ const STATUS_LABEL = {
   rejected: { text: '✗ Отказана',  cls: 'bg-red-100 text-red-700 border-red-300' },
 }
 
-const EMPTY = { name: '', description: '', icon: '🛍️', monthly_price: '', deposit_amount: '', active: 1, sort_order: 0 }
+const EMPTY = { name: '', description: '', icon: '🛍️', monthly_price: '', deposit_amount: '', active: 1, sort_order: 0, property_scope: 'residential' }
+
+const SCOPE_LABEL = {
+  all:         { text: 'Всички имоти',  icon: '🏘️' },
+  residential: { text: 'Жилищни',        icon: '🏠' },
+  storage:     { text: 'Гараж / Мазе',   icon: '📦' },
+}
 
 export default function Addons({ API }) {
   const [tab, setTab] = useState('subs') // 'subs' | 'catalog'
@@ -38,6 +44,7 @@ export default function Addons({ API }) {
       name: svc.name, description: svc.description || '', icon: svc.icon || '🛍️',
       monthly_price: svc.monthly_price, deposit_amount: svc.deposit_amount,
       active: svc.active, sort_order: svc.sort_order || 0,
+      property_scope: svc.property_scope || 'all',
     })
   }
   const startNew = () => { setEditing('new'); setForm(EMPTY) }
@@ -52,6 +59,7 @@ export default function Addons({ API }) {
       deposit_amount: Number(form.deposit_amount) || 0,
       active: form.active ? 1 : 0,
       sort_order: Number(form.sort_order) || 0,
+      property_scope: form.property_scope || 'all',
     }
     const url = editing === 'new'
       ? `${API}/api/addons/catalog`
@@ -188,6 +196,20 @@ export default function Addons({ API }) {
                     className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm" />
                 </div>
                 <div className="md:col-span-3">
+                  <label className="text-xs text-gray-500 font-medium block mb-1">За кои имоти е достъпна</label>
+                  <div className="flex flex-wrap gap-2">
+                    {Object.entries(SCOPE_LABEL).map(([k, v]) => (
+                      <button key={k} type="button" onClick={() => setForm({ ...form, property_scope: k })}
+                        className={`text-xs px-3 py-1.5 rounded-full border ${form.property_scope === k ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}`}>
+                        {v.icon} {v.text}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="text-[11px] text-gray-500 mt-1">
+                    "Жилищни" = апартамент/студио/къща/офис · "Гараж/Мазе" = складови имоти
+                  </div>
+                </div>
+                <div className="md:col-span-3">
                   <label className="text-sm text-gray-700 flex items-center gap-2">
                     <input type="checkbox" checked={!!form.active} onChange={e => setForm({ ...form, active: e.target.checked ? 1 : 0 })}
                       className="w-4 h-4 accent-blue-600" />
@@ -206,7 +228,7 @@ export default function Addons({ API }) {
             <table className="min-w-full divide-y divide-gray-100 text-sm">
               <thead className="bg-gray-50">
                 <tr>
-                  {['', 'Услуга', 'Цена/мес', 'Депозит', 'Статус', 'Сорт.', 'Действия'].map(h => (
+                  {['', 'Услуга', 'За имоти', 'Цена/мес', 'Депозит', 'Статус', 'Сорт.', 'Действия'].map(h => (
                     <th key={h} className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase">{h}</th>
                   ))}
                 </tr>
@@ -218,6 +240,14 @@ export default function Addons({ API }) {
                     <td className="px-3 py-2">
                       <div className="font-medium text-gray-800">{svc.name}</div>
                       {svc.description && <div className="text-xs text-gray-500">{svc.description}</div>}
+                    </td>
+                    <td className="px-3 py-2 whitespace-nowrap text-xs">
+                      {(() => {
+                        const sc = svc.property_scope || 'all'
+                        const lab = SCOPE_LABEL[sc] || SCOPE_LABEL.all
+                        const cls = sc === 'storage' ? 'bg-orange-50 text-orange-700 border-orange-200' : sc === 'residential' ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-gray-50 text-gray-600 border-gray-200'
+                        return <span className={`px-2 py-0.5 rounded-full border ${cls}`}>{lab.icon} {lab.text}</span>
+                      })()}
                     </td>
                     <td className="px-3 py-2 text-right font-medium text-blue-700 whitespace-nowrap">{fmt(svc.monthly_price)} €</td>
                     <td className="px-3 py-2 text-right text-orange-700 whitespace-nowrap">{svc.deposit_amount > 0 ? `${fmt(svc.deposit_amount)} €` : '—'}</td>
@@ -234,7 +264,7 @@ export default function Addons({ API }) {
                   </tr>
                 ))}
                 {catalog.length === 0 && (
-                  <tr><td colSpan={7} className="text-center text-gray-400 py-8">Няма дефинирани услуги.</td></tr>
+                  <tr><td colSpan={8} className="text-center text-gray-400 py-8">Няма дефинирани услуги.</td></tr>
                 )}
               </tbody>
             </table>

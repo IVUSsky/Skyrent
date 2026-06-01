@@ -5,6 +5,7 @@ const bcrypt  = require('bcryptjs');
 const multer  = require('multer');
 const { askAgent } = require('../lib/tenantAgent');
 const { notifyAdmin } = require('../lib/notify');
+const { getPropertyScope } = require('../lib/propertyScope');
 const supportMod = require('./support');
 
 const DATA_DIR     = process.env.DATA_DIR || path.join(__dirname, '../data');
@@ -181,14 +182,46 @@ module.exports = function(db) {
     return row ? row.property_id : null;
   }
 
-  router.get('/addons/catalog', (req, res) => {
+  // Връща Set от scope-ове за всички активни договори на наемателя.
+  function tenantScopes(userId) {
     const rows = db.prepare(`
-      SELECT id, name, description, icon, monthly_price, deposit_amount, currency
+      SELECT p.тип FROM contracts c
+      LEFT JOIN properties p ON p.id = c.property_id
+      WHERE c.tenant_user_id=? AND c.status='active' AND c.property_id IS NOT NULL
+    `).all(userId);
+    const set = new Set();
+    for (const r of rows) set.add(getPropertyScope(r['тип']));
+    if (set.size === 0) set.add('residential'); // безопасен default
+    return set;
+  }
+
+  // Връща property_id който отговаря на даден scope (за automatic attach при заявка)
+  function tenantPropertyForScope(userId, scope) {
+    const rows = db.prepare(`
+      SELECT c.property_id, p.тип FROM contracts c
+      LEFT JOIN properties p ON p.id = c.property_id
+      WHERE c.tenant_user_id=? AND c.status='active' AND c.property_id IS NOT NULL
+      ORDER BY c.created_at ASC
+    `).all(userId);
+    for (const r of rows) {
+      if (getPropertyScope(r['тип']) === scope) return r.property_id;
+    }
+    return rows[0]?.property_id || null;
+  }
+
+  router.get('/addons/catalog', (req, res) => {
+    const scopes = tenantScopes(req.user.id);
+    const all = db.prepare(`
+      SELECT id, name, description, icon, monthly_price, deposit_amount, currency, property_scope
       FROM addon_services
       WHERE active = 1
       ORDER BY sort_order ASC, id ASC
     `).all();
-    res.json(rows);
+    const filtered = all.filter(s => {
+      const sc = s.property_scope || 'all';
+      return sc === 'all' || scopes.has(sc);
+    });
+    res.json(filtered);
   });
 
   router.get('/addons/mine', (req, res) => {
@@ -212,6 +245,14 @@ module.exports = function(db) {
       if (!service_id) return res.status(400).json({ error: 'service_id е задължително' });
       const svc = db.prepare('SELECT * FROM addon_services WHERE id=? AND active=1').get(service_id);
       if (!svc) return res.status(404).json({ error: 'Услугата не е намерена или е деактивирана' });
+
+      // Scope check — услугата трябва да е съвместима поне с един от scope-овете на наемателя
+      const scope = svc.property_scope || 'all';
+      const scopes = tenantScopes(req.user.id);
+      if (scope !== 'all' && !scopes.has(scope)) {
+        return res.status(400).json({ error: 'Услугата не е достъпна за вашия имот' });
+      }
+
       // Block duplicate pending/active requests for same service
       const existing = db.prepare(`
         SELECT id, status FROM tenant_addons
@@ -219,7 +260,10 @@ module.exports = function(db) {
       `).get(req.user.id, service_id);
       if (existing) return res.status(400).json({ error: `Вече имате ${existing.status === 'active' ? 'активна' : 'чакаща'} заявка за тази услуга` });
 
-      const propId = tenantPropertyId(req.user.id);
+      // Прикачи към имота с правилния scope (или най-стария при 'all')
+      const propId = scope === 'all'
+        ? tenantPropertyId(req.user.id)
+        : tenantPropertyForScope(req.user.id, scope);
       const r = db.prepare(`
         INSERT INTO tenant_addons (user_id, service_id, property_id, status)
         VALUES (?, ?, ?, 'pending')

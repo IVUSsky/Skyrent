@@ -329,6 +329,13 @@ async function main() {
     sort_order INTEGER DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`);
+  try { db.exec("ALTER TABLE addon_services ADD COLUMN property_scope TEXT DEFAULT 'all'"); console.log('Migration: added addon_services.property_scope'); } catch(_) {}
+  // Backfill за съществуващите услуги: Стелаж → storage, Интернет/ТВ/уреди → residential
+  db.exec("UPDATE addon_services SET property_scope = 'storage' WHERE property_scope IS NULL AND name = 'Стелаж'");
+  db.exec("UPDATE addon_services SET property_scope = 'residential' WHERE property_scope IS NULL OR property_scope = ''");
+  db.exec("UPDATE addon_services SET property_scope = 'residential' WHERE property_scope = 'all' AND name IN ('Интернет','Телевизор','Кафемашина','Прахосмукачка','Робот-прахосмукачка','Микровълнова','PlayStation 5')");
+  db.exec("UPDATE addon_services SET property_scope = 'storage' WHERE name = 'Стелаж'");
+
   db.exec(`CREATE TABLE IF NOT EXISTS tenant_addons (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL,
@@ -347,34 +354,35 @@ async function main() {
   const addonCount = db.prepare('SELECT COUNT(*) as cnt FROM addon_services').get();
   if (addonCount.cnt === 0) {
     const ins = db.prepare(`
-      INSERT INTO addon_services (name, description, icon, monthly_price, deposit_amount, sort_order)
-      VALUES (?, ?, ?, ?, ?, ?)
+      INSERT INTO addon_services (name, description, icon, monthly_price, deposit_amount, sort_order, property_scope)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
     `);
     const seed = [
-      ['Интернет', 'Wi-Fi 300 Mbps, фиксиран месечен абонамент', '🌐', 15, 0, 10],
-      ['Телевизор', 'Телевизор с дистанционно', '📺', 12, 0, 15],
-      ['Кафемашина', 'Кафемашина за еспресо', '☕', 10, 0, 20],
-      ['Прахосмукачка', 'Безжична прахосмукачка', '🧹', 8, 0, 30],
-      ['Робот-прахосмукачка', 'Роботизирана прахосмукачка', '🤖', 15, 50, 40],
-      ['Микровълнова', 'Микровълнова фурна', '🍱', 5, 0, 50],
-      ['PlayStation 5', 'Конзола с контролер и 2 игри', '🎮', 30, 200, 60],
+      ['Интернет', 'Wi-Fi 300 Mbps, фиксиран месечен абонамент', '🌐', 15, 0, 10, 'residential'],
+      ['Телевизор', 'Телевизор с дистанционно', '📺', 12, 0, 15, 'residential'],
+      ['Кафемашина', 'Кафемашина за еспресо', '☕', 10, 0, 20, 'residential'],
+      ['Прахосмукачка', 'Безжична прахосмукачка', '🧹', 8, 0, 30, 'residential'],
+      ['Робот-прахосмукачка', 'Роботизирана прахосмукачка', '🤖', 15, 50, 40, 'residential'],
+      ['Микровълнова', 'Микровълнова фурна', '🍱', 5, 0, 50, 'residential'],
+      ['PlayStation 5', 'Конзола с контролер и 2 игри', '🎮', 30, 200, 60, 'residential'],
+      ['Стелаж', 'Метален стелаж за гараж/мазе (за съхранение на вещи)', '📦', 5, 0, 70, 'storage'],
     ];
     for (const s of seed) ins.run(...s);
     console.log('Seeded addon_services catalog with', seed.length, 'items');
   }
   // Idempotent: ако базата вече е seed-ната, гарантирай че следните са добавени
-  const ensureAddon = (name, description, icon, monthly_price, deposit_amount, sort_order) => {
+  const ensureAddon = (name, description, icon, monthly_price, deposit_amount, sort_order, property_scope) => {
     const exists = db.prepare('SELECT 1 FROM addon_services WHERE name = ?').get(name);
     if (!exists) {
       db.prepare(`
-        INSERT INTO addon_services (name, description, icon, monthly_price, deposit_amount, sort_order, active)
-        VALUES (?, ?, ?, ?, ?, ?, 1)
-      `).run(name, description, icon, monthly_price, deposit_amount, sort_order);
+        INSERT INTO addon_services (name, description, icon, monthly_price, deposit_amount, sort_order, active, property_scope)
+        VALUES (?, ?, ?, ?, ?, ?, 1, ?)
+      `).run(name, description, icon, monthly_price, deposit_amount, sort_order, property_scope || 'all');
       console.log(`Added ${name} to addon catalog`);
     }
   };
-  ensureAddon('Телевизор', 'Телевизор с дистанционно',                                     '📺', 12, 0,  15);
-  ensureAddon('Стелаж',    'Метален стелаж за гараж/мазе (за съхранение на вещи)',         '📦',  5, 0,  70);
+  ensureAddon('Телевизор', 'Телевизор с дистанционно',                              '📺', 12, 0,  15, 'residential');
+  ensureAddon('Стелаж',    'Метален стелаж за гараж/мазе (за съхранение на вещи)',  '📦',  5, 0,  70, 'storage');
   console.log('addon_services + tenant_addons ready');
 
   // Support tickets + messages + attachments + notifications
