@@ -74,7 +74,7 @@ module.exports = function(db) {
         категория = 'друго_лично';
         scope = 'personal';
       } else {
-        const isLoan    = ['прокредит','unicredit','уникредит','пощенска','вноска','кредит'].some(kw => kontLower.includes(kw) || osnLower.includes(kw));
+        const isLoan    = ['прокредит','unicredit','уникредит','пощенска','вноска','кредит','погасяване','погасяване главница','погасяване лихва'].some(kw => kontLower.includes(kw) || osnLower.includes(kw));
         const isExpense = ['такса','застраховка','счетоводство','поддръжка','нотариус'].some(kw => kontLower.includes(kw) || osnLower.includes(kw));
         if (isLoan)         категория = 'вноска';
         else if (isExpense) категория = 'разход';
@@ -85,6 +85,61 @@ module.exports = function(db) {
     }
 
     return { категория, property_id, scope };
+  }
+
+  // ── Helper: enrich a raw transaction (categorize, apply rules, set currency, etc.)
+  // rawTx must have: дата, контрагент, контрагент_iban, контрагент_bic,
+  //                  основание, сума, operation
+  // Returns full transaction or null to skip.
+  function enrichTransaction(rawTx, tenantMap, rules, unknownSet, unknownTenants) {
+    let { дата, контрагент, контрагент_iban = '', контрагент_bic = '',
+          основание = '', сума = 0, operation = '' } = rawTx;
+    if (!дата) return null;
+
+    // POS merchant fallback if no counterparty given
+    if (!контрагент && operation === 'Дт') {
+      контрагент = parsePosName(основание) || '';
+    }
+
+    const kontLower = (контрагент || '').toLowerCase();
+    const osnLower  = (основание  || '').toLowerCase();
+
+    // Tenant map lookup
+    let property_id_from_map = null;
+    for (const [key, pid] of Object.entries(tenantMap)) {
+      if (kontLower.includes(key) || osnLower.includes(key)) {
+        property_id_from_map = pid;
+        break;
+      }
+    }
+
+    let { категория, property_id, scope } = categorizeRow({ operation, контрагент, основание, property_id_from_map });
+
+    if (категория === 'наем' && !property_id_from_map && контрагент && !unknownSet.has(контрагент)) {
+      unknownSet.add(контрагент);
+      unknownTenants.push({ контрагент, основание });
+    }
+
+    let rule_id = null, validated = 1;
+    for (const rule of rules) {
+      const pat = rule.pattern.toLowerCase();
+      if (kontLower.includes(pat) || osnLower.includes(pat)) {
+        категория = rule.категория;
+        if (rule.property_id) property_id = rule.property_id;
+        if (rule.scope) scope = rule.scope;
+        rule_id = rule.id;
+        validated = 0;
+        break;
+      }
+    }
+
+    const currency = rawTx.currency || (дата >= '2026-01-01' ? 'EUR' : 'BGN');
+    const месец    = rawTx.месец || дата.slice(0, 7);
+
+    return {
+      дата, контрагент, контрагент_iban, контрагент_bic, основание,
+      сума, operation, категория, property_id, месец, rule_id, validated, currency, scope,
+    };
   }
 
   // ── Helper: parse one XLSX buffer ─────────────────────────
@@ -113,89 +168,74 @@ module.exports = function(db) {
       if (!dateRaw) continue;
 
       // Parse date
-      let дата = '', месец = '';
+      let дата = '';
       const dm = dateRaw.match(/(\d{2})\.(\d{2})\.(\d{4})/);
       if (dm) {
-        дата  = `${dm[3]}-${dm[2]}-${dm[1]}`;
-        месец = `${dm[3]}-${dm[2]}`;
+        дата = `${dm[3]}-${dm[2]}-${dm[1]}`;
       } else {
         try {
           const d = new Date(dateRaw);
-          if (!isNaN(d)) { дата = d.toISOString().slice(0, 10); месец = дата.slice(0, 7); }
+          if (!isNaN(d)) дата = d.toISOString().slice(0, 10);
         } catch {}
       }
+      if (!дата) continue;
 
-      // Parse amount
       const суmaRaw = row[4];
-      let сума = typeof суmaRaw === 'number'
+      const сума = typeof суmaRaw === 'number'
         ? суmaRaw
         : parseFloat(String(суmaRaw || '').replace(/\s/g, '').replace(',', '.')) || 0;
 
-      const operation         = String(row[7]  || '').trim();
-      const контрагент_raw    = String(row[10] || '').trim();
-      const контрагент_iban   = String(row[11] || '').replace(/\s/g,'').toUpperCase();
-      const контрагент_bic    = String(row[9]  || '').trim().toUpperCase();
-      const основание         = String(row[12] || '').trim();
-      // For POS payments (no counterparty name), parse merchant from description
-      const контрагент        = контрагент_raw || (operation === 'Дт' ? parsePosName(основание) || '' : '');
-      const kontLower   = контрагент.toLowerCase();
-      const osnLower    = основание.toLowerCase();
-
-      // Tenant map lookup
-      let property_id_from_map = null;
-      for (const [key, pid] of Object.entries(tenantMap)) {
-        if (kontLower.includes(key) || osnLower.includes(key)) {
-          property_id_from_map = pid;
-          break;
-        }
-      }
-
-      // Auto-categorize (built-in logic)
-      let { категория, property_id, scope } = categorizeRow({ operation, контрагент, основание, property_id_from_map });
-
-      // Track unknown tenants
-      if (категория === 'наем' && !property_id_from_map && контрагент && !unknownSet.has(контрагент)) {
-        unknownSet.add(контрагент);
-        unknownTenants.push({ контрагент, основание });
-      }
-
-      // ── Apply custom rules (override built-in) ─────────────
-      let rule_id   = null;
-      let validated = 1; // manual/built-in = pre-validated
-      for (const rule of rules) {
-        const pat = rule.pattern.toLowerCase();
-        if (kontLower.includes(pat) || osnLower.includes(pat)) {
-          категория  = rule.категория;
-          if (rule.property_id) property_id = rule.property_id;
-          if (rule.scope) scope = rule.scope;
-          rule_id   = rule.id;
-          validated = 0; // rule-matched → needs user validation
-          break;
-        }
-      }
-
-      // Currency: BGN before 2026-01-01, EUR from 2026-01-01 onward
-      const currency = дата >= '2026-01-01' ? 'EUR' : 'BGN';
-
-      transactions.push({ дата, контрагент, контрагент_iban, контрагент_bic, основание, сума, operation, категория, property_id, месец, rule_id, validated, currency, scope });
+      const tx = enrichTransaction({
+        дата,
+        контрагент:      String(row[10] || '').trim(),
+        контрагент_iban: String(row[11] || '').replace(/\s/g,'').toUpperCase(),
+        контрагент_bic:  String(row[9]  || '').trim().toUpperCase(),
+        основание:       String(row[12] || '').trim(),
+        сума,
+        operation:       String(row[7]  || '').trim(),
+      }, tenantMap, rules, unknownSet, unknownTenants);
+      if (tx) transactions.push(tx);
     }
 
     return { transactions, unknownTenants };
   }
 
-  // ── POST /parse (single file) ──────────────────────────────
-  router.post('/parse', upload.single('file'), (req, res) => {
+  // ── Helper: parse one PDF buffer (ProBanking) ─────────────
+  async function parsePdfBuffer(buffer, tenantMap, rules) {
+    const { parseProBankingPdf } = require('../lib/probankingPdfParser');
+    const { transactions: rawTx } = await parseProBankingPdf(buffer);
+
+    const transactions   = [];
+    const unknownTenants = [];
+    const unknownSet     = new Set();
+    for (const r of rawTx) {
+      const tx = enrichTransaction(r, tenantMap, rules, unknownSet, unknownTenants);
+      if (tx) transactions.push(tx);
+    }
+    return { transactions, unknownTenants };
+  }
+
+  // Dispatch by file extension/mime.
+  async function parseFile(file, tenantMap, rules) {
+    const name = (file.originalname || '').toLowerCase();
+    const mime = (file.mimetype || '').toLowerCase();
+    const isPdf = name.endsWith('.pdf') || mime === 'application/pdf';
+    if (isPdf) return await parsePdfBuffer(file.buffer, tenantMap, rules);
+    return parseBuffer(file.buffer, tenantMap, rules);
+  }
+
+  // ── POST /parse (single file: xlsx или pdf) ────────────────
+  router.post('/parse', upload.single('file'), async (req, res) => {
     try {
       if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
       const tenantMapRow = db.prepare("SELECT value FROM settings WHERE key='tenant_map'").get();
       let tenantMap = {};
       if (tenantMapRow) { try { tenantMap = JSON.parse(tenantMapRow.value); } catch {} }
-      // Normalize to lowercase keys
       const normMap = Object.fromEntries(Object.entries(tenantMap).map(([k,v]) => [k.toLowerCase(), v]));
 
       const rules = loadRules();
-      let { transactions, unknownTenants } = parseBuffer(req.file.buffer, normMap, rules);
+      let { transactions, unknownTenants } = await parseFile(req.file, normMap, rules);
       const dupCheck = db.prepare(
         'SELECT id FROM transactions WHERE дата=? AND ROUND(сума,2)=ROUND(?,2) AND operation=? AND контрагент=?'
       );
@@ -211,8 +251,8 @@ module.exports = function(db) {
     }
   });
 
-  // ── POST /parse-multi (multiple files) ────────────────────
-  router.post('/parse-multi', upload.array('files', 24), (req, res) => {
+  // ── POST /parse-multi (xlsx + pdf смесено) ─────────────────
+  router.post('/parse-multi', upload.array('files', 24), async (req, res) => {
     try {
       if (!req.files || !req.files.length) return res.status(400).json({ error: 'No files uploaded' });
 
@@ -228,7 +268,7 @@ module.exports = function(db) {
 
       for (const file of req.files) {
         try {
-          const { transactions, unknownTenants } = parseBuffer(file.buffer, normMap, rules);
+          const { transactions, unknownTenants } = await parseFile(file, normMap, rules);
           allTx      = allTx.concat(transactions);
           allUnknown = allUnknown.concat(unknownTenants.filter(u => !allUnknown.some(x => x.контрагент === u.контрагент)));
         } catch(e) {

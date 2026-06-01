@@ -845,8 +845,8 @@ function ImportTab({ API, onSaved }) {
   }
 
   const parseFiles = useCallback((files) => {
-    const xlsFiles = Array.from(files).filter(f => f.name.endsWith('.xlsx') || f.name.endsWith('.xls'))
-    if (!xlsFiles.length) { setParseError('Моля изберете .xlsx файлове'); return }
+    const xlsFiles = Array.from(files).filter(f => /\.(xlsx|xls|pdf)$/i.test(f.name))
+    if (!xlsFiles.length) { setParseError('Моля изберете .xlsx или .pdf файлове'); return }
 
     setParsing(true)
     setParseError(null)
@@ -1065,13 +1065,13 @@ function ImportTab({ API, onSaved }) {
           }`}>
           <div className="text-5xl mb-3">📂</div>
           <div className="text-lg font-semibold text-gray-700 mb-1">
-            {parsing ? 'Обработва се...' : 'Провлачете .xlsx файлове тук'}
+            {parsing ? 'Обработва се...' : 'Провлачете .xlsx или .pdf файлове тук'}
           </div>
           <div className="text-sm text-gray-400 mb-2">или кликнете за да изберете</div>
           <div className="text-xs text-gray-400 bg-white/60 inline-block px-3 py-1 rounded-full">
-            Можете да изберете няколко файла наведнъж — всички ще се обработят заедно
+            ProBanking: xlsx или PDF извлечение. Можете да изберете няколко файла наведнъж.
           </div>
-          <input ref={fileInputRef} type="file" accept=".xlsx,.xls" multiple onChange={e => parseFiles(e.target.files)} className="hidden"/>
+          <input ref={fileInputRef} type="file" accept=".xlsx,.xls,.pdf" multiple onChange={e => parseFiles(e.target.files)} className="hidden"/>
         </div>
       )}
 
