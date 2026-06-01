@@ -352,6 +352,7 @@ async function main() {
     `);
     const seed = [
       ['Интернет', 'Wi-Fi 300 Mbps, фиксиран месечен абонамент', '🌐', 15, 0, 10],
+      ['Телевизор', 'Телевизор с дистанционно', '📺', 12, 0, 15],
       ['Кафемашина', 'Кафемашина за еспресо', '☕', 10, 0, 20],
       ['Прахосмукачка', 'Безжична прахосмукачка', '🧹', 8, 0, 30],
       ['Робот-прахосмукачка', 'Роботизирана прахосмукачка', '🤖', 15, 50, 40],
@@ -360,6 +361,15 @@ async function main() {
     ];
     for (const s of seed) ins.run(...s);
     console.log('Seeded addon_services catalog with', seed.length, 'items');
+  }
+  // Idempotent: ако базата вече е seed-ната, гарантирай че Телевизор е добавен
+  const tvExists = db.prepare("SELECT 1 FROM addon_services WHERE name = 'Телевизор'").get();
+  if (!tvExists) {
+    db.prepare(`
+      INSERT INTO addon_services (name, description, icon, monthly_price, deposit_amount, sort_order, active)
+      VALUES (?, ?, ?, ?, ?, ?, 1)
+    `).run('Телевизор', 'Телевизор с дистанционно', '📺', 12, 0, 15);
+    console.log('Added Телевизор to addon catalog');
   }
   console.log('addon_services + tenant_addons ready');
 
