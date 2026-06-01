@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import { apiFetch } from '../api'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine, PieChart, Pie, Cell, Legend } from 'recharts'
+import BulgarDashboard from './BulgarDashboard'
 
 // Платината ще се добави по-късно (раздкоментирай реда).
 const METALS = [
@@ -28,6 +29,10 @@ export default function Investments({ API }) {
             className={`px-3 py-1.5 text-sm rounded-lg border font-medium ${asset === 't212' ? 'bg-blue-600 text-white border-transparent' : 'bg-white text-gray-600 border-gray-300'}`}>
             🏦 Trading 212
           </button>
+          <button onClick={() => setAsset('bulgar')}
+            className={`px-3 py-1.5 text-sm rounded-lg border font-medium ${asset === 'bulgar' ? 'bg-purple-600 text-white border-transparent' : 'bg-white text-gray-600 border-gray-300'}`}>
+            💼 Bulgar Capital
+          </button>
           <button onClick={() => setAsset('wealth')}
             className={`px-3 py-1.5 text-sm rounded-lg border font-medium ${asset === 'wealth' ? 'bg-emerald-600 text-white border-transparent' : 'bg-white text-gray-600 border-gray-300'}`}>
             💎 Нетно богатство
@@ -35,6 +40,7 @@ export default function Investments({ API }) {
         </div>
       </div>
       {asset === 't212'   ? <BrokerDashboard API={API} /> :
+       asset === 'bulgar' ? <BulgarDashboard API={API} /> :
        asset === 'wealth' ? <WealthDashboard API={API} /> :
        <MetalDashboard API={API} metal={asset} metalConfig={metalConfig} />}
     </div>

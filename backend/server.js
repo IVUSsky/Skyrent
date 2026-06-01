@@ -226,6 +226,7 @@ async function main() {
     разпределение_json TEXT
   )`);
   try { db.exec("CREATE INDEX IF NOT EXISTS idx_wealth_snapshots_date ON wealth_snapshots(дата DESC)"); } catch(_) {}
+  try { db.exec("ALTER TABLE wealth_snapshots ADD COLUMN болгар REAL DEFAULT 0"); console.log('Migration: added wealth_snapshots.болгар'); } catch(_) {}
 
   // Net Wealth goals — точкови цели с дата (например "€500K до 31.12.2026")
   db.exec(`CREATE TABLE IF NOT EXISTS wealth_goals (
@@ -238,6 +239,37 @@ async function main() {
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`);
   console.log('investments tables ready (multi-metal + t212_snapshots + wealth_snapshots + wealth_goals)');
+
+  // ── Bulgar Capital (дялов фонд с тримесечни дивиденти) ─────────
+  // Позиция = един влог с фиксиран % годишна доходност, период на дивиденти.
+  // Дивидентите се изплащат в кеш и влизат в personal_income (тип 'лихва_болгар').
+  db.exec(`CREATE TABLE IF NOT EXISTS bulgar_positions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    име TEXT NOT NULL,
+    дата_влог DATE NOT NULL,
+    главница_orig REAL NOT NULL,
+    валута_orig TEXT DEFAULT 'BGN',
+    главница_eur REAL NOT NULL,
+    лихва_pct REAL,
+    период_месеци INTEGER DEFAULT 3,
+    бележка TEXT,
+    активна INTEGER DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+  db.exec(`CREATE TABLE IF NOT EXISTS bulgar_transactions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    position_id INTEGER REFERENCES bulgar_positions(id) ON DELETE CASCADE,
+    дата DATE NOT NULL,
+    тип TEXT NOT NULL,
+    сума REAL NOT NULL,
+    валута TEXT DEFAULT 'EUR',
+    bank_tx_id INTEGER,
+    бележка TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+  try { db.exec("CREATE INDEX IF NOT EXISTS idx_bulgar_tx_pos ON bulgar_transactions(position_id, дата DESC)"); } catch(_) {}
+  try { db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_bulgar_tx_bank ON bulgar_transactions(bank_tx_id) WHERE bank_tx_id IS NOT NULL"); } catch(_) {}
+  console.log('bulgar_capital tables ready');
 
   // ── Personal income (заплата / договор управление / дивидент / лихва / друго)
   // Източник: ProBanking импорт (link чрез bank_tx_id), друга банка (manual),
@@ -805,6 +837,7 @@ async function main() {
   app.use('/api/smart', require('./routes/smart')(db));
   app.use('/api/inventory', require('./routes/inventory')(db));
   app.use('/api/investments', require('./routes/investments')(db));
+  app.use('/api/investments/bulgar', require('./routes/bulgar')(db));
   app.use('/api/personal', require('./routes/personal')(db));
   app.use('/api/tenant', require('./routes/tenant')(db));
   app.use('/api/chat-learning', require('./routes/chatLearning')(db));

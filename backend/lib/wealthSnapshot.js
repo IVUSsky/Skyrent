@@ -50,6 +50,7 @@ async function computeWealth(db) {
 
   const gold = metalSnapshot(db, 'gold');
   const silver = metalSnapshot(db, 'silver');
+  const bulgar = bulgarSnapshot(db);
 
   // T212: live; fall back to last t212_snapshot
   let t212Data = null;
@@ -94,12 +95,14 @@ async function computeWealth(db) {
 
   const metals_value = (gold.текуща_стойност || 0) + (silver.текуща_стойност || 0);
   const t212_value = t212Data?.обща_стойност || 0;
-  const total_wealth = property_equity + metals_value + t212_value;
+  const bulgar_value = bulgar.текуща_стойност || 0;
+  const total_wealth = property_equity + metals_value + t212_value + bulgar_value;
   const allocation = total_wealth > 0 ? {
     имоти_equity: Number(((property_equity / total_wealth) * 100).toFixed(2)),
     злато:        Number((((gold.текуща_стойност || 0) / total_wealth) * 100).toFixed(2)),
     сребро:       Number((((silver.текуща_стойност || 0) / total_wealth) * 100).toFixed(2)),
     t212:         Number(((t212_value / total_wealth) * 100).toFixed(2)),
+    болгар:       Number(((bulgar_value / total_wealth) * 100).toFixed(2)),
   } : null;
 
   return {
@@ -116,7 +119,40 @@ async function computeWealth(db) {
     злато: { метал: 'gold', ...gold },
     сребро: { метал: 'silver', ...silver },
     t212: t212Data,
+    болгар: bulgar,
     изчислено_на: new Date().toISOString(),
+  };
+}
+
+// Bulgar Capital snapshot — sum of all active positions (principal + accrued).
+function bulgarSnapshot(db) {
+  const positions = db.prepare('SELECT * FROM bulgar_positions WHERE активна=1').all();
+  if (!positions.length) return { позиции: 0, главница_eur: 0, текуща_стойност: 0 };
+  const BGN_EUR_RATE = 1.95583;
+  const toEur = (a, c) => c === 'BGN' ? a / BGN_EUR_RATE : a;
+  let totalCurrent = 0, totalPrincipal = 0;
+  for (const pos of positions) {
+    const txs = db.prepare('SELECT * FROM bulgar_transactions WHERE position_id=? ORDER BY дата ASC, id ASC').all(pos.id);
+    let principal = pos.главница_eur;
+    let lastDiv = pos.дата_влог;
+    for (const t of txs) {
+      const eur = toEur(Number(t.сума), t.валута);
+      if (t.тип === 'влог') principal += eur;
+      else if (t.тип === 'теглене') principal -= eur;
+      else if (t.тип === 'дивидент' && t.дата > lastDiv) lastDiv = t.дата;
+    }
+    let accrued = 0;
+    if (pos.лихва_pct) {
+      const days = Math.max(0, Math.floor((Date.now() - new Date(lastDiv).getTime()) / 86400000));
+      accrued = principal * (pos.лихва_pct / 100) * (days / 365);
+    }
+    totalCurrent += principal + accrued;
+    totalPrincipal += principal;
+  }
+  return {
+    позиции: positions.length,
+    главница_eur:    Number(totalPrincipal.toFixed(2)),
+    текуща_стойност: Number(totalCurrent.toFixed(2)),
   };
 }
 
@@ -134,23 +170,24 @@ async function takeWealthSnapshot(db) {
     злато:          w.злато.текуща_стойност || 0,
     сребро:         w.сребро.текуща_стойност || 0,
     t212:           w.t212?.обща_стойност || 0,
+    болгар:         w.болгар?.текуща_стойност || 0,
     разпределение_json: JSON.stringify(w.разпределение || {}),
   };
   if (existing) {
     db.prepare(`UPDATE wealth_snapshots SET
       дата=CURRENT_TIMESTAMP, общо=?, имоти_equity=?, имоти_asset=?, имоти_debt=?, имоти_брой=?,
-      злато=?, сребро=?, t212=?, разпределение_json=?
+      злато=?, сребро=?, t212=?, болгар=?, разпределение_json=?
       WHERE id=?`).run(
       row.общо, row.имоти_equity, row.имоти_asset, row.имоти_debt, row.имоти_брой,
-      row.злато, row.сребро, row.t212, row.разпределение_json, existing.id
+      row.злато, row.сребро, row.t212, row.болгар, row.разпределение_json, existing.id
     );
     return existing.id;
   }
   const r = db.prepare(`INSERT INTO wealth_snapshots
-    (общо, имоти_equity, имоти_asset, имоти_debt, имоти_брой, злато, сребро, t212, разпределение_json)
-    VALUES (?,?,?,?,?,?,?,?,?)`).run(
+    (общо, имоти_equity, имоти_asset, имоти_debt, имоти_брой, злато, сребро, t212, болгар, разпределение_json)
+    VALUES (?,?,?,?,?,?,?,?,?,?)`).run(
     row.общо, row.имоти_equity, row.имоти_asset, row.имоти_debt, row.имоти_брой,
-    row.злато, row.сребро, row.t212, row.разпределение_json
+    row.злато, row.сребро, row.t212, row.болгар, row.разпределение_json
   );
   return r.lastInsertRowid;
 }
