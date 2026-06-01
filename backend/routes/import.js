@@ -23,13 +23,14 @@ module.exports = function(db) {
 
   // ── Helper: categorize one row ─────────────────────────────
   // Returns { категория, property_id, scope }.
-  // scope: 'personal' за заплата/договор управление/домакински разходи; иначе 'business'.
-  function categorizeRow({ operation, контрагент, основание, property_id_from_map }) {
+  // scope: 'personal' за заплата/договор управление/домакински разходи; иначе
+  // ползва defaultScope (от account_scope_map за тази сметка).
+  function categorizeRow({ operation, контрагент, основание, property_id_from_map, defaultScope = 'business' }) {
     const kontLower = контрагент.toLowerCase();
     const osnLower  = основание.toLowerCase();
     let категория  = '';
     let property_id = property_id_from_map;
-    let scope = 'business';
+    let scope = defaultScope;
 
     const isDeposit = ['депозит','deposit','гаранция','garantion'].some(kw => kontLower.includes(kw) || osnLower.includes(kw));
     // Personal income keywords (Кт): заплата, договор за управление, ДУ, salary
@@ -90,8 +91,10 @@ module.exports = function(db) {
   // ── Helper: enrich a raw transaction (categorize, apply rules, set currency, etc.)
   // rawTx must have: дата, контрагент, контрагент_iban, контрагент_bic,
   //                  основание, сума, operation
+  // ctx: { tenantMap, rules, unknownSet, unknownTenants, defaultScope }
   // Returns full transaction or null to skip.
-  function enrichTransaction(rawTx, tenantMap, rules, unknownSet, unknownTenants) {
+  function enrichTransaction(rawTx, ctx) {
+    const { tenantMap, rules, unknownSet, unknownTenants, defaultScope = 'business' } = ctx;
     let { дата, контрагент, контрагент_iban = '', контрагент_bic = '',
           основание = '', сума = 0, operation = '' } = rawTx;
     if (!дата) return null;
@@ -113,7 +116,7 @@ module.exports = function(db) {
       }
     }
 
-    let { категория, property_id, scope } = categorizeRow({ operation, контрагент, основание, property_id_from_map });
+    let { категория, property_id, scope } = categorizeRow({ operation, контрагент, основание, property_id_from_map, defaultScope });
 
     if (категория === 'наем' && !property_id_from_map && контрагент && !unknownSet.has(контрагент)) {
       unknownSet.add(контрагент);
@@ -143,14 +146,21 @@ module.exports = function(db) {
   }
 
   // ── Helper: parse one XLSX buffer ─────────────────────────
-  function parseBuffer(buffer, tenantMap, rules) {
+  function parseBuffer(buffer, tenantMap, rules, defaultScope = 'business') {
     const workbook = XLSX.read(buffer, { type: 'buffer', cellDates: true });
     const sheet    = workbook.Sheets[workbook.SheetNames[0]];
     const rawRows  = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
 
-    // Find header row
+    // Find header row + опитай да извлечеш IBAN от header (преди header row)
     let headerRowIdx = -1;
+    let accountIban  = null;
+    const IBAN_RE = /(BG\d{2}[A-Z]{4}[A-Z0-9]{14,18})/;
     for (let i = 0; i < Math.min(20, rawRows.length); i++) {
+      const rowText = rawRows[i].map(c => String(c || '')).join(' ');
+      if (!accountIban) {
+        const m = rowText.toUpperCase().replace(/\s+/g, '').match(IBAN_RE);
+        if (m) accountIban = m[1];
+      }
       if (rawRows[i].some(cell => String(cell).includes('Дата и час'))) {
         headerRowIdx = i;
         break;
@@ -161,13 +171,13 @@ module.exports = function(db) {
     const transactions   = [];
     const unknownTenants = [];
     const unknownSet     = new Set();
+    const ctx = { tenantMap, rules, unknownSet, unknownTenants, defaultScope };
 
     for (const row of rawRows.slice(headerRowIdx + 1)) {
       if (!row[0] && !row[4]) continue;
       const dateRaw = String(row[0] || '').trim();
       if (!dateRaw) continue;
 
-      // Parse date
       let дата = '';
       const dm = dateRaw.match(/(\d{2})\.(\d{2})\.(\d{4})/);
       if (dm) {
@@ -193,11 +203,11 @@ module.exports = function(db) {
         основание:       String(row[12] || '').trim(),
         сума,
         operation:       String(row[7]  || '').trim(),
-      }, tenantMap, rules, unknownSet, unknownTenants);
+      }, ctx);
       if (tx) transactions.push(tx);
     }
 
-    return { transactions, unknownTenants };
+    return { transactions, unknownTenants, accountIban };
   }
 
   // ── Helper: detect bank от съдържание на PDF (sniff first 4KB на текста).
@@ -219,35 +229,66 @@ module.exports = function(db) {
 
   // ── Helper: parse PDF (auto-detect bank). По default → ProBanking
   // за обратна съвместимост.
-  async function parsePdfBuffer(buffer, tenantMap, rules) {
+  async function parsePdfBuffer(buffer, tenantMap, rules, defaultScope = 'business') {
     const bank = await detectPdfBank(buffer);
-    let rawTx;
+    let rawTx, accountIban = null;
     if (bank === 'unicredit') {
       const { parseUniCreditPdf } = require('../lib/unicreditPdfParser');
-      ({ transactions: rawTx } = await parseUniCreditPdf(buffer));
+      const r = await parseUniCreditPdf(buffer);
+      rawTx = r.transactions; accountIban = r.accountIban;
     } else {
-      // probanking или unknown → пробвай ProBanking
       const { parseProBankingPdf } = require('../lib/probankingPdfParser');
-      ({ transactions: rawTx } = await parseProBankingPdf(buffer));
+      const r = await parseProBankingPdf(buffer);
+      rawTx = r.transactions; accountIban = r.accountIban;
     }
 
     const transactions   = [];
     const unknownTenants = [];
     const unknownSet     = new Set();
+    const ctx = { tenantMap, rules, unknownSet, unknownTenants, defaultScope };
     for (const r of rawTx) {
-      const tx = enrichTransaction(r, tenantMap, rules, unknownSet, unknownTenants);
+      const tx = enrichTransaction(r, ctx);
       if (tx) transactions.push(tx);
     }
-    return { transactions, unknownTenants };
+    return { transactions, unknownTenants, accountIban };
   }
 
-  // Dispatch by file extension/mime.
+  // Чете account_scope_map от settings.
+  function loadAccountScopeMap() {
+    try {
+      const row = db.prepare("SELECT value FROM settings WHERE key='account_scope_map'").get();
+      if (!row) return {};
+      const obj = JSON.parse(row.value);
+      // Normalize IBAN keys to uppercase
+      return Object.fromEntries(Object.entries(obj).map(([k, v]) => [String(k).toUpperCase(), v]));
+    } catch { return {}; }
+  }
+
+  // Dispatch by file extension/mime. Подава defaultScope от account_scope_map.
   async function parseFile(file, tenantMap, rules) {
+    const scopeMap = loadAccountScopeMap();
     const name = (file.originalname || '').toLowerCase();
     const mime = (file.mimetype || '').toLowerCase();
     const isPdf = name.endsWith('.pdf') || mime === 'application/pdf';
-    if (isPdf) return await parsePdfBuffer(file.buffer, tenantMap, rules);
-    return parseBuffer(file.buffer, tenantMap, rules);
+
+    // Първи pass — за да хванем accountIban, ползваме default scope='business'.
+    // Не е big deal — keywords (заплата, household) винаги override-ват на personal.
+    let result;
+    if (isPdf) result = await parsePdfBuffer(file.buffer, tenantMap, rules, 'business');
+    else       result = parseBuffer(file.buffer, tenantMap, rules, 'business');
+
+    const iban = result.accountIban;
+    const accountScope = iban && scopeMap[iban.toUpperCase()] ? scopeMap[iban.toUpperCase()] : null;
+
+    // Втори pass само ако account scope е personal — пре-парсваме с този default.
+    if (accountScope === 'personal') {
+      if (isPdf) result = await parsePdfBuffer(file.buffer, tenantMap, rules, 'personal');
+      else       result = parseBuffer(file.buffer, tenantMap, rules, 'personal');
+    }
+    result.accountIban = iban;
+    result.accountScope = accountScope || 'business';
+    result.accountKnown = !!accountScope;
+    return result;
   }
 
   // ── POST /parse (single file: xlsx или pdf) ────────────────
@@ -261,7 +302,8 @@ module.exports = function(db) {
       const normMap = Object.fromEntries(Object.entries(tenantMap).map(([k,v]) => [k.toLowerCase(), v]));
 
       const rules = loadRules();
-      let { transactions, unknownTenants } = await parseFile(req.file, normMap, rules);
+      const parsed = await parseFile(req.file, normMap, rules);
+      let { transactions, unknownTenants, accountIban, accountScope, accountKnown } = parsed;
       const dupCheck = db.prepare(
         'SELECT id FROM transactions WHERE дата=? AND ROUND(сума,2)=ROUND(?,2) AND operation=? AND контрагент=?'
       );
@@ -270,7 +312,8 @@ module.exports = function(db) {
         is_duplicate: !!(tx.дата && dupCheck.get(tx.дата, tx.сума || 0, tx.operation || '', tx.контрагент || ''))
       }));
       const dupCount = transactions.filter(t => t.is_duplicate).length;
-      res.json({ transactions, unknownTenants, dupCount });
+      res.json({ transactions, unknownTenants, dupCount,
+                 account: { iban: accountIban, scope: accountScope, known: accountKnown } });
     } catch (err) {
       console.error('Parse error:', err);
       res.status(500).json({ error: err.message });
@@ -291,21 +334,23 @@ module.exports = function(db) {
       let allTx       = [];
       let allUnknown  = [];
       const errors    = [];
+      const accounts  = []; // { iban, scope, known }
 
       for (const file of req.files) {
         try {
-          const { transactions, unknownTenants } = await parseFile(file, normMap, rules);
+          const { transactions, unknownTenants, accountIban, accountScope, accountKnown } = await parseFile(file, normMap, rules);
           allTx      = allTx.concat(transactions);
           allUnknown = allUnknown.concat(unknownTenants.filter(u => !allUnknown.some(x => x.контрагент === u.контрагент)));
+          if (accountIban && !accounts.some(a => a.iban === accountIban)) {
+            accounts.push({ iban: accountIban, scope: accountScope, known: accountKnown });
+          }
         } catch(e) {
           errors.push(`${file.originalname}: ${e.message}`);
         }
       }
 
-      // Sort chronologically
       allTx.sort((a, b) => (a.дата || '').localeCompare(b.дата || ''));
 
-      // Mark duplicates
       const dupCheck = db.prepare(
         'SELECT id FROM transactions WHERE дата=? AND ROUND(сума,2)=ROUND(?,2) AND operation=? AND контрагент=?'
       );
@@ -315,7 +360,7 @@ module.exports = function(db) {
       }));
 
       const dupCount = allTx.filter(t => t.is_duplicate).length;
-      res.json({ transactions: allTx, unknownTenants: allUnknown, errors, dupCount });
+      res.json({ transactions: allTx, unknownTenants: allUnknown, errors, dupCount, accounts });
     } catch (err) {
       console.error('Parse-multi error:', err);
       res.status(500).json({ error: err.message });
@@ -423,17 +468,25 @@ module.exports = function(db) {
             );
           }
 
-          // Кт personal income (заплата / договор управление) → personal_income row
-          if (tx.operation === 'Кт' && txScope === 'personal' && (tx.категория === 'заплата' || tx.категория === 'управление')) {
-            insertPersonalIncome.run(
-              tx.дата || null,
-              tx.категория,
-              tx.сума || 0,
-              tx.currency || (tx.дата >= '2026-01-01' ? 'EUR' : 'BGN'),
-              tx.контрагент || '',
-              tx.основание || '',
-              txResult.lastInsertRowid
-            );
+          // Кт personal income (заплата / договор управление / личен наем) →
+          // personal_income row. За личен наем (personal scope + категория='наем')
+          // пишем тип 'друго' с източник контрагента.
+          if (tx.operation === 'Кт' && txScope === 'personal') {
+            let pincomeType = null;
+            if (tx.категория === 'заплата')    pincomeType = 'заплата';
+            else if (tx.категория === 'управление') pincomeType = 'управление';
+            else if (tx.категория === 'наем')  pincomeType = 'друго'; // личен наем
+            if (pincomeType) {
+              insertPersonalIncome.run(
+                tx.дата || null,
+                pincomeType,
+                tx.сума || 0,
+                tx.currency || (tx.дата >= '2026-01-01' ? 'EUR' : 'BGN'),
+                tx.контрагент || (pincomeType === 'друго' ? 'Личен наем' : ''),
+                tx.основание || '',
+                txResult.lastInsertRowid
+              );
+            }
           }
 
           // Дт разходи → link to existing invoice or create new expense record

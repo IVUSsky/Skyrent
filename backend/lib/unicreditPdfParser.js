@@ -27,6 +27,8 @@ const IBAN_RE        = /\b(BG\d{2}[A-Z]{4}[A-Z0-9]{14,18})\b/;
 const BIC_RE         = /\b([A-Z]{4}BG[A-Z0-9]{2}(?:[A-Z0-9]{3})?)\b/;
 // Account currency: header has "разплащателна сметка в EUR"
 const ACCT_CURRENCY_RE = /разплащателна\s+сметка\s+в\s+([A-Z]{3})/i;
+// Account IBAN: "IBAN:BG11UNCR70001520361576"
+const ACCT_IBAN_RE     = /IBAN\s*:\s*(BG\d{2}[A-Z]{4}[A-Z0-9]{14,18})/;
 
 // POS merchant: "авт.код:NNN-MERCHANT/" (optional space след колоната).
 const POS_MERCHANT_RE = /авт\.код:\s*\d+-\s*([^/]+?)\s*\//i;
@@ -36,6 +38,8 @@ async function parseUniCreditPdf(buffer) {
   const lines = data.text.split(/\r?\n/).map(l => l.trim());
   const curM = data.text.match(ACCT_CURRENCY_RE);
   const accountCurrency = curM ? curM[1].toUpperCase() : 'EUR';
+  const ibanM = data.text.match(ACCT_IBAN_RE);
+  const accountIban = ibanM ? ibanM[1] : null;
 
   // Find the transactions section header to skip preamble.
   // After lines like "Дата/Вальор" the records start.
@@ -96,7 +100,7 @@ async function parseUniCreditPdf(buffer) {
   for (const rec of records) {
     transactions.push(recordToTransaction(rec, accountCurrency));
   }
-  return { transactions, unknownTenants: [], accountCurrency };
+  return { transactions, unknownTenants: [], accountCurrency, accountIban };
 }
 
 function recordToTransaction(rec, accountCurrency) {

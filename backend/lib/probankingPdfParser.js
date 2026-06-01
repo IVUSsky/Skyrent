@@ -43,6 +43,8 @@ const BIC_RE          = /BIC:\s*([A-Z]{8,11})(?:XXX)?/;
 const POS_LINE_RE     = /ПОС\s+плащане\s+\d+(?:[.,]\d+)?\s+[A-Z]{3}\s+\S+\s+(.+)/i;
 // Account currency от header-а: "Валута/Currency     EUR"
 const ACCT_CURRENCY_RE = /Валута\/Currency\s+([A-Z]{3})/;
+// Account IBAN: "IBAN: BG34PRCB92301040957901"
+const ACCT_IBAN_RE     = /IBAN:\s*(BG\d{2}[A-Z]{4}[A-Z0-9]{14,18})/;
 
 /**
  * @param {Buffer} buffer PDF buffer
@@ -52,9 +54,11 @@ async function parseProBankingPdf(buffer) {
   const data = await pdfParse(buffer);
   const rawLines = data.text.split(/\r?\n/);
 
-  // Account currency from header
+  // Account currency + IBAN from header
   const curMatch = data.text.match(ACCT_CURRENCY_RE);
   const accountCurrency = curMatch ? curMatch[1] : 'EUR';
+  const ibanMatch = data.text.match(ACCT_IBAN_RE);
+  const accountIban = ibanMatch ? ibanMatch[1] : null;
 
   // Walk lines, group into records
   const records = [];
@@ -123,7 +127,7 @@ async function parseProBankingPdf(buffer) {
     if (tx) transactions.push(tx);
   }
 
-  return { transactions, unknownTenants, accountCurrency };
+  return { transactions, unknownTenants, accountCurrency, accountIban };
 }
 
 // Search for an amount+op pattern anywhere in a string. Returns null or

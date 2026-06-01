@@ -806,6 +806,10 @@ function ImportTab({ API, onSaved }) {
   const [clearConfirm, setClearConfirm] = useState(false)
   const [clearResult, setClearResult]   = useState(null)
   const [coverage, setCoverage]         = useState(null)
+  // Сметки от току що парсирани файлове: [{iban, scope, known}]
+  const [parsedAccounts, setParsedAccounts] = useState([])
+  // Кеш на качените файлове за да можем да re-parse след промяна на scope.
+  const [cachedFiles, setCachedFiles]       = useState([])
   const fileInputRef = useRef()
 
   const clearAllTransactions = async () => {
@@ -854,6 +858,7 @@ function ImportTab({ API, onSaved }) {
     setUT([])
     setSaveResult(null)
     setFileNames(xlsFiles.map(f => f.name))
+    setCachedFiles(xlsFiles)
 
     if (xlsFiles.length === 1) {
       const formData = new FormData()
@@ -864,13 +869,13 @@ function ImportTab({ API, onSaved }) {
           if (data.error) throw new Error(data.error)
           setTx(data.transactions || [])
           setUT(data.unknownTenants || [])
+          setParsedAccounts(data.account ? [data.account] : [])
           if ((data.unknownTenants||[]).length > 0) setShowMatchModal(true)
           setParsing(false)
           showToastMsg(`Прочетени ${(data.transactions||[]).length} транзакции от ${xlsFiles[0].name}`)
         })
         .catch(e => { setParseError(e.message); setParsing(false) })
     } else {
-      // Multi-file
       const formData = new FormData()
       xlsFiles.forEach(f => formData.append('files', f))
       apiFetch(`${API}/api/import/parse-multi`, { method: 'POST', body: formData })
@@ -879,6 +884,7 @@ function ImportTab({ API, onSaved }) {
           if (data.error) throw new Error(data.error)
           setTx(data.transactions || [])
           setUT(data.unknownTenants || [])
+          setParsedAccounts(data.accounts || [])
           if ((data.unknownTenants||[]).length > 0) setShowMatchModal(true)
           setParsing(false)
           const errMsg = data.errors?.length ? ` (${data.errors.length} грешки)` : ''
@@ -887,6 +893,27 @@ function ImportTab({ API, onSaved }) {
         .catch(e => { setParseError(e.message); setParsing(false) })
     }
   }, [API])
+
+  // Зададе scope на дадена сметка → запази в settings → ре-парсва същите файлове.
+  const assignAccountScope = useCallback((iban, scope) => {
+    if (!iban || !['business','personal'].includes(scope)) return
+    // Прочети текущия account_scope_map, добави нашия запис, push.
+    apiFetch(`${API}/api/settings`)
+      .then(r => r.json())
+      .then(settings => {
+        const map = { ...(settings.account_scope_map || {}), [iban.toUpperCase()]: scope }
+        return apiFetch(`${API}/api/settings`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ account_scope_map: map }),
+        })
+      })
+      .then(() => {
+        showToastMsg(`Сметка ${iban.slice(0,8)}... → ${scope === 'personal' ? 'лична' : 'бизнес'}. Преизчислявам...`)
+        if (cachedFiles.length) parseFiles(cachedFiles)
+      })
+      .catch(e => showToastMsg('Грешка: ' + e.message, 'error'))
+  }, [API, cachedFiles, parseFiles])
 
   const onDrop = useCallback((e) => {
     e.preventDefault()
@@ -1088,6 +1115,46 @@ function ImportTab({ API, onSaved }) {
       {parseError && (
         <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl p-4 mb-4">
           <strong>Грешка:</strong> {parseError}
+        </div>
+      )}
+
+      {/* Unmapped accounts — pick scope */}
+      {parsedAccounts.filter(a => a.iban && !a.known).length > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-4 space-y-2">
+          <div className="text-sm font-bold text-amber-900">
+            🏦 Нова сметка — задай scope, за да се категоризират правилно:
+          </div>
+          {parsedAccounts.filter(a => a.iban && !a.known).map(acc => (
+            <div key={acc.iban} className="flex items-center gap-3 flex-wrap">
+              <code className="text-xs bg-white px-2 py-1 rounded border border-amber-200">{acc.iban}</code>
+              <button onClick={() => assignAccountScope(acc.iban, 'business')}
+                      className="px-3 py-1.5 bg-slate-700 hover:bg-slate-800 text-white rounded text-xs font-medium">
+                Бизнес (Sky Capital)
+              </button>
+              <button onClick={() => assignAccountScope(acc.iban, 'personal')}
+                      className="px-3 py-1.5 bg-pink-600 hover:bg-pink-700 text-white rounded text-xs font-medium">
+                Лична (твоя)
+              </button>
+              <span className="text-xs text-amber-700">
+                Текущо: {acc.scope === 'personal' ? 'лична (default)' : 'бизнес (default)'}
+              </span>
+            </div>
+          ))}
+          <div className="text-xs text-amber-700">
+            След като зададеш scope, файловете се преизчисляват автоматично.
+          </div>
+        </div>
+      )}
+
+      {/* Show known accounts (small info) */}
+      {parsedAccounts.filter(a => a.iban && a.known).length > 0 && (
+        <div className="text-xs text-gray-500 mb-3">
+          {parsedAccounts.filter(a => a.iban && a.known).map(a => (
+            <span key={a.iban} className="inline-flex items-center gap-1 mr-3">
+              <code className="bg-gray-100 px-1.5 py-0.5 rounded">{a.iban.slice(0,12)}...</code>
+              → {a.scope === 'personal' ? '👤 лична' : '🏢 бизнес'}
+            </span>
+          ))}
         </div>
       )}
 
