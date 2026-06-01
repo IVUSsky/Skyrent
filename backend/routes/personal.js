@@ -132,10 +132,18 @@ module.exports = function(db) {
 
   // ── Helper: parse period query (?month=YYYY-MM | ?from=YYYY-MM-DD&to=... | ?months=N)
   // Връща { from, to, label } като ISO дати.
+  // Поправено: ползва локални дати (не UTC) за да избегне TZ off-by-one.
+  // "Nм" = последните N месеца включително днес (today.setMonth(today.getMonth() - N)).
+  function localDate(d) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
   function parsePeriod(q) {
     if (q.month && /^\d{4}-\d{2}$/.test(q.month)) {
       const [y, m] = q.month.split('-');
-      const last = new Date(Number(y), Number(m), 0).toISOString().slice(0, 10);
+      const last = localDate(new Date(Number(y), Number(m), 0));
       return { from: `${q.month}-01`, to: last, label: q.month };
     }
     if (q.from && q.to) {
@@ -144,12 +152,14 @@ module.exports = function(db) {
     if (q.months) {
       const n = Math.min(60, Math.max(1, Number(q.months) || 1));
       const today = new Date();
-      const from = new Date(today.getFullYear(), today.getMonth() - n + 1, 1);
-      return { from: from.toISOString().slice(0, 10), to: today.toISOString().slice(0, 10), label: `последни ${n} мес` };
+      const from = new Date(today);
+      from.setMonth(from.getMonth() - n);
+      return { from: localDate(from), to: localDate(today), label: `последни ${n} мес` };
     }
     // default: current month
-    const t = new Date().toISOString().slice(0, 7);
-    const last = new Date(Number(t.slice(0,4)), Number(t.slice(5,7)), 0).toISOString().slice(0, 10);
+    const today = new Date();
+    const t = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+    const last = localDate(new Date(today.getFullYear(), today.getMonth() + 1, 0));
     return { from: `${t}-01`, to: last, label: t };
   }
 
