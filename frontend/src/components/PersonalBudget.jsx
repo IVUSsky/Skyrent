@@ -39,6 +39,11 @@ export default function PersonalBudget() {
   const [rebuildResult, setRebuildResult] = useState(null)
   const [initialized, setInitialized] = useState(false)
   const [view, setView]         = useState('overview') // 'overview' | 'analysis'
+  const [showAccounts, setShowAccounts] = useState(false)
+  const [accounts, setAccounts] = useState(null)
+  const [markIban, setMarkIban] = useState('')
+  const [markScope, setMarkScope] = useState('personal')
+  const [marking, setMarking]   = useState(false)
 
   // Period → query string
   const periodQuery = () => {
@@ -97,6 +102,36 @@ export default function PersonalBudget() {
       })
   }
 
+  const openAccountsModal = () => {
+    apiFetch(`${API}/api/personal/accounts`)
+      .then(r => r.json())
+      .then(d => { setAccounts(d); setShowAccounts(true) })
+  }
+
+  const markAccount = () => {
+    if (!markIban) return
+    setMarking(true)
+    apiFetch(`${API}/api/personal/accounts/mark-and-rebuild`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ iban: markIban, scope: markScope }),
+    })
+      .then(r => r.json())
+      .then(d => {
+        setMarking(false)
+        setRebuildResult({
+          создадени_доходи: d.personal_income_created,
+          Кт_намерени:      d.personal_income_created,
+          синхронизирани_разходи: d.tx_updated,
+          extra: `Сметка ${d.iban} → ${d.scope_set}; ${d.tx_updated} tx-те обновени.`,
+        })
+        setShowAccounts(false)
+        load()
+        setTimeout(() => setRebuildResult(null), 10000)
+      })
+      .catch(() => setMarking(false))
+  }
+
   const submitIncome = () => {
     if (!form.дата || !form.сума) return
     apiFetch(`${API}/api/personal/income`, {
@@ -136,6 +171,11 @@ export default function PersonalBudget() {
             </button>
           </div>
           <div className="flex gap-2">
+            <button onClick={openAccountsModal}
+                    title="Маркирай сметка като лична или бизнес — ретроактивно за всички вече импортирани tx-те"
+                    className="px-3 py-1.5 bg-pink-100 hover:bg-pink-200 text-pink-800 border border-pink-300 rounded text-sm font-medium">
+              🏦 Сметки
+            </button>
             <button onClick={doRebuild}
                     title="Сканира bank transactions и създава липсващи personal_income"
                     className="px-3 py-1.5 bg-amber-100 hover:bg-amber-200 text-amber-800 border border-amber-300 rounded text-sm font-medium">
@@ -326,6 +366,60 @@ export default function PersonalBudget() {
         )}
       </div>
       </>}
+
+      {/* Accounts modal — маркирай сметка като personal/business + ретро */}
+      {showAccounts && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={() => setShowAccounts(false)}>
+          <div className="bg-white rounded-xl shadow-2xl p-5 max-w-lg w-full m-4" onClick={e => e.stopPropagation()}>
+            <h3 className="text-lg font-bold text-gray-900 mb-3">🏦 Маркирай сметка</h3>
+            <p className="text-sm text-gray-600 mb-3">
+              Промяната ретроактивно update-ва всички вече импортирани транзакции
+              от тази сметка + обновява personal_income/expense_invoices.
+            </p>
+            {accounts?.account_scope_map && Object.keys(accounts.account_scope_map).length > 0 && (
+              <div className="mb-3">
+                <div className="text-xs font-bold text-gray-500 uppercase mb-1">Текущи маркировки</div>
+                <div className="bg-gray-50 rounded p-2 text-xs space-y-1">
+                  {Object.entries(accounts.account_scope_map).map(([iban, scope]) => (
+                    <div key={iban} className="flex justify-between">
+                      <code>{iban}</code>
+                      <span className={scope === 'personal' ? 'text-pink-700' : 'text-slate-700'}>
+                        {scope === 'personal' ? '👤 лична' : '🏢 бизнес'}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            <Field label="IBAN на сметката">
+              <input type="text" value={markIban} onChange={e => setMarkIban(e.target.value.toUpperCase())}
+                     placeholder="напр. BG34PRCB92301040957901"
+                     className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm font-mono" autoFocus/>
+            </Field>
+            <div className="mt-3">
+              <div className="text-xs font-bold text-gray-500 uppercase mb-1">Scope</div>
+              <div className="flex gap-2">
+                <button onClick={() => setMarkScope('personal')}
+                        className={`px-3 py-1.5 rounded text-sm font-medium border ${markScope === 'personal' ? 'bg-pink-600 text-white border-pink-600' : 'bg-white text-gray-600 border-gray-300'}`}>
+                  👤 Лична
+                </button>
+                <button onClick={() => setMarkScope('business')}
+                        className={`px-3 py-1.5 rounded text-sm font-medium border ${markScope === 'business' ? 'bg-slate-700 text-white border-slate-700' : 'bg-white text-gray-600 border-gray-300'}`}>
+                  🏢 Бизнес
+                </button>
+              </div>
+            </div>
+            <div className="flex gap-2 mt-5 justify-end">
+              <button onClick={() => setShowAccounts(false)}
+                      className="px-4 py-1.5 text-sm text-gray-600 hover:text-gray-900">Отказ</button>
+              <button onClick={markAccount} disabled={marking || !markIban}
+                      className="px-4 py-1.5 bg-pink-600 hover:bg-pink-700 text-white rounded text-sm font-medium disabled:bg-gray-300">
+                {marking ? 'Update-ва...' : 'Маркирай + Преизчисли'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Add income modal */}
       {showAdd && (

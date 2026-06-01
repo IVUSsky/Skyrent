@@ -390,6 +390,100 @@ module.exports = function(db) {
     res.json({ updated: r.changes });
   });
 
+  // GET /accounts — списък сметки + текущ scope + tx брой
+  // Полезно за да види user-ът кои IBAN-и са какъв scope и да корек/сменя.
+  router.get('/accounts', (req, res) => {
+    // Извличам IBAN-и от основанието на transactions (банковите BG IBAN-и)
+    // Хм, transactions няма account_iban колона — затова взимам от settings + bank info.
+    const settingsRow = db.prepare("SELECT value FROM settings WHERE key='account_scope_map'").get();
+    let map = {};
+    if (settingsRow) { try { map = JSON.parse(settingsRow.value); } catch {} }
+
+    // Tx counts по scope (за инфо)
+    const byScope = db.prepare(`
+      SELECT scope, COUNT(*) AS count
+      FROM transactions
+      GROUP BY scope
+    `).all();
+
+    res.json({
+      account_scope_map: map,
+      tx_by_scope: byScope,
+    });
+  });
+
+  // POST /accounts/mark-and-rebuild { iban, scope }
+  // Маркира сметка като дадения scope в settings, после ретро update-ва всички
+  // tx-те match-ващи BIC/IBAN/филиал на тази сметка и преизчислява personal_income.
+  router.post('/accounts/mark-and-rebuild', (req, res) => {
+    const { iban, scope } = req.body || {};
+    if (!iban || !['personal','business'].includes(scope)) {
+      return res.status(400).json({ error: 'iban + scope са задължителни' });
+    }
+    const ibanUp = String(iban).toUpperCase();
+
+    // 1. Запази в settings
+    const settingsRow = db.prepare("SELECT value FROM settings WHERE key='account_scope_map'").get();
+    let map = {};
+    if (settingsRow) { try { map = JSON.parse(settingsRow.value); } catch {} }
+    map[ibanUp] = scope;
+    db.prepare(`INSERT OR REPLACE INTO settings (key, value) VALUES ('account_scope_map', ?)`).run(JSON.stringify(map));
+
+    // 2. Извлечи BIC и filial код от IBAN (за match-ване в основанието)
+    // BG34 PRCB 92301040957901 → bankCode=PRCB, branch=9230, account=1040957901
+    const bankCode  = ibanUp.slice(4, 8);   // PRCB
+    const branchCd  = ibanUp.slice(8, 12);  // 9230
+    const acctPart  = ibanUp.slice(12);     // последните цифри
+
+    // 3. Ретро update — всички tx-те които съдържат този IBAN-фрагмент или BIC + branch
+    // (ProBanking PDF записва IBAN-ите в основанието)
+    const patterns = [`%${ibanUp}%`, `%${bankCode}BG%${branchCd}%`, `%${acctPart}%`];
+    const setExpr = `${scope === 'personal' ? "'personal'" : "'business'"}`;
+
+    // Update transactions scope WHERE основание/контрагент_iban match-ват IBAN/BIC
+    const updTx = db.prepare(`
+      UPDATE transactions SET scope = ?
+      WHERE контрагент_iban = ?
+         OR основание LIKE ?
+         OR основание LIKE ?
+         OR основание LIKE ?
+    `).run(scope, ibanUp, ...patterns);
+
+    // Sync expense_invoices.scope
+    db.prepare(`UPDATE expense_invoices
+                SET scope = ?
+                WHERE bank_tx_id IS NOT NULL
+                  AND bank_tx_id IN (SELECT id FROM transactions WHERE scope = ?)`).run(scope, scope);
+
+    // 4. Rebuild personal_income (идемпотентно)
+    const ktRows = db.prepare(`
+      SELECT t.* FROM transactions t
+      WHERE t.operation = 'Кт'
+        AND t.scope = 'personal'
+        AND t.категория IN ('заплата','управление','наем','sky_capital')
+        AND NOT EXISTS (SELECT 1 FROM personal_income pi WHERE pi.bank_tx_id = t.id)
+    `).all();
+    const insertPi = db.prepare(`INSERT INTO personal_income
+      (дата, тип, сума, валута, източник, бележка, bank_tx_id) VALUES (?,?,?,?,?,?,?)`);
+    let createdIncome = 0;
+    for (const t of ktRows) {
+      let pincomeType = 'друго';
+      if (t.категория === 'заплата')         pincomeType = 'заплата';
+      else if (t.категория === 'управление') pincomeType = 'управление';
+      else if (t.категория === 'sky_capital') pincomeType = 'sky_capital';
+      insertPi.run(t.дата, pincomeType, t.сума, t.currency || 'EUR',
+                   t.контрагент || '', t.основание || '', t.id);
+      createdIncome++;
+    }
+
+    res.json({
+      scope_set: scope,
+      iban: ibanUp,
+      tx_updated: updTx.changes,
+      personal_income_created: createdIncome,
+    });
+  });
+
   // GET /last-month → връща последния месец с personal_income или
   // personal expense_invoices. По default за UI picker.
   router.get('/last-month', (req, res) => {
