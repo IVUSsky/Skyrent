@@ -362,15 +362,19 @@ async function main() {
     for (const s of seed) ins.run(...s);
     console.log('Seeded addon_services catalog with', seed.length, 'items');
   }
-  // Idempotent: ако базата вече е seed-ната, гарантирай че Телевизор е добавен
-  const tvExists = db.prepare("SELECT 1 FROM addon_services WHERE name = 'Телевизор'").get();
-  if (!tvExists) {
-    db.prepare(`
-      INSERT INTO addon_services (name, description, icon, monthly_price, deposit_amount, sort_order, active)
-      VALUES (?, ?, ?, ?, ?, ?, 1)
-    `).run('Телевизор', 'Телевизор с дистанционно', '📺', 12, 0, 15);
-    console.log('Added Телевизор to addon catalog');
-  }
+  // Idempotent: ако базата вече е seed-ната, гарантирай че следните са добавени
+  const ensureAddon = (name, description, icon, monthly_price, deposit_amount, sort_order) => {
+    const exists = db.prepare('SELECT 1 FROM addon_services WHERE name = ?').get(name);
+    if (!exists) {
+      db.prepare(`
+        INSERT INTO addon_services (name, description, icon, monthly_price, deposit_amount, sort_order, active)
+        VALUES (?, ?, ?, ?, ?, ?, 1)
+      `).run(name, description, icon, monthly_price, deposit_amount, sort_order);
+      console.log(`Added ${name} to addon catalog`);
+    }
+  };
+  ensureAddon('Телевизор', 'Телевизор с дистанционно',                                     '📺', 12, 0,  15);
+  ensureAddon('Стелаж',    'Метален стелаж за гараж/мазе (за съхранение на вещи)',         '📦',  5, 0,  70);
   console.log('addon_services + tenant_addons ready');
 
   // Support tickets + messages + attachments + notifications
