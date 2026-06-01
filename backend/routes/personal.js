@@ -397,25 +397,33 @@ module.exports = function(db) {
     if (!rules.length) return res.status(400).json({ error: 'rules array required' });
 
     const results = [];
+    // JS-side filter защото SQLite LOWER() не handle-ва кирилица.
+    // Извличаме кандидати първо според op (ако е зададен), после filter-ваме в JS.
     for (const rule of rules) {
-      const kw = (rule.keyword || '').toLowerCase();
+      const kw = (rule.keyword || '').toLowerCase().trim();
       const cat = rule.target_category;
       const op = rule.operation;
       const scope = rule.target_scope;
       if (!kw || !cat) continue;
-      const conds = [`(LOWER(контрагент) LIKE ? OR LOWER(основание) LIKE ?)`];
-      const params = [scope || 'business', cat, `%${kw}%`, `%${kw}%`];
-      let sql = `UPDATE transactions SET scope = ?, категория = ? WHERE `;
-      if (op) { conds.push('operation = ?'); params.push(op); }
-      sql += conds.join(' AND ');
-      // scope param order: scope, cat, kw, kw, op?
-      if (!scope) {
-        // ако не е подаден scope → запази текущия
-        sql = sql.replace('scope = ?, ', '');
-        params.shift(); // премахни първия placeholder (scope)
+
+      const filterSql = op ? `SELECT id, контрагент, основание FROM transactions WHERE operation = ?`
+                           : `SELECT id, контрагент, основание FROM transactions`;
+      const candidates = op ? db.prepare(filterSql).all(op) : db.prepare(filterSql).all();
+      const matched = candidates.filter(t =>
+        (t.контрагент || '').toLowerCase().includes(kw) ||
+        (t.основание  || '').toLowerCase().includes(kw)
+      );
+
+      const upd = scope
+        ? db.prepare('UPDATE transactions SET scope = ?, категория = ? WHERE id = ?')
+        : db.prepare('UPDATE transactions SET категория = ? WHERE id = ?');
+      let count = 0;
+      for (const tx of matched) {
+        if (scope) upd.run(scope, cat, tx.id);
+        else       upd.run(cat, tx.id);
+        count++;
       }
-      const r = db.prepare(sql).run(...params);
-      results.push({ keyword: kw, target_category: cat, updated: r.changes });
+      results.push({ keyword: kw, target_category: cat, updated: count });
     }
 
     // Rebuild personal_income за новите 'заплата'/'управление'/'sky_capital'/'наем' tx-те
