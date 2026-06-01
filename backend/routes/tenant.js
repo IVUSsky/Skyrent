@@ -6,7 +6,13 @@ const multer  = require('multer');
 const { askAgent } = require('../lib/tenantAgent');
 const { notifyAdmin } = require('../lib/notify');
 const { getPropertyScope } = require('../lib/propertyScope');
+const { getOrCreateAccount } = require('../lib/internetService');
 const supportMod = require('./support');
+
+function getStripe() {
+  if (!process.env.STRIPE_SECRET_KEY) return null;
+  return require('stripe')(process.env.STRIPE_SECRET_KEY, { apiVersion: '2024-12-18.acacia' });
+}
 
 const DATA_DIR     = process.env.DATA_DIR || path.join(__dirname, '../data');
 const CONTRACTS_DIR = path.join(DATA_DIR, 'contracts');
@@ -457,6 +463,97 @@ module.exports = function(db) {
     if (att.mime_type) res.setHeader('Content-Type', att.mime_type);
     res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(att.original_name || att.filename)}"`);
     res.sendFile(fp);
+  });
+
+  // ── Internet (tenant side) ────────────────────────────────
+  router.get('/internet', (req, res) => {
+    const propId = tenantPropertyId(req.user.id);
+    const account = getOrCreateAccount(db, req.user.id, propId);
+    const plans = db.prepare(`
+      SELECT id, name, description, duration_days, price, speed_down_mbps, speed_up_mbps, currency
+      FROM internet_plans WHERE active = 1
+      ORDER BY sort_order ASC, id ASC
+    `).all();
+    const purchases = db.prepare(`
+      SELECT id, plan_name, amount, currency, status, paid_at, valid_from, valid_until, created_at
+      FROM internet_purchases
+      WHERE account_id=? AND status IN ('paid','pending')
+      ORDER BY created_at DESC LIMIT 10
+    `).all(account.id);
+    res.json({
+      account: {
+        id: account.id, username: account.username, password: account.password,
+        mac_address: account.mac_address, status: account.status,
+        valid_from: account.valid_from, valid_until: account.valid_until,
+        total_paid: account.total_paid,
+      },
+      plans,
+      purchases,
+    });
+  });
+
+  router.post('/internet/mac', (req, res) => {
+    const mac = (req.body.mac_address || '').trim().toUpperCase();
+    if (mac && !/^([0-9A-F]{2}[:-]){5}[0-9A-F]{2}$/.test(mac)) {
+      return res.status(400).json({ error: 'MAC адресът трябва да е във формат AA:BB:CC:DD:EE:FF' });
+    }
+    const propId = tenantPropertyId(req.user.id);
+    const account = getOrCreateAccount(db, req.user.id, propId);
+    db.prepare('UPDATE internet_accounts SET mac_address=? WHERE id=?')
+      .run(mac || null, account.id);
+    res.json({ ok: true, mac_address: mac || null });
+  });
+
+  router.post('/internet/buy', async (req, res) => {
+    try {
+      const s = getStripe();
+      if (!s) return res.status(500).json({ error: 'Stripe не е конфигуриран' });
+      const plan = db.prepare('SELECT * FROM internet_plans WHERE id=? AND active=1').get(req.body.plan_id);
+      if (!plan) return res.status(404).json({ error: 'Планът не е намерен или е неактивен' });
+
+      const propId = tenantPropertyId(req.user.id);
+      const account = getOrCreateAccount(db, req.user.id, propId);
+      const user = db.prepare('SELECT email FROM users WHERE id=?').get(req.user.id);
+      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+
+      const pr = db.prepare(`
+        INSERT INTO internet_purchases (account_id, plan_id, plan_name, amount, duration_days, currency, status)
+        VALUES (?, ?, ?, ?, ?, ?, 'pending')
+      `).run(account.id, plan.id, plan.name, Number(plan.price), Number(plan.duration_days), plan.currency || 'EUR');
+
+      const session = await s.checkout.sessions.create({
+        mode: 'payment',
+        payment_method_types: ['card'],
+        customer_email: user?.email || undefined,
+        line_items: [{
+          price_data: {
+            currency: (plan.currency || 'EUR').toLowerCase(),
+            product_data: {
+              name: `Интернет — ${plan.name}`,
+              description: `${plan.duration_days} дни${plan.speed_down_mbps ? ` · ${plan.speed_down_mbps} Mbps` : ''}`,
+            },
+            unit_amount: Math.round(Number(plan.price) * 100),
+          },
+          quantity: 1,
+        }],
+        metadata: {
+          kind: 'internet',
+          purchase_id: String(pr.lastInsertRowid),
+          account_id: String(account.id),
+          tenant_user_id: String(req.user.id),
+        },
+        success_url: `${frontendUrl}/?internet_success=1&purchase=${pr.lastInsertRowid}`,
+        cancel_url:  `${frontendUrl}/?internet_cancel=1&purchase=${pr.lastInsertRowid}`,
+      });
+
+      db.prepare('UPDATE internet_purchases SET stripe_session_id=? WHERE id=?')
+        .run(session.id, pr.lastInsertRowid);
+
+      res.json({ url: session.url, session_id: session.id, purchase_id: pr.lastInsertRowid });
+    } catch (err) {
+      console.error('internet buy failed:', err);
+      res.status(500).json({ error: err.message });
+    }
   });
 
   // ── In-app notifications (tenant) ─────────────────────────

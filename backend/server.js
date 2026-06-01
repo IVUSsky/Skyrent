@@ -438,6 +438,91 @@ async function main() {
   try { db.exec("CREATE INDEX IF NOT EXISTS idx_tickets_status ON support_tickets(status, updated_at DESC)"); } catch(_) {}
   console.log('support_tickets + notifications ready');
 
+  // Internet reselling: per-property routers + plans + accounts + purchases
+  db.exec(`CREATE TABLE IF NOT EXISTS routers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    property_id INTEGER REFERENCES properties(id),
+    name TEXT,
+    model TEXT,
+    host TEXT NOT NULL,
+    api_port INTEGER DEFAULT 8728,
+    api_user TEXT,
+    api_pass TEXT,
+    use_tls INTEGER DEFAULT 0,
+    status TEXT DEFAULT 'unknown',
+    last_seen_at DATETIME,
+    last_error TEXT,
+    notes TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(property_id)
+  )`);
+
+  db.exec(`CREATE TABLE IF NOT EXISTS internet_plans (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    description TEXT,
+    duration_days INTEGER NOT NULL,
+    price REAL NOT NULL,
+    speed_down_mbps INTEGER,
+    speed_up_mbps INTEGER,
+    currency TEXT DEFAULT 'EUR',
+    active INTEGER DEFAULT 1,
+    sort_order INTEGER DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+  db.exec(`CREATE TABLE IF NOT EXISTS internet_accounts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    property_id INTEGER REFERENCES properties(id),
+    username TEXT NOT NULL,
+    password TEXT NOT NULL,
+    mac_address TEXT,
+    status TEXT NOT NULL DEFAULT 'inactive',
+    valid_from DATETIME,
+    valid_until DATETIME,
+    total_paid REAL DEFAULT 0,
+    router_synced_at DATETIME,
+    router_state TEXT,
+    notes TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(user_id)
+  )`);
+  db.exec(`CREATE TABLE IF NOT EXISTS internet_purchases (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER NOT NULL REFERENCES internet_accounts(id),
+    plan_id INTEGER NOT NULL REFERENCES internet_plans(id),
+    plan_name TEXT,
+    amount REAL NOT NULL,
+    duration_days INTEGER NOT NULL,
+    currency TEXT DEFAULT 'EUR',
+    status TEXT NOT NULL DEFAULT 'pending',
+    stripe_session_id TEXT UNIQUE,
+    stripe_payment_intent_id TEXT,
+    paid_at DATETIME,
+    applied_at DATETIME,
+    valid_from DATETIME,
+    valid_until DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+  try { db.exec("CREATE INDEX IF NOT EXISTS idx_inet_accounts_status ON internet_accounts(status, valid_until)"); } catch(_) {}
+  // Seed plans only if empty
+  const planCount = db.prepare('SELECT COUNT(*) as cnt FROM internet_plans').get();
+  if (planCount.cnt === 0) {
+    const ins = db.prepare(`
+      INSERT INTO internet_plans (name, description, duration_days, price, speed_down_mbps, speed_up_mbps, sort_order)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+    const seed = [
+      ['24 часа',  'Кратък достъп до 24 часа',    1,   3.00, 100, 50, 10],
+      ['7 дни',    'Седмичен пакет',               7,  10.00, 100, 50, 20],
+      ['1 месец',  'Месечен пакет — най-изгоден',  30, 25.00, 100, 50, 30],
+      ['3 месеца', 'Тримесечен пакет',             90, 65.00, 100, 50, 40],
+    ];
+    for (const s of seed) ins.run(...s);
+    console.log('Seeded internet_plans with', seed.length, 'plans');
+  }
+  console.log('internet_* tables ready');
+
   // Stripe payment records
   db.exec(`CREATE TABLE IF NOT EXISTS stripe_payments (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -697,6 +782,7 @@ async function main() {
   app.use('/api/addons', require('./routes/addons')(db));
   app.use('/api/support', require('./routes/support')(db));
   app.use('/api/notifications', require('./routes/notifications')(db));
+  app.use('/api/internet', require('./routes/internet')(db));
 
   // Stripe payments — tenant-facing endpoints mounted under /api/tenant (auth + tenant guard inside)
   const { tenantPaymentsRouter, webhookHandler } = require('./routes/payments');
@@ -812,6 +898,14 @@ async function main() {
   const { runAutopayCharges } = require('./lib/autopayCron');
   setTimeout(() => runAutopayCharges(db).catch(e => console.error('Autopay cron failed:', e.message)), 60 * 1000);
   setInterval(() => runAutopayCharges(db).catch(e => console.error('Autopay cron failed:', e.message)), 24 * 60 * 60 * 1000);
+
+  // ─── Internet account reconciliation cron (every 5 min) ──────────────────
+  try {
+    const { startInternetCron } = require('./lib/internetCron');
+    startInternetCron(db);
+  } catch (e) {
+    console.error('Failed to register internet cron:', e.message);
+  }
 
   app.listen(PORT, () => console.log(`Backend running on port ${PORT}`));
 }

@@ -1,4 +1,7 @@
 const express = require('express');
+const { applyPurchase } = require('../lib/internetService');
+const { getRouterProvider } = require('../lib/routerProvider');
+const { notifyTenant } = require('../lib/notify');
 
 // Stripe SDK is lazy-loaded — only initialized if STRIPE_SECRET_KEY is set,
 // so the app still boots in environments without Stripe configured.
@@ -304,6 +307,45 @@ function webhookHandler(db) {
       switch (event.type) {
         case 'checkout.session.completed': {
           const session = event.data.object;
+
+          // Internet purchase flow: metadata.kind = 'internet'
+          if (session.metadata?.kind === 'internet') {
+            const purchaseId = Number(session.metadata?.purchase_id);
+            if (!purchaseId) {
+              console.warn('internet checkout.session.completed without purchase_id:', session.id);
+              break;
+            }
+            db.prepare(`
+              UPDATE internet_purchases
+              SET status='paid', stripe_payment_intent_id=?, paid_at=datetime('now')
+              WHERE id=? AND status='pending'
+            `).run(session.payment_intent || null, purchaseId);
+            try {
+              const purchase = applyPurchase(db, purchaseId);
+              const acc = db.prepare('SELECT * FROM internet_accounts WHERE id=?').get(purchase.account_id);
+              // Активирай в рутера веднага (best-effort)
+              try {
+                await getRouterProvider().ensureUser(db, {
+                  username: acc.username, password: acc.password, mac_address: acc.mac_address,
+                  valid_until: acc.valid_until, property_id: acc.property_id,
+                });
+                db.prepare(`UPDATE internet_accounts SET router_synced_at=datetime('now'), status='active' WHERE id=?`).run(acc.id);
+              } catch (e) {
+                console.error('router ensureUser after purchase failed:', e.message);
+              }
+              notifyTenant(db, acc.user_id, {
+                kind: 'internet_activated',
+                title: `Интернетът е активен до ${purchase.valid_until?.slice(0, 16).replace('T', ' ')}`,
+                body: `Платихте ${fmtMoney(purchase.amount)} EUR за пакет "${purchase.plan_name}"`,
+                link: 'internet', ref_type: 'internet_purchase', ref_id: purchaseId,
+              });
+              console.log(`Stripe: internet purchase ${purchaseId} applied to account ${acc.id}`);
+            } catch (err) {
+              console.error('applyPurchase failed:', err.message);
+            }
+            break;
+          }
+
           const invoiceId = session.metadata?.invoice_id;
           if (!invoiceId) {
             console.warn('checkout.session.completed without invoice_id metadata:', session.id);

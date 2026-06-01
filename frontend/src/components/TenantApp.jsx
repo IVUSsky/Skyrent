@@ -13,6 +13,7 @@ const TABS = [
   { id: 'contract',     label: 'Договор',    icon: '📋' },
   { id: 'invoices',     label: 'Фактури',    icon: '🧾' },
   { id: 'addons',       label: 'Услуги',     icon: '🛍️' },
+  { id: 'internet',     label: 'Интернет',   icon: '🌐' },
   { id: 'support',      label: 'Поддръжка',  icon: '🛟' },
   { id: 'consumption',  label: 'Сметки',     icon: '📊' },
   { id: 'profile',      label: 'Профил',     icon: '👤' },
@@ -210,6 +211,7 @@ export default function TenantApp({ userName, onLogout, mustChangePassword }) {
         {tab === 'contract'    && <Contract contracts={me?.contracts || []} />}
         {tab === 'invoices'    && <Invoices />}
         {tab === 'addons'      && <Addons />}
+        {tab === 'internet'    && <TenantInternet />}
         {tab === 'support'     && <TenantTickets />}
         {tab === 'consumption' && <Consumption property={property} />}
         {tab === 'profile'     && <Profile me={me} onChangePassword={() => setShowPwd(true)} />}
@@ -217,7 +219,7 @@ export default function TenantApp({ userName, onLogout, mustChangePassword }) {
 
       {/* Bottom nav */}
       <nav className="fixed bottom-0 inset-x-0 bg-white border-t shadow-lg z-20">
-        <div className="max-w-2xl mx-auto grid grid-cols-9">
+        <div className="max-w-2xl mx-auto grid grid-cols-10">
           {TABS.map(t => (
             <button
               key={t.id}
@@ -747,6 +749,166 @@ function Addons() {
           })}
         </div>
       </Card>
+    </div>
+  )
+}
+
+function TenantInternet() {
+  const [data, setData] = useState(null)
+  const [busy, setBusy]   = useState(null) // plan id while buying
+  const [err, setErr]     = useState(null)
+  const [macInput, setMacInput] = useState('')
+  const [savingMac, setSavingMac] = useState(false)
+
+  const load = () => {
+    apiFetch(`${API}/api/tenant/internet`).then(r => r.json()).then(d => {
+      setData(d); setMacInput(d?.account?.mac_address || '')
+    }).catch(() => setErr('Грешка при зареждане'))
+  }
+  useEffect(load, [])
+
+  // Refresh ако се върнем от Stripe Checkout
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('internet_success')) {
+      setTimeout(() => { load(); window.history.replaceState({}, '', '/') }, 1500)
+    }
+  }, [])
+
+  const buy = async (plan) => {
+    setBusy(plan.id); setErr(null)
+    try {
+      const r = await apiFetch(`${API}/api/tenant/internet/buy`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ plan_id: plan.id }),
+      })
+      const d = await r.json()
+      if (!r.ok || !d.url) { setErr(d.error || 'Грешка'); setBusy(null); return }
+      window.location.href = d.url
+    } catch (e) { setErr('Сървърна грешка'); setBusy(null) }
+  }
+
+  const saveMac = async () => {
+    setSavingMac(true); setErr(null)
+    try {
+      const r = await apiFetch(`${API}/api/tenant/internet/mac`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mac_address: macInput }),
+      })
+      const d = await r.json()
+      if (!r.ok) { setErr(d.error || 'Грешка'); return }
+      load()
+    } catch (e) { setErr('Сървърна грешка') }
+    finally { setSavingMac(false) }
+  }
+
+  if (data === null) return <Card><p className="text-slate-500 text-sm">Зареждане...</p></Card>
+
+  const acc = data.account
+  const isActive = acc.status === 'active' && acc.valid_until && new Date(acc.valid_until) > new Date()
+  const validUntil = acc.valid_until ? new Date(acc.valid_until + (acc.valid_until.endsWith('Z') ? '' : 'Z')) : null
+  const hoursLeft = validUntil ? Math.max(0, (validUntil.getTime() - Date.now()) / 3600000) : 0
+
+  const fmt = n => Number(n || 0).toLocaleString('bg-BG', { minimumFractionDigits: 0 })
+  const fmtTimeLeft = (h) => {
+    if (h < 1)  return `${Math.round(h * 60)} мин`
+    if (h < 48) return `${Math.round(h)} часа`
+    return `${Math.round(h / 24)} дни`
+  }
+
+  return (
+    <div className="space-y-3">
+      {err && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg p-3">{err}</div>}
+
+      {/* Status card */}
+      <Card title="Достъп до Wi-Fi">
+        {isActive ? (
+          <div className="bg-green-50 border border-green-200 rounded-lg p-3 mb-3">
+            <div className="flex items-baseline justify-between">
+              <div className="text-green-800 font-bold">✅ Активен</div>
+              <div className="text-xs text-green-600">остават {fmtTimeLeft(hoursLeft)}</div>
+            </div>
+            <div className="text-xs text-green-700 mt-1">До: {validUntil.toLocaleString('bg-BG')}</div>
+          </div>
+        ) : (
+          <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-3">
+            <div className="text-red-800 font-bold">❌ Няма активен пакет</div>
+            <div className="text-xs text-red-700 mt-1">Изберете план по-долу за да активирате интернет.</div>
+          </div>
+        )}
+
+        <div className="bg-slate-50 rounded p-3 mb-3 text-sm">
+          <div className="text-xs text-slate-500 mb-1">За свързване към Wi-Fi мрежата:</div>
+          <div className="flex justify-between">
+            <span className="text-slate-600">Потребител:</span>
+            <span className="font-mono font-semibold">{acc.username}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-slate-600">Парола:</span>
+            <span className="font-mono font-semibold">{acc.password}</span>
+          </div>
+        </div>
+
+        <div className="text-xs text-slate-600">
+          <div className="font-medium mb-1">MAC адрес на устройството ви (опционално)</div>
+          <div className="text-slate-500 mb-2">Ако зададете MAC, ще се свързвате автоматично без парола.</div>
+          <div className="flex gap-2">
+            <input value={macInput} onChange={e => setMacInput(e.target.value.toUpperCase())}
+              placeholder="AA:BB:CC:DD:EE:FF" maxLength={17}
+              className="flex-1 border border-gray-300 rounded px-2 py-1.5 text-sm font-mono" />
+            <button onClick={saveMac} disabled={savingMac || macInput === (acc.mac_address || '')}
+              className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs px-3 py-1.5 rounded">
+              {savingMac ? '...' : 'Запази'}
+            </button>
+          </div>
+        </div>
+      </Card>
+
+      {/* Plans */}
+      <Card title="Купи пакет">
+        <p className="text-xs text-slate-500 mb-3">Изберете пакет — заплащате с карта; интернетът се активира веднага.</p>
+        <div className="space-y-2">
+          {data.plans.map(p => (
+            <div key={p.id} className="flex items-center justify-between gap-3 py-2 border-b last:border-0">
+              <div className="min-w-0 flex-1">
+                <div className="font-semibold text-slate-800">{p.name}</div>
+                {p.description && <div className="text-xs text-slate-500">{p.description}</div>}
+                <div className="text-xs text-slate-600 mt-0.5">
+                  <strong>{fmt(p.price)} €</strong>
+                  <span className="text-slate-400 ml-1">· {p.duration_days} дни</span>
+                  {p.speed_down_mbps && <span className="text-slate-400 ml-1">· {p.speed_down_mbps}/{p.speed_up_mbps || '?'} Mbps</span>}
+                </div>
+              </div>
+              <button onClick={() => buy(p)} disabled={busy === p.id}
+                className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-semibold px-3 py-2 rounded-lg whitespace-nowrap">
+                {busy === p.id ? '...' : '💳 Купи'}
+              </button>
+            </div>
+          ))}
+        </div>
+      </Card>
+
+      {/* Last purchases */}
+      {data.purchases.length > 0 && (
+        <Card title="История на покупките">
+          <div className="space-y-1 text-xs">
+            {data.purchases.map(p => (
+              <div key={p.id} className="flex justify-between py-1.5 border-b last:border-0">
+                <div>
+                  <div className="font-medium text-slate-800">{p.plan_name}</div>
+                  <div className="text-slate-500">{(p.paid_at || p.created_at || '').slice(0, 16).replace('T', ' ')}</div>
+                </div>
+                <div className="text-right">
+                  <div className="font-semibold">{fmt(p.amount)} €</div>
+                  <div className={`text-[10px] ${p.status === 'paid' ? 'text-green-600' : 'text-yellow-600'}`}>
+                    {p.status === 'paid' ? '✓ Платен' : '⏳ Чакащ'}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
     </div>
   )
 }

@@ -16,6 +16,7 @@ import Smart from './components/Smart'
 import Investments from './components/Investments'
 import Addons from './components/Addons'
 import Support from './components/Support'
+import Internet from './components/Internet'
 import TenantApp from './components/TenantApp'
 import ChatLearning from './components/ChatLearning'
 import NotificationBell from './components/NotificationBell'
@@ -32,6 +33,7 @@ const ALL_TABS = [
   { id: 'invoices',  label: '🧾 Фактури',     roles: ['admin', 'broker'] },
   { id: 'contracts', label: '📋 Договори',    roles: ['admin', 'broker'] },
   { id: 'addons',    label: '🛍️ Услуги',     roles: ['admin'] },
+  { id: 'internet',  label: '🌐 Интернет',    roles: ['admin'] },
   { id: 'support',   label: '🛟 Поддръжка',   roles: ['admin'] },
   { id: 'loans',     label: 'Кредити',        roles: ['admin'] },
   { id: 'analysis',  label: 'Анализ',         roles: ['admin'] },
@@ -188,6 +190,7 @@ export default function App() {
         {validTab === 'invoices'  && <Invoices API={API} role={role} />}
         {validTab === 'contracts' && <Contracts API={API} role={role} />}
         {validTab === 'addons'    && <Addons API={API} />}
+        {validTab === 'internet'  && <Internet API={API} />}
         {validTab === 'support'   && <Support API={API} />}
         {validTab === 'loans'     && <Loans API={API} />}
         {validTab === 'history'   && <History API={API} />}
