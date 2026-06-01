@@ -345,14 +345,17 @@ export default function PersonalBudget() {
                      placeholder="напр. 43496.49"
                      className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm" autoFocus/>
             </Field>
-            <Field label="Към дата">
+            <Field label="Към края на коя дата">
               <input type="date" value={baselineForm.as_of}
                      onChange={e => setBaselineForm(f => ({ ...f, as_of: e.target.value }))}
                      className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm"/>
             </Field>
-            <p className="text-xs text-gray-500 mt-2">
-              След тази дата всички tx-те (от вече импортирани извлечения) ще променят баланса.
-            </p>
+            <div className="text-xs text-gray-500 mt-2 space-y-1">
+              <p><b>Важно:</b> Сумата представлява <b>баланса в края на избраната дата</b>.</p>
+              <p>Tx-тeте СЛЕД тази дата ще се добавят/изваждат от баланса.</p>
+              <p>Tx-те НА същата дата вече се считат за част от baseline-а — няма да се броят отново.</p>
+              <p className="text-blue-700">💡 Пример: ако днес банката показва X EUR, въведи X и изберди <b>днешна дата</b>.</p>
+            </div>
             <div className="flex gap-2 mt-5 justify-end">
               <button onClick={() => setShowBaseline(null)}
                       className="px-4 py-1.5 text-sm text-gray-600 hover:text-gray-900">Отказ</button>

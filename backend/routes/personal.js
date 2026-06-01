@@ -648,7 +648,11 @@ module.exports = function(db) {
       if (opening !== null && opSource !== 'pdf_closing_fallback') {
         const sessIds = sessions.map(s => s.id);
         const placeholders = sessIds.map(() => '?').join(',');
-        // Сумирай tx-те с дата >= asOfDate (избягвай дублирано броене ако опорна = вече начислена)
+        // ВАЖНО: ползваме дата > as_of (не >=), за да третираме baseline като
+        // "балансът в края на as_of date" — tx-те ON as_of date вече са включени
+        // в baseline и не се броят втори път. За PDF opening (typically date на
+        // statement start) използваме >= за да броим включително тази дата.
+        const cmp = opSource === 'manual' ? '>' : '>=';
         const sumRow = db.prepare(`
           SELECT
             COALESCE(SUM(CASE WHEN operation='Кт' THEN сума ELSE 0 END), 0) AS kt,
@@ -657,7 +661,7 @@ module.exports = function(db) {
             MAX(дата) AS last_date
           FROM transactions
           WHERE session_id IN (${placeholders})
-            AND дата >= ?
+            AND дата ${cmp} ?
         `).get(...sessIds, asOfDate || '1970-01-01');
         balance = opening + (Number(sumRow.kt) || 0) - (Number(sumRow.dt) || 0);
         lastTxDate = sumRow.last_date || asOfDate;
