@@ -185,6 +185,92 @@ module.exports = function(db) {
     });
   });
 
+  // POST /rebuild-from-tx
+  // Сканира съществуващите transactions и:
+  // 1. За всеки Кт с категория ∈ ['заплата','управление','наем'] и scope='personal'
+  //    → ако няма personal_income запис → създава го.
+  // 2. За всеки Дт с scope='personal' → ако има свързан expense_invoices с
+  //    различен scope → sync-ва го на 'personal'.
+  // Идемпотентно — можеш да го пускаш многократно.
+  router.post('/rebuild-from-tx', (req, res) => {
+    const ktRows = db.prepare(`
+      SELECT t.* FROM transactions t
+      WHERE t.operation = 'Кт'
+        AND t.scope = 'personal'
+        AND t.категория IN ('заплата', 'управление', 'наем')
+        AND NOT EXISTS (SELECT 1 FROM personal_income pi WHERE pi.bank_tx_id = t.id)
+    `).all();
+
+    const insertPi = db.prepare(`INSERT INTO personal_income
+      (дата, тип, сума, валута, източник, бележка, bank_tx_id) VALUES (?,?,?,?,?,?,?)`);
+
+    let createdIncome = 0;
+    for (const t of ktRows) {
+      let pincomeType = 'друго';
+      if (t.категория === 'заплата')    pincomeType = 'заплата';
+      else if (t.категория === 'управление') pincomeType = 'управление';
+      // наем → 'друго' (личен наем)
+      insertPi.run(
+        t.дата, pincomeType, t.сума,
+        t.currency || 'EUR',
+        t.контрагент || '',
+        t.основание || `Ретро от bank tx #${t.id}`,
+        t.id
+      );
+      createdIncome++;
+    }
+
+    // Sync expense_invoices.scope = transactions.scope ако bank_tx_id linked
+    const syncExpense = db.prepare(`
+      UPDATE expense_invoices
+      SET scope = (SELECT scope FROM transactions WHERE id = expense_invoices.bank_tx_id)
+      WHERE bank_tx_id IS NOT NULL
+        AND scope != (SELECT scope FROM transactions WHERE id = expense_invoices.bank_tx_id)
+    `).run();
+
+    res.json({
+      создадени_доходи:  createdIncome,
+      синхронизирани_разходи: syncExpense.changes,
+      Кт_намерени:       ktRows.length,
+    });
+  });
+
+  // POST /scope/by-keyword  { keyword, scope: 'personal'|'business', operation? }
+  // Ретро-маркира всички transactions match-ващи keyword като желания scope.
+  // Полезно когато не си посочил account scope при импорта.
+  router.post('/scope/by-keyword', (req, res) => {
+    const { keyword, scope, operation } = req.body || {};
+    if (!keyword || !['personal','business'].includes(scope)) {
+      return res.status(400).json({ error: 'keyword + scope са задължителни' });
+    }
+    const kw = `%${keyword.toLowerCase()}%`;
+    let sql = `UPDATE transactions SET scope = ?
+               WHERE (LOWER(контрагент) LIKE ? OR LOWER(основание) LIKE ?)`;
+    const params = [scope, kw, kw];
+    if (operation) { sql += ' AND operation = ?'; params.push(operation); }
+    const r = db.prepare(sql).run(...params);
+    // Sync expense_invoices
+    db.prepare(`UPDATE expense_invoices
+                SET scope = ?
+                WHERE bank_tx_id IN (
+                  SELECT id FROM transactions
+                  WHERE (LOWER(контрагент) LIKE ? OR LOWER(основание) LIKE ?)
+                  ${operation ? 'AND operation = ?' : ''}
+                )`).run(scope, kw, kw, ...(operation ? [operation] : []));
+    res.json({ updated: r.changes });
+  });
+
+  // GET /last-month → връща последния месец с personal_income или
+  // personal expense_invoices. По default за UI picker.
+  router.get('/last-month', (req, res) => {
+    const lastIncome = db.prepare(`SELECT MAX(strftime('%Y-%m', дата)) AS m FROM personal_income`).get();
+    const lastExpense = db.prepare(`SELECT MAX(месец) AS m FROM expense_invoices WHERE scope='personal'`).get();
+    const a = lastIncome?.m || '';
+    const b = lastExpense?.m || '';
+    const last = a > b ? a : b;
+    res.json({ месец: last || new Date().toISOString().slice(0, 7) });
+  });
+
   // GET /summary/timeline?months=12 → месечни суми за последните N месеца
   router.get('/summary/timeline', (req, res) => {
     const months = Math.min(60, Math.max(1, Number(req.query.months) || 12));

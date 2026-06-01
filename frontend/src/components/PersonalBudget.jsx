@@ -29,6 +29,9 @@ export default function PersonalBudget() {
   const [timeline, setTimeline] = useState([])
   const [loading, setLoading]   = useState(false)
   const [showAdd, setShowAdd]   = useState(false)
+  const [rebuildOpen, setRebuildOpen] = useState(false)
+  const [rebuildResult, setRebuildResult] = useState(null)
+  const [initialized, setInitialized] = useState(false)
   const [form, setForm]         = useState({
     дата: new Date().toISOString().slice(0, 10),
     тип:  'заплата',
@@ -49,7 +52,30 @@ export default function PersonalBudget() {
     }).catch(() => setLoading(false))
   }, [month])
 
-  useEffect(() => { load() }, [load])
+  // На първо зареждане: попитай backend за последния месец с данни
+  // и автоматично го избери (вместо текущия, който може да е празен).
+  useEffect(() => {
+    if (initialized) return
+    apiFetch(`${API}/api/personal/last-month`)
+      .then(r => r.json())
+      .then(d => {
+        if (d?.месец && d.месец !== today) setMonth(d.месец)
+        setInitialized(true)
+      })
+      .catch(() => setInitialized(true))
+  }, [initialized, today])
+
+  useEffect(() => { if (initialized) load() }, [load, initialized])
+
+  const doRebuild = () => {
+    apiFetch(`${API}/api/personal/rebuild-from-tx`, { method: 'POST' })
+      .then(r => r.json())
+      .then(d => {
+        setRebuildResult(d)
+        load()
+        setTimeout(() => setRebuildResult(null), 8000)
+      })
+  }
 
   const submitIncome = () => {
     if (!form.дата || !form.сума) return
@@ -84,12 +110,24 @@ export default function PersonalBudget() {
                  className="border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400"/>
         </div>
         <div className="ml-auto flex gap-2">
+          <button onClick={doRebuild}
+                  title="Сканира съществуващи bank transactions и създава липсващи personal_income (полезно ако си импортирал bank данни преди настройка на account scope)"
+                  className="px-4 py-1.5 bg-amber-100 hover:bg-amber-200 text-amber-800 border border-amber-300 rounded text-sm font-medium">
+            ⟳ Преизчисли от банка
+          </button>
           <button onClick={() => setShowAdd(true)}
                   className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm font-medium">
             + Добави доход
           </button>
         </div>
       </div>
+
+      {rebuildResult && (
+        <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl p-3 text-sm">
+          ✓ Преизчисление готово — създадени {rebuildResult.создадени_доходи} нови доходи от {rebuildResult.Кт_намерени} Кт транзакции;
+          синхронизирани {rebuildResult.синхронизирани_разходи} разходни записи.
+        </div>
+      )}
 
       {/* KPI cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
