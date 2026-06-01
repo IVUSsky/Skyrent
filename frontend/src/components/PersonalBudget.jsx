@@ -35,6 +35,8 @@ export default function PersonalBudget() {
   const [timeline, setTimeline] = useState([])
   const [breakdown, setBreakdown] = useState(null)
   const [balances, setBalances]   = useState(null)
+  const [showBaseline, setShowBaseline] = useState(null)
+  const [baselineForm, setBaselineForm] = useState({ opening: '', as_of: '' })
   const [loading, setLoading]   = useState(false)
   const [showAdd, setShowAdd]   = useState(false)
   const [rebuildResult, setRebuildResult] = useState(null)
@@ -109,6 +111,30 @@ export default function PersonalBudget() {
     apiFetch(`${API}/api/personal/accounts`)
       .then(r => r.json())
       .then(d => { setAccounts(d); setShowAccounts(true) })
+  }
+
+  const openBaseline = (acc) => {
+    setShowBaseline(acc)
+    setBaselineForm({
+      opening: acc.opening != null ? String(acc.opening) : '',
+      as_of:   acc.opening_as_of || new Date().toISOString().slice(0, 10),
+    })
+  }
+
+  const saveBaseline = () => {
+    if (!showBaseline || !baselineForm.opening) return
+    apiFetch(`${API}/api/personal/accounts/baseline`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        iban: showBaseline.iban,
+        opening: Number(baselineForm.opening),
+        as_of: baselineForm.as_of,
+      }),
+    }).then(r => r.json()).then(() => {
+      setShowBaseline(null)
+      load()
+    })
   }
 
   const markSession = (session_id, scope) => {
@@ -272,20 +298,70 @@ export default function PersonalBudget() {
 
       {/* Account balances detail */}
       {(balances?.акаунти || []).length > 0 && (
-        <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-3 text-xs flex flex-wrap gap-4">
-          <div className="font-bold text-gray-500 uppercase">Баланс по сметка (към последен импорт):</div>
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-3 text-xs space-y-1">
+          <div className="font-bold text-gray-500 uppercase mb-1">Баланс по сметка:</div>
           {(balances.акаунти || []).map(a => (
-            <div key={a.iban} className="flex items-center gap-2">
+            <div key={a.iban} className="flex items-center gap-2 flex-wrap">
               <span className={a.scope === 'personal' ? 'text-pink-700' : 'text-slate-700'}>
                 {a.scope === 'personal' ? '👤' : '🏢'}
               </span>
-              <code className="text-[10px] text-gray-500">{a.iban.slice(0,12)}...</code>
-              <b className={a.balance < 0 ? 'text-rose-700' : 'text-emerald-700'}>
-                {fmt(a.balance)} {a.currency}
+              <code className="text-[10px] text-gray-500">{a.iban}</code>
+              <b className={(a.balance || 0) < 0 ? 'text-rose-700' : 'text-emerald-700'}>
+                {a.balance != null ? fmt(a.balance) : '—'} {a.currency}
               </b>
-              <span className="text-gray-400">@ {a.as_of}</span>
+              <span className="text-gray-400">
+                @ {a.as_of} · {a.tx_count} tx
+                {a.opening_source === 'manual' && ' · ръчно baseline'}
+                {a.opening_source === 'pdf_opening' && ` · от opening на ${a.opening_as_of}`}
+                {a.opening_source === 'pdf_closing_fallback' && ` · от closing на ${a.opening_as_of}`}
+              </span>
+              {a.needs_baseline && (
+                <span className="text-amber-700 text-[10px]">⚠ няма базова стойност</span>
+              )}
+              <button onClick={() => openBaseline(a)}
+                      className="ml-auto text-xs px-2 py-0.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded">
+                ✎ Корекция
+              </button>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Baseline modal */}
+      {showBaseline && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={() => setShowBaseline(null)}>
+          <div className="bg-white rounded-xl shadow-2xl p-5 max-w-md w-full m-4" onClick={e => e.stopPropagation()}>
+            <h3 className="text-lg font-bold text-gray-900 mb-3">✎ Корекция на баланс</h3>
+            <p className="text-sm text-gray-600 mb-3">
+              Задай реалния баланс по сметката към определена дата. Системата ще
+              използва това като опорна точка + ще добави всички tx-те след тази дата.
+            </p>
+            <div className="bg-gray-50 rounded p-2 text-xs mb-3">
+              IBAN: <code>{showBaseline.iban}</code>
+            </div>
+            <Field label="Реален баланс (от твоето online banking)">
+              <input type="number" step="0.01" value={baselineForm.opening}
+                     onChange={e => setBaselineForm(f => ({ ...f, opening: e.target.value }))}
+                     placeholder="напр. 43496.49"
+                     className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm" autoFocus/>
+            </Field>
+            <Field label="Към дата">
+              <input type="date" value={baselineForm.as_of}
+                     onChange={e => setBaselineForm(f => ({ ...f, as_of: e.target.value }))}
+                     className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm"/>
+            </Field>
+            <p className="text-xs text-gray-500 mt-2">
+              След тази дата всички tx-те (от вече импортирани извлечения) ще променят баланса.
+            </p>
+            <div className="flex gap-2 mt-5 justify-end">
+              <button onClick={() => setShowBaseline(null)}
+                      className="px-4 py-1.5 text-sm text-gray-600 hover:text-gray-900">Отказ</button>
+              <button onClick={saveBaseline}
+                      className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm font-medium">
+                Запази
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

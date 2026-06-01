@@ -513,45 +513,129 @@ module.exports = function(db) {
     });
   });
 
-  // GET /accounts/balances → текущ баланс per IBAN от latest import session
+  // GET /accounts/balances → live computed балас per IBAN.
+  // Алгоритъм:
+  //  1. За всеки известен IBAN (от import_sessions) намери най-ранния session с
+  //     opening_balance → опорна точка.
+  //  2. Sum-вай Кт и Дт от ВСИЧКИ tx-те в сесии за този IBAN с дата >= опорната.
+  //  3. balance = opening + Σ Кт − Σ Дт.
+  //
+  // Ако няма session с opening_balance → fallback към latest closing_balance.
+  // Ако и това няма → 0 + поле needs_baseline=true (UI ще покаже бутон Корекция).
   router.get('/accounts/balances', (req, res) => {
-    const rows = db.prepare(`
-      SELECT account_iban, account_scope, account_currency,
-             closing_balance, month_to, imported_at, filename
+    const allSessions = db.prepare(`
+      SELECT id, account_iban, account_scope, account_currency,
+             opening_balance, closing_balance, month_from, month_to,
+             imported_at, filename
       FROM import_sessions
-      WHERE account_iban IS NOT NULL AND closing_balance IS NOT NULL
-      ORDER BY month_to DESC, imported_at DESC
+      WHERE account_iban IS NOT NULL
+      ORDER BY month_from ASC, imported_at ASC
     `).all();
 
-    // Group: latest closing per IBAN
-    const seen = new Set();
-    const latest = [];
-    for (const r of rows) {
-      if (seen.has(r.account_iban)) continue;
-      seen.add(r.account_iban);
-      latest.push({
-        iban: r.account_iban,
-        scope: r.account_scope,
-        currency: r.account_currency || 'EUR',
-        balance: Number((r.closing_balance || 0).toFixed(2)),
-        as_of: r.month_to,
-        from_file: r.filename,
+    // Group sessions by IBAN
+    const byIban = new Map();
+    for (const s of allSessions) {
+      if (!byIban.has(s.account_iban)) byIban.set(s.account_iban, []);
+      byIban.get(s.account_iban).push(s);
+    }
+
+    // Manual baseline overrides от settings.account_baseline (JSON: {iban: {opening, as_of}})
+    const baselineRow = db.prepare("SELECT value FROM settings WHERE key='account_baseline'").get();
+    let baselines = {};
+    if (baselineRow) { try { baselines = JSON.parse(baselineRow.value); } catch {} }
+
+    const accounts = [];
+    for (const [iban, sessions] of byIban) {
+      const latestSession = sessions[sessions.length - 1];
+      const earliestWithOpening = sessions.find(s => s.opening_balance != null);
+      const manualBaseline = baselines[iban];
+
+      let opening = null;
+      let asOfDate = null;
+      let opSource = null;
+      if (manualBaseline?.opening != null) {
+        opening = Number(manualBaseline.opening);
+        asOfDate = manualBaseline.as_of || sessions[0]?.month_from;
+        opSource = 'manual';
+      } else if (earliestWithOpening) {
+        opening = Number(earliestWithOpening.opening_balance);
+        asOfDate = earliestWithOpening.month_from || `${earliestWithOpening.month_from}-01`;
+        opSource = 'pdf_opening';
+      } else if (latestSession.closing_balance != null) {
+        opening = Number(latestSession.closing_balance);
+        asOfDate = latestSession.month_to;
+        opSource = 'pdf_closing_fallback';
+      }
+
+      let balance = opening;
+      let lastTxDate = asOfDate;
+      let txCount = 0;
+      if (opening !== null && opSource !== 'pdf_closing_fallback') {
+        const sessIds = sessions.map(s => s.id);
+        const placeholders = sessIds.map(() => '?').join(',');
+        // Сумирай tx-те с дата >= asOfDate (избягвай дублирано броене ако опорна = вече начислена)
+        const sumRow = db.prepare(`
+          SELECT
+            COALESCE(SUM(CASE WHEN operation='Кт' THEN сума ELSE 0 END), 0) AS kt,
+            COALESCE(SUM(CASE WHEN operation='Дт' THEN сума ELSE 0 END), 0) AS dt,
+            COUNT(*) AS cnt,
+            MAX(дата) AS last_date
+          FROM transactions
+          WHERE session_id IN (${placeholders})
+            AND дата >= ?
+        `).get(...sessIds, asOfDate || '1970-01-01');
+        balance = opening + (Number(sumRow.kt) || 0) - (Number(sumRow.dt) || 0);
+        lastTxDate = sumRow.last_date || asOfDate;
+        txCount = sumRow.cnt;
+      }
+
+      accounts.push({
+        iban,
+        scope: latestSession.account_scope,
+        currency: latestSession.account_currency || 'EUR',
+        balance: balance !== null ? Number(balance.toFixed(2)) : null,
+        opening: opening !== null ? Number(opening.toFixed(2)) : null,
+        opening_as_of: asOfDate,
+        opening_source: opSource,
+        as_of: lastTxDate,
+        tx_count: txCount,
+        needs_baseline: opening === null,
+        sessions_count: sessions.length,
       });
     }
 
-    // Totals по scope (за KPI карта)
-    const totals = latest.reduce((acc, a) => {
+    accounts.sort((a, b) => (b.balance || 0) - (a.balance || 0));
+
+    const totals = accounts.reduce((acc, a) => {
       const k = a.scope || 'unknown';
-      acc[k] = (acc[k] || 0) + a.balance;
+      if (a.balance !== null) acc[k] = (acc[k] || 0) + a.balance;
       return acc;
     }, {});
 
     res.json({
-      акаунти: latest,
+      акаунти: accounts,
       общо_personal: Number((totals.personal || 0).toFixed(2)),
       общо_business: Number((totals.business || 0).toFixed(2)),
       общо: Number(Object.values(totals).reduce((s, v) => s + v, 0).toFixed(2)),
     });
+  });
+
+  // POST /accounts/baseline { iban, opening, as_of }
+  // Manual override на началния баланс на сметка. Полезно когато:
+  //  - PDF-ите не съдържат opening_balance
+  //  - Балансът в системата не съвпада с реалния по сметка → задаваш реалния
+  router.post('/accounts/baseline', (req, res) => {
+    const { iban, opening, as_of } = req.body || {};
+    if (!iban || opening === undefined) {
+      return res.status(400).json({ error: 'iban + opening са задължителни' });
+    }
+    const ibanUp = String(iban).replace(/\s+/g, '').toUpperCase();
+    const row = db.prepare("SELECT value FROM settings WHERE key='account_baseline'").get();
+    let map = {};
+    if (row) { try { map = JSON.parse(row.value); } catch {} }
+    map[ibanUp] = { opening: Number(opening), as_of: as_of || new Date().toISOString().slice(0, 10) };
+    db.prepare(`INSERT OR REPLACE INTO settings (key, value) VALUES ('account_baseline', ?)`).run(JSON.stringify(map));
+    res.json({ ok: true, iban: ibanUp, baseline: map[ibanUp] });
   });
 
   // GET /last-month → връща последния месец с personal_income или
