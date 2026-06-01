@@ -163,16 +163,20 @@ module.exports = function(db) {
     return { from: `${t}-01`, to: last, label: t };
   }
 
+  // Категории Дт които НЕ са лични разходи а capital flows/loans/инвестиции:
+  // изключват се от "Лични разходи" и се показват отделно в breakdown-а.
+  const NOT_PERSONAL_EXPENSE = ['вноска', 'заем_sky', 'инвестиция', 'благородни метали',
+                                 'ремонт', 'ремонт д', 'нап_ддс'];
+
   // ── Period summary ────────────────────────────────────────────────────────
   // Връща: доходи (по тип), разходи (по категория), нетен cashflow, savings rate.
   // Параметри: ?month=YYYY-MM ИЛИ ?from=YYYY-MM-DD&to=YYYY-MM-DD ИЛИ ?months=N
   //
   // ВАЖНО за формулата:
   // - доход_общо = personal_income (заплати, наеми, дивиденти, и т.н.)
-  // - разходи_общо = ВСИЧКИ Дт от personal transactions за периода
-  //   (включително инвестиции, прехвърления, кеш, не само "лични разходи")
-  // - реално_свободно = доход - всичко излязло (включително инвестираното)
-  //   → това е действителната сума, с която сметката е нараснала/намаляла
+  // - разходи_общо = САМО реални консумативни Дт (изключва loans/capital/инв.)
+  // - капитал_общо = вноски + заеми към Sky + инвестиции (отделно)
+  // - реално_свободно = доход - разходи - капитал
   router.get('/summary', (req, res) => {
     const { from, to, label } = parsePeriod(req.query);
 
@@ -192,7 +196,6 @@ module.exports = function(db) {
       GROUP BY категория, currency
     `).all(from, to);
 
-    // Ръчни expense_invoices без bank_tx_id (manual cash/cards)
     const manualExp = db.prepare(`
       SELECT expense_category AS категория, currency, SUM(amount) AS total, COUNT(*) AS count
       FROM expense_invoices
@@ -202,7 +205,6 @@ module.exports = function(db) {
       GROUP BY expense_category, currency
     `).all(from, to, from.slice(0, 7), to.slice(0, 7));
 
-    // Merge personalOut + manualExp по категория
     const expMap = new Map();
     const addExp = (rows) => {
       for (const r of rows) {
@@ -215,11 +217,17 @@ module.exports = function(db) {
     };
     addExp(personalOut);
     addExp(manualExp);
-    const expensesByCat = [...expMap.values()].sort((a, b) => b.total - a.total);
+    const allOutflows = [...expMap.values()].sort((a, b) => b.total - a.total);
+
+    // Раздели на: реални лични разходи / капитал-loans-инвестиции
+    const expensesByCat = allOutflows.filter(r => !NOT_PERSONAL_EXPENSE.includes(r.expense_category));
+    const capitalByCat  = allOutflows.filter(r =>  NOT_PERSONAL_EXPENSE.includes(r.expense_category));
 
     const incomeTotal  = incomeByType.reduce((s, r) => s + (Number(r.total) || 0), 0);
     const expenseTotal = expensesByCat.reduce((s, r) => s + (Number(r.total) || 0), 0);
+    const capitalTotal = capitalByCat.reduce((s, r) => s + (Number(r.total) || 0), 0);
     const cashflow     = incomeTotal - expenseTotal;
+    const realFree     = incomeTotal - expenseTotal - capitalTotal;
 
     const settingsRow = db.prepare("SELECT value FROM settings WHERE key='savings_target_pct'").get();
     const targetPct = settingsRow ? Number(settingsRow.value) || 0 : 30;
@@ -243,9 +251,12 @@ module.exports = function(db) {
       месец: label,
       доход_общо:     Number(incomeTotal.toFixed(2)),
       разходи_общо:   Number(expenseTotal.toFixed(2)),
+      капитал_общо:   Number(capitalTotal.toFixed(2)),
       нетен_cashflow: Number(cashflow.toFixed(2)),
+      реално_свободно: Number(realFree.toFixed(2)),
       доход_по_тип:           incomeByType,
       разходи_по_категория:   expensesByCat,
+      капитал_по_категория:   capitalByCat,
       savings: {
         rate_pct: savingsRate,
         target_pct: targetPct,

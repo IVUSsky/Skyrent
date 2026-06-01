@@ -368,6 +368,39 @@ export default function PersonalBudget() {
       {view === 'analysis' && <ExpenseAnalysis breakdown={breakdown}/>}
 
       {view === 'overview' && <>
+      {/* Cashflow breakdown — visual baleance */}
+      {(s.доход_общо > 0 || s.разходи_общо > 0 || s.капитал_общо > 0) && (
+        <div className="bg-gradient-to-r from-emerald-50 to-rose-50 rounded-xl border border-gray-200 shadow-sm p-4">
+          <div className="text-sm font-bold text-gray-800 mb-2">💧 Cash flow за периода</div>
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-2 text-sm">
+            <div className="bg-white rounded p-2">
+              <div className="text-xs text-gray-500">Доход</div>
+              <div className="font-bold text-emerald-700">+{fmt(s.доход_общо)}</div>
+            </div>
+            <div className="bg-white rounded p-2">
+              <div className="text-xs text-gray-500">Лични разходи</div>
+              <div className="font-bold text-rose-700">−{fmt(s.разходи_общо)}</div>
+            </div>
+            <div className="bg-white rounded p-2">
+              <div className="text-xs text-gray-500">Кредити/Капитал/Инв.</div>
+              <div className="font-bold text-amber-700">−{fmt(s.капитал_общо || 0)}</div>
+            </div>
+            <div className="bg-white rounded p-2 border-2 border-blue-200">
+              <div className="text-xs text-gray-500">Реално остава</div>
+              <div className={`font-bold ${(s.реално_свободно || 0) < 0 ? 'text-rose-700' : 'text-blue-700'}`}>
+                {fmt(s.реално_свободно || 0)}
+              </div>
+            </div>
+            <div className="bg-white rounded p-2">
+              <div className="text-xs text-gray-500">Cashflow (без капитал)</div>
+              <div className={`font-bold ${(s.нетен_cashflow || 0) < 0 ? 'text-rose-700' : 'text-emerald-700'}`}>
+                {fmt(s.нетен_cashflow || 0)}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Income & Expenses breakdown */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
@@ -408,6 +441,34 @@ export default function PersonalBudget() {
           )}
         </div>
       </div>
+
+      {/* Капитал / Кредити / Инвестиции */}
+      {(s.капитал_по_категория || []).length > 0 && (
+        <div className="bg-white rounded-xl border border-amber-200 shadow-sm p-4">
+          <h3 className="text-sm font-bold text-gray-800 mb-3">🏦 Кредитни вноски / Капитал / Инвестиции</h3>
+          <p className="text-xs text-gray-500 mb-2">
+            Това НЕ са лични разходи — пари които излизат от сметката но отиват в активи (имоти, инвестиции, фирмата).
+          </p>
+          <table className="w-full text-sm">
+            <tbody>
+              {(s.капитал_по_категория || []).map((r, i) => (
+                <tr key={i} className="border-t border-gray-100">
+                  <td className="py-2 text-gray-700">{r.expense_category || '—'}</td>
+                  <td className="py-2 text-right font-medium text-amber-700">−{fmt(r.total)} {r.currency}</td>
+                  <td className="py-2 text-right text-gray-400 text-xs w-12">×{r.count}</td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot className="border-t-2 border-gray-300">
+              <tr>
+                <td className="py-2 font-bold text-gray-800">Общо капитал/кредити</td>
+                <td className="py-2 text-right font-bold text-amber-700">−{fmt(s.капитал_общо || 0)}</td>
+                <td></td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      )}
 
       {/* Timeline chart */}
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
