@@ -44,6 +44,7 @@ export default function PersonalBudget() {
   const [markIban, setMarkIban] = useState('')
   const [markScope, setMarkScope] = useState('personal')
   const [marking, setMarking]   = useState(false)
+  const [markError, setMarkError] = useState(null)
 
   // Period → query string
   const periodQuery = () => {
@@ -109,14 +110,24 @@ export default function PersonalBudget() {
   }
 
   const markAccount = () => {
-    if (!markIban) return
+    const ibanClean = (markIban || '').replace(/\s+/g, '').toUpperCase()
+    if (!ibanClean) { setMarkError('Въведи IBAN'); return }
+    if (!/^BG\d{2}[A-Z]{4}[A-Z0-9]{14,18}$/.test(ibanClean)) {
+      setMarkError(`Невалиден IBAN: "${ibanClean}". Формат BG + 22 символа.`)
+      return
+    }
+    setMarkError(null)
     setMarking(true)
     apiFetch(`${API}/api/personal/accounts/mark-and-rebuild`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ iban: markIban, scope: markScope }),
+      body: JSON.stringify({ iban: ibanClean, scope: markScope }),
     })
-      .then(r => r.json())
+      .then(async r => {
+        const data = await r.json()
+        if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`)
+        return data
+      })
       .then(d => {
         setMarking(false)
         setRebuildResult({
@@ -126,10 +137,11 @@ export default function PersonalBudget() {
           extra: `Сметка ${d.iban} → ${d.scope_set}; ${d.tx_updated} tx-те обновени.`,
         })
         setShowAccounts(false)
+        setMarkIban('')
         load()
         setTimeout(() => setRebuildResult(null), 10000)
       })
-      .catch(() => setMarking(false))
+      .catch(e => { setMarking(false); setMarkError(`Грешка: ${e.message}`) })
   }
 
   const submitIncome = () => {
@@ -392,10 +404,16 @@ export default function PersonalBudget() {
               </div>
             )}
             <Field label="IBAN на сметката">
-              <input type="text" value={markIban} onChange={e => setMarkIban(e.target.value.toUpperCase())}
+              <input type="text" value={markIban}
+                     onChange={e => { setMarkIban(e.target.value.toUpperCase()); setMarkError(null) }}
                      placeholder="напр. BG34PRCB92301040957901"
                      className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm font-mono" autoFocus/>
             </Field>
+            {markError && (
+              <div className="mt-2 text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded p-2">
+                {markError}
+              </div>
+            )}
             <div className="mt-3">
               <div className="text-xs font-bold text-gray-500 uppercase mb-1">Scope</div>
               <div className="flex gap-2">
