@@ -109,19 +109,13 @@ export default function PersonalBudget() {
       .then(d => { setAccounts(d); setShowAccounts(true) })
   }
 
-  const markAccount = () => {
-    const ibanClean = (markIban || '').replace(/\s+/g, '').toUpperCase()
-    if (!ibanClean) { setMarkError('Въведи IBAN'); return }
-    if (!/^BG\d{2}[A-Z]{4}[A-Z0-9]{14,18}$/.test(ibanClean)) {
-      setMarkError(`Невалиден IBAN: "${ibanClean}". Формат BG + 22 символа.`)
-      return
-    }
+  const markSession = (session_id, scope) => {
     setMarkError(null)
     setMarking(true)
     apiFetch(`${API}/api/personal/accounts/mark-and-rebuild`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ iban: ibanClean, scope: markScope }),
+      body: JSON.stringify({ session_id, scope }),
     })
       .then(async r => {
         const data = await r.json()
@@ -134,10 +128,10 @@ export default function PersonalBudget() {
           создадени_доходи: d.personal_income_created,
           Кт_намерени:      d.personal_income_created,
           синхронизирани_разходи: d.tx_updated,
-          extra: `Сметка ${d.iban} → ${d.scope_set}; ${d.tx_updated} tx-те обновени.`,
+          extra: `Сесия #${d.session_id} → ${d.scope_set}; ${d.tx_updated} tx-те обновени.`,
         })
-        setShowAccounts(false)
-        setMarkIban('')
+        // Re-fetch accounts list to update scope counts
+        apiFetch(`${API}/api/personal/accounts`).then(r => r.json()).then(setAccounts)
         load()
         setTimeout(() => setRebuildResult(null), 10000)
       })
@@ -379,23 +373,25 @@ export default function PersonalBudget() {
       </div>
       </>}
 
-      {/* Accounts modal — маркирай сметка като personal/business + ретро */}
+      {/* Accounts modal — маркирай сесии като personal/business + ретро */}
       {showAccounts && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={() => setShowAccounts(false)}>
-          <div className="bg-white rounded-xl shadow-2xl p-5 max-w-lg w-full m-4" onClick={e => e.stopPropagation()}>
-            <h3 className="text-lg font-bold text-gray-900 mb-3">🏦 Маркирай сметка</h3>
+          <div className="bg-white rounded-xl shadow-2xl p-5 max-w-3xl w-full m-4 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <h3 className="text-lg font-bold text-gray-900 mb-3">🏦 Маркирай импорт сесия</h3>
             <p className="text-sm text-gray-600 mb-3">
-              Промяната ретроактивно update-ва всички вече импортирани транзакции
-              от тази сметка + обновява personal_income/expense_invoices.
+              Всеки импорт от банка = една сесия. Кликни <b>👤 Лична</b> или <b>🏢 Бизнес</b>
+              за дадена сесия → ретроактивно update-ва всички транзакции от тази сесия +
+              синхронизира expense_invoices/personal_income.
             </p>
+
             {accounts?.account_scope_map && Object.keys(accounts.account_scope_map).length > 0 && (
-              <div className="mb-3">
-                <div className="text-xs font-bold text-gray-500 uppercase mb-1">Текущи маркировки</div>
+              <div className="mb-4">
+                <div className="text-xs font-bold text-gray-500 uppercase mb-1">Известни IBAN-и</div>
                 <div className="bg-gray-50 rounded p-2 text-xs space-y-1">
                   {Object.entries(accounts.account_scope_map).map(([iban, scope]) => (
                     <div key={iban} className="flex justify-between">
-                      <code>{iban}</code>
-                      <span className={scope === 'personal' ? 'text-pink-700' : 'text-slate-700'}>
+                      <code className="text-gray-700">{iban}</code>
+                      <span className={scope === 'personal' ? 'text-pink-700 font-medium' : 'text-slate-700 font-medium'}>
                         {scope === 'personal' ? '👤 лична' : '🏢 бизнес'}
                       </span>
                     </div>
@@ -403,37 +399,64 @@ export default function PersonalBudget() {
                 </div>
               </div>
             )}
-            <Field label="IBAN на сметката">
-              <input type="text" value={markIban}
-                     onChange={e => { setMarkIban(e.target.value.toUpperCase()); setMarkError(null) }}
-                     placeholder="напр. BG34PRCB92301040957901"
-                     className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm font-mono" autoFocus/>
-            </Field>
+
+            <div className="mb-4">
+              <div className="text-xs font-bold text-gray-500 uppercase mb-2">Импорт сесии (последните 50)</div>
+              {!accounts?.sessions?.length ? (
+                <p className="text-sm text-gray-400 py-4 text-center bg-gray-50 rounded">Няма сесии.</p>
+              ) : (
+                <table className="w-full text-xs">
+                  <thead className="text-gray-500 uppercase border-b border-gray-200">
+                    <tr>
+                      <th className="text-left py-1.5">#</th>
+                      <th className="text-left py-1.5">Файл</th>
+                      <th className="text-left py-1.5">IBAN</th>
+                      <th className="text-left py-1.5">Период</th>
+                      <th className="text-right py-1.5">Tx</th>
+                      <th className="text-center py-1.5">Scope</th>
+                      <th className="text-right py-1.5">Маркирай</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {accounts.sessions.map(s => (
+                      <tr key={s.id} className="border-b border-gray-50 hover:bg-gray-50">
+                        <td className="py-1.5 text-gray-400">{s.id}</td>
+                        <td className="py-1.5 truncate max-w-[180px]" title={s.filename}>{s.filename}</td>
+                        <td className="py-1.5 font-mono text-[10px]" title={s.account_iban}>
+                          {s.account_iban ? s.account_iban.slice(0, 12) + '...' : '—'}
+                        </td>
+                        <td className="py-1.5 text-gray-500">{s.month_from}…{s.month_to}</td>
+                        <td className="py-1.5 text-right">{s.tx_actual || s.tx_count}</td>
+                        <td className="py-1.5 text-center">
+                          {s.tx_personal > 0 && <span className="text-pink-600">👤{s.tx_personal} </span>}
+                          {s.tx_business > 0 && <span className="text-slate-600">🏢{s.tx_business}</span>}
+                        </td>
+                        <td className="py-1.5 text-right">
+                          <button onClick={() => markSession(s.id, 'personal')} disabled={marking}
+                                  className="px-2 py-1 bg-pink-100 hover:bg-pink-200 text-pink-800 rounded text-xs font-medium mr-1 disabled:opacity-50">
+                            👤 Лична
+                          </button>
+                          <button onClick={() => markSession(s.id, 'business')} disabled={marking}
+                                  className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded text-xs font-medium disabled:opacity-50">
+                            🏢 Бизнес
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
             {markError && (
-              <div className="mt-2 text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded p-2">
+              <div className="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded p-2 mb-3">
                 {markError}
               </div>
             )}
-            <div className="mt-3">
-              <div className="text-xs font-bold text-gray-500 uppercase mb-1">Scope</div>
-              <div className="flex gap-2">
-                <button onClick={() => setMarkScope('personal')}
-                        className={`px-3 py-1.5 rounded text-sm font-medium border ${markScope === 'personal' ? 'bg-pink-600 text-white border-pink-600' : 'bg-white text-gray-600 border-gray-300'}`}>
-                  👤 Лична
-                </button>
-                <button onClick={() => setMarkScope('business')}
-                        className={`px-3 py-1.5 rounded text-sm font-medium border ${markScope === 'business' ? 'bg-slate-700 text-white border-slate-700' : 'bg-white text-gray-600 border-gray-300'}`}>
-                  🏢 Бизнес
-                </button>
-              </div>
-            </div>
-            <div className="flex gap-2 mt-5 justify-end">
+
+            <div className="flex justify-end">
               <button onClick={() => setShowAccounts(false)}
-                      className="px-4 py-1.5 text-sm text-gray-600 hover:text-gray-900">Отказ</button>
-              <button onClick={markAccount} disabled={marking || !markIban}
-                      className="px-4 py-1.5 bg-pink-600 hover:bg-pink-700 text-white rounded text-sm font-medium disabled:bg-gray-300">
-                {marking ? 'Update-ва...' : 'Маркирай + Преизчисли'}
-              </button>
+                      className="px-4 py-1.5 text-sm text-gray-600 hover:text-gray-900">Затвори</button>
             </div>
           </div>
         </div>

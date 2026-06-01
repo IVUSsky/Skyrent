@@ -375,7 +375,7 @@ module.exports = function(db) {
   // ── POST /save ─────────────────────────────────────────────
   router.post('/save', (req, res) => {
     try {
-      const { filename, transactions } = req.body;
+      const { filename, transactions, account } = req.body;
       if (!transactions || !Array.isArray(transactions)) {
         return res.status(400).json({ error: 'transactions array required' });
       }
@@ -385,8 +385,8 @@ module.exports = function(db) {
       const month_to   = months[months.length - 1] || null;
 
       const insertSession = db.prepare(`
-        INSERT INTO import_sessions (filename, tx_count, month_from, month_to)
-        VALUES (?, ?, ?, ?)
+        INSERT INTO import_sessions (filename, tx_count, month_from, month_to, account_iban, account_scope)
+        VALUES (?, ?, ?, ?, ?, ?)
       `);
 
       const insertTx = db.prepare(`
@@ -435,7 +435,10 @@ module.exports = function(db) {
       let saved = 0, skipped = 0;
 
       const doImport = db.transaction(() => {
-        const sessionResult = insertSession.run(filename || 'upload.xlsx', transactions.length, month_from, month_to);
+        const sessionResult = insertSession.run(
+          filename || 'upload.xlsx', transactions.length, month_from, month_to,
+          account?.iban || null, account?.scope || null
+        );
         const session_id    = sessionResult.lastInsertRowid;
 
         for (const tx of transactions) {

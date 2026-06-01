@@ -390,16 +390,25 @@ module.exports = function(db) {
     res.json({ updated: r.changes });
   });
 
-  // GET /accounts — списък сметки + текущ scope + tx брой
-  // Полезно за да види user-ът кои IBAN-и са какъв scope и да корек/сменя.
+  // GET /accounts — списък import sessions + scope_map + статистики
   router.get('/accounts', (req, res) => {
-    // Извличам IBAN-и от основанието на transactions (банковите BG IBAN-и)
-    // Хм, transactions няма account_iban колона — затова взимам от settings + bank info.
     const settingsRow = db.prepare("SELECT value FROM settings WHERE key='account_scope_map'").get();
     let map = {};
     if (settingsRow) { try { map = JSON.parse(settingsRow.value); } catch {} }
 
-    // Tx counts по scope (за инфо)
+    const sessions = db.prepare(`
+      SELECT s.id, s.filename, s.tx_count, s.month_from, s.month_to,
+             s.account_iban, s.account_scope, s.imported_at,
+             SUM(CASE WHEN t.scope='personal' THEN 1 ELSE 0 END) AS tx_personal,
+             SUM(CASE WHEN t.scope='business' THEN 1 ELSE 0 END) AS tx_business,
+             COUNT(t.id) AS tx_actual
+      FROM import_sessions s
+      LEFT JOIN transactions t ON t.session_id = s.id
+      GROUP BY s.id
+      ORDER BY s.imported_at DESC
+      LIMIT 50
+    `).all();
+
     const byScope = db.prepare(`
       SELECT scope, COUNT(*) AS count
       FROM transactions
@@ -408,54 +417,62 @@ module.exports = function(db) {
 
     res.json({
       account_scope_map: map,
+      sessions,
       tx_by_scope: byScope,
     });
   });
 
-  // POST /accounts/mark-and-rebuild { iban, scope }
-  // Маркира сметка като дадения scope в settings, после ретро update-ва всички
-  // tx-те match-ващи BIC/IBAN/филиал на тази сметка и преизчислява personal_income.
+  // POST /accounts/mark-and-rebuild
+  // Body: { session_id?, iban?, scope }
+  // - Ако е подаден session_id → update всички tx-те от тази сесия.
+  // - Ако е подаден IBAN → update сесии с този account_iban + запазва в map.
+  // - Винаги rebuild-ва personal_income накрая.
   router.post('/accounts/mark-and-rebuild', (req, res) => {
-    const { iban, scope } = req.body || {};
-    if (!iban || !['personal','business'].includes(scope)) {
-      return res.status(400).json({ error: 'iban + scope са задължителни' });
+    const { session_id, iban, scope } = req.body || {};
+    if (!['personal','business'].includes(scope)) {
+      return res.status(400).json({ error: 'scope: personal | business' });
     }
-    const ibanUp = String(iban).toUpperCase();
+    if (!session_id && !iban) {
+      return res.status(400).json({ error: 'session_id или iban е задължителен' });
+    }
 
-    // 1. Запази в settings
-    const settingsRow = db.prepare("SELECT value FROM settings WHERE key='account_scope_map'").get();
-    let map = {};
-    if (settingsRow) { try { map = JSON.parse(settingsRow.value); } catch {} }
-    map[ibanUp] = scope;
-    db.prepare(`INSERT OR REPLACE INTO settings (key, value) VALUES ('account_scope_map', ?)`).run(JSON.stringify(map));
+    let txUpdated = 0;
+    let expUpdated = 0;
 
-    // 2. Извлечи BIC и filial код от IBAN (за match-ване в основанието)
-    // BG34 PRCB 92301040957901 → bankCode=PRCB, branch=9230, account=1040957901
-    const bankCode  = ibanUp.slice(4, 8);   // PRCB
-    const branchCd  = ibanUp.slice(8, 12);  // 9230
-    const acctPart  = ibanUp.slice(12);     // последните цифри
+    if (session_id) {
+      const r = db.prepare(`UPDATE transactions SET scope = ? WHERE session_id = ?`).run(scope, Number(session_id));
+      txUpdated += r.changes;
+      const e = db.prepare(`UPDATE expense_invoices SET scope = ?
+                            WHERE bank_tx_id IN (SELECT id FROM transactions WHERE session_id = ?)`).run(scope, Number(session_id));
+      expUpdated += e.changes;
+      // Маркирай и самата сесия
+      db.prepare(`UPDATE import_sessions SET account_scope = ? WHERE id = ?`).run(scope, Number(session_id));
+    }
 
-    // 3. Ретро update — всички tx-те които съдържат този IBAN-фрагмент или BIC + branch
-    // (ProBanking PDF записва IBAN-ите в основанието)
-    const patterns = [`%${ibanUp}%`, `%${bankCode}BG%${branchCd}%`, `%${acctPart}%`];
-    const setExpr = `${scope === 'personal' ? "'personal'" : "'business'"}`;
+    let savedIban = null;
+    if (iban) {
+      const ibanUp = String(iban).replace(/\s+/g, '').toUpperCase();
+      savedIban = ibanUp;
+      // Запази в settings
+      const settingsRow = db.prepare("SELECT value FROM settings WHERE key='account_scope_map'").get();
+      let map = {};
+      if (settingsRow) { try { map = JSON.parse(settingsRow.value); } catch {} }
+      map[ibanUp] = scope;
+      db.prepare(`INSERT OR REPLACE INTO settings (key, value) VALUES ('account_scope_map', ?)`).run(JSON.stringify(map));
 
-    // Update transactions scope WHERE основание/контрагент_iban match-ват IBAN/BIC
-    const updTx = db.prepare(`
-      UPDATE transactions SET scope = ?
-      WHERE контрагент_iban = ?
-         OR основание LIKE ?
-         OR основание LIKE ?
-         OR основание LIKE ?
-    `).run(scope, ibanUp, ...patterns);
+      // Update сесии с този IBAN
+      const sessIds = db.prepare(`SELECT id FROM import_sessions WHERE account_iban = ?`).all(ibanUp).map(s => s.id);
+      for (const sid of sessIds) {
+        const r = db.prepare(`UPDATE transactions SET scope = ? WHERE session_id = ?`).run(scope, sid);
+        txUpdated += r.changes;
+        const e = db.prepare(`UPDATE expense_invoices SET scope = ?
+                              WHERE bank_tx_id IN (SELECT id FROM transactions WHERE session_id = ?)`).run(scope, sid);
+        expUpdated += e.changes;
+        db.prepare(`UPDATE import_sessions SET account_scope = ? WHERE id = ?`).run(scope, sid);
+      }
+    }
 
-    // Sync expense_invoices.scope
-    db.prepare(`UPDATE expense_invoices
-                SET scope = ?
-                WHERE bank_tx_id IS NOT NULL
-                  AND bank_tx_id IN (SELECT id FROM transactions WHERE scope = ?)`).run(scope, scope);
-
-    // 4. Rebuild personal_income (идемпотентно)
+    // Rebuild personal_income
     const ktRows = db.prepare(`
       SELECT t.* FROM transactions t
       WHERE t.operation = 'Кт'
@@ -478,8 +495,10 @@ module.exports = function(db) {
 
     res.json({
       scope_set: scope,
-      iban: ibanUp,
-      tx_updated: updTx.changes,
+      iban: savedIban,
+      session_id: session_id || null,
+      tx_updated: txUpdated,
+      expense_invoices_updated: expUpdated,
       personal_income_created: createdIncome,
     });
   });

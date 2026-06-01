@@ -126,6 +126,9 @@ async function main() {
   try { db.exec("ALTER TABLE tx_rules ADD COLUMN scope TEXT DEFAULT 'business'");          console.log('Migration: added tx_rules.scope'); }          catch(_) {}
   try { db.exec("CREATE INDEX IF NOT EXISTS idx_transactions_scope ON transactions(scope, дата)"); } catch(_) {}
   try { db.exec("CREATE INDEX IF NOT EXISTS idx_expense_invoices_scope ON expense_invoices(scope, месец)"); } catch(_) {}
+  // Account info per import session (IBAN + scope by file)
+  try { db.exec("ALTER TABLE import_sessions ADD COLUMN account_iban TEXT");  console.log('Migration: added import_sessions.account_iban'); } catch(_) {}
+  try { db.exec("ALTER TABLE import_sessions ADD COLUMN account_scope TEXT"); console.log('Migration: added import_sessions.account_scope'); } catch(_) {}
 
   // ── Investments module: precious metals (gold, silver, platinum) ──────
   // Tables are named gold_* for historical reasons but contain a 'метал'
