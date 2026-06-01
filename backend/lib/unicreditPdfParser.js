@@ -108,8 +108,26 @@ async function parseUniCreditPdf(buffer) {
   for (const rec of records) {
     transactions.push(recordToTransaction(rec, accountCurrency));
   }
+  // Closing balance: UC layout:
+  // Line: "   Крайно салдо (EUR)/(BGN)" (label only)
+  // Layout order at top: opening label + 3 amounts (debit, credit, closing) appear
+  // after 3 label lines. Extract by finding "Крайно салдо" label index in lines
+  // then the value 3 positions later.
   let closingBalance = null;
-  if (openingBalance !== null) {
+  for (let k = 0; k < lines.length; k++) {
+    if (/Крайно\s*салдо/i.test(lines[k])) {
+      // Стойността е на позиция k+3 (след debit и credit values)
+      const candidate = lines[k+3];
+      const cm = candidate && candidate.match(/([\d.,]+)\s*\/\s*([\d.,]+)/);
+      if (cm) {
+        const eur = parseFloat(cm[1].replace(/,/g, ''));
+        const bgn = parseFloat(cm[2].replace(/,/g, ''));
+        closingBalance = accountCurrency === 'BGN' ? bgn : eur;
+        break;
+      }
+    }
+  }
+  if (closingBalance === null && openingBalance !== null) {
     let kt = 0, dt = 0;
     for (const t of transactions) {
       if (t.operation === 'Кт') kt += Number(t.сума) || 0;

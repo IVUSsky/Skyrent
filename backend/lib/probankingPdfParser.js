@@ -136,9 +136,24 @@ async function parseProBankingPdf(buffer) {
     if (tx) transactions.push(tx);
   }
 
-  // Compute closing balance: opening + sum(Кт) - sum(Дт)
+  // Closing balance: extract directly from "КРАЙНО САЛДО" line (по-точно).
+  // Pattern: "КРАЙНО САЛДО28 148.4955 053.66КТ"
+  // Fallback: compute = opening + sum(Кт) - sum(Дт).
   let closingBalance = null;
-  if (openingBalance !== null) {
+  const closeRegex = /КРАЙНО\s*САЛДО([\d ]+\.\d{2})([\d ]+\.\d{2})(КТ|ДТ)/g;
+  let m, firstNonZero = null;
+  while ((m = closeRegex.exec(data.text)) !== null) {
+    const eur = parseFloat(m[1].replace(/\s/g, ''));
+    const bgn = parseFloat(m[2].replace(/\s/g, ''));
+    const sign = m[3] === 'КТ' ? 1 : -1;
+    if (eur > 0 || bgn > 0) {
+      firstNonZero = { eur, bgn, sign };
+      break;
+    }
+  }
+  if (firstNonZero) {
+    closingBalance = (accountCurrency === 'BGN' ? firstNonZero.bgn : firstNonZero.eur) * firstNonZero.sign;
+  } else if (openingBalance !== null) {
     let kt = 0, dt = 0;
     for (const t of transactions) {
       if (t.operation === 'Кт') kt += Number(t.сума) || 0;
