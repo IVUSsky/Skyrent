@@ -59,6 +59,15 @@ async function parseProBankingPdf(buffer) {
   const accountCurrency = curMatch ? curMatch[1] : 'EUR';
   const ibanMatch = data.text.match(ACCT_IBAN_RE);
   const accountIban = ibanMatch ? ibanMatch[1] : null;
+  // Opening balance: "Начално САЛДО/Balance Forwarded36 229.8370 859.39КТ"
+  const openMatch = data.text.match(/Начално\s*САЛДО[^\d]*([\d ]+\.\d{2})([\d ]+\.\d{2})(КТ|ДТ)/);
+  let openingBalance = null;
+  if (openMatch) {
+    const eur = parseFloat(openMatch[1].replace(/\s/g, ''));
+    const bgn = parseFloat(openMatch[2].replace(/\s/g, ''));
+    const sign = openMatch[3] === 'КТ' ? 1 : -1;
+    openingBalance = (accountCurrency === 'BGN' ? bgn : eur) * sign;
+  }
 
   // Walk lines, group into records
   const records = [];
@@ -127,7 +136,18 @@ async function parseProBankingPdf(buffer) {
     if (tx) transactions.push(tx);
   }
 
-  return { transactions, unknownTenants, accountCurrency, accountIban };
+  // Compute closing balance: opening + sum(Кт) - sum(Дт)
+  let closingBalance = null;
+  if (openingBalance !== null) {
+    let kt = 0, dt = 0;
+    for (const t of transactions) {
+      if (t.operation === 'Кт') kt += Number(t.сума) || 0;
+      else if (t.operation === 'Дт') dt += Number(t.сума) || 0;
+    }
+    closingBalance = Number((openingBalance + kt - dt).toFixed(2));
+  }
+
+  return { transactions, unknownTenants, accountCurrency, accountIban, openingBalance, closingBalance };
 }
 
 // Search for an amount+op pattern anywhere in a string. Returns null or

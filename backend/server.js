@@ -127,8 +127,11 @@ async function main() {
   try { db.exec("CREATE INDEX IF NOT EXISTS idx_transactions_scope ON transactions(scope, дата)"); } catch(_) {}
   try { db.exec("CREATE INDEX IF NOT EXISTS idx_expense_invoices_scope ON expense_invoices(scope, месец)"); } catch(_) {}
   // Account info per import session (IBAN + scope by file)
-  try { db.exec("ALTER TABLE import_sessions ADD COLUMN account_iban TEXT");  console.log('Migration: added import_sessions.account_iban'); } catch(_) {}
-  try { db.exec("ALTER TABLE import_sessions ADD COLUMN account_scope TEXT"); console.log('Migration: added import_sessions.account_scope'); } catch(_) {}
+  try { db.exec("ALTER TABLE import_sessions ADD COLUMN account_iban TEXT");        console.log('Migration: added import_sessions.account_iban'); } catch(_) {}
+  try { db.exec("ALTER TABLE import_sessions ADD COLUMN account_scope TEXT");       console.log('Migration: added import_sessions.account_scope'); } catch(_) {}
+  try { db.exec("ALTER TABLE import_sessions ADD COLUMN opening_balance REAL");     console.log('Migration: added import_sessions.opening_balance'); } catch(_) {}
+  try { db.exec("ALTER TABLE import_sessions ADD COLUMN closing_balance REAL");     console.log('Migration: added import_sessions.closing_balance'); } catch(_) {}
+  try { db.exec("ALTER TABLE import_sessions ADD COLUMN account_currency TEXT");    console.log('Migration: added import_sessions.account_currency'); } catch(_) {}
 
   // ── Investments module: precious metals (gold, silver, platinum) ──────
   // Tables are named gold_* for historical reasons but contain a 'метал'

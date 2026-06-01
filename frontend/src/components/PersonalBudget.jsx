@@ -34,6 +34,7 @@ export default function PersonalBudget() {
   const [income, setIncome]     = useState([])
   const [timeline, setTimeline] = useState([])
   const [breakdown, setBreakdown] = useState(null)
+  const [balances, setBalances]   = useState(null)
   const [loading, setLoading]   = useState(false)
   const [showAdd, setShowAdd]   = useState(false)
   const [rebuildResult, setRebuildResult] = useState(null)
@@ -75,8 +76,9 @@ export default function PersonalBudget() {
       apiFetch(`${API}/api/personal/income?month=${incomeMonth()}`).then(r => r.json()),
       apiFetch(`${API}/api/personal/summary/timeline?months=12`).then(r => r.json()),
       apiFetch(`${API}/api/personal/expenses/breakdown?${q}`).then(r => r.json()),
-    ]).then(([s, i, t, b]) => {
-      setSummary(s); setIncome(i); setTimeline(t); setBreakdown(b); setLoading(false)
+      apiFetch(`${API}/api/personal/accounts/balances`).then(r => r.json()),
+    ]).then(([s, i, t, b, bal]) => {
+      setSummary(s); setIncome(i); setTimeline(t); setBreakdown(b); setBalances(bal); setLoading(false)
     }).catch(() => setLoading(false))
   }, [period])
 
@@ -255,14 +257,37 @@ export default function PersonalBudget() {
       )}
 
       {/* KPI cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
         <Kpi label={`Доход (${s.период?.label || ''})`} value={s.доход_общо} color="text-emerald-700" suffix={` ${income[0]?.валута||'EUR'}`}/>
         <Kpi label="Лични разходи" value={s.разходи_общо} color="text-rose-700"/>
         <Kpi label="Свободно за инвестиране" value={s.нетен_cashflow} color="text-blue-700"
              extra={<span className="text-xs text-gray-400">savings rate: <b>{sv.rate_pct !== null ? sv.rate_pct + '%' : '—'}</b> (цел {sv.target_pct||30}%)</span>}/>
         <Kpi label="Вече инвестирано" value={s.инвестирано_месец} color="text-indigo-700"
              extra={sv.дисциплина && <span className={`text-xs font-medium ${dispKt}`}>● {sv.дисциплина}</span>}/>
+        <Kpi label="💳 Налично в сметката" value={balances?.общо_personal || 0} color="text-violet-700"
+             extra={(balances?.акаунти || []).filter(a => a.scope === 'personal').length > 0 && (
+               <span className="text-xs text-gray-400">{(balances?.акаунти || []).filter(a => a.scope === 'personal').length} лични сметки · по {balances?.акаунти?.[0]?.as_of || ''}</span>
+             )}/>
       </div>
+
+      {/* Account balances detail */}
+      {(balances?.акаунти || []).length > 0 && (
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-3 text-xs flex flex-wrap gap-4">
+          <div className="font-bold text-gray-500 uppercase">Баланс по сметка (към последен импорт):</div>
+          {(balances.акаунти || []).map(a => (
+            <div key={a.iban} className="flex items-center gap-2">
+              <span className={a.scope === 'personal' ? 'text-pink-700' : 'text-slate-700'}>
+                {a.scope === 'personal' ? '👤' : '🏢'}
+              </span>
+              <code className="text-[10px] text-gray-500">{a.iban.slice(0,12)}...</code>
+              <b className={a.balance < 0 ? 'text-rose-700' : 'text-emerald-700'}>
+                {fmt(a.balance)} {a.currency}
+              </b>
+              <span className="text-gray-400">@ {a.as_of}</span>
+            </div>
+          ))}
+        </div>
+      )}
 
       {view === 'analysis' && <ExpenseAnalysis breakdown={breakdown}/>}
 

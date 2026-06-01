@@ -924,10 +924,19 @@ function ImportTab({ API, onSaved }) {
   const handleSave = () => {
     if (!transactions.length) return
     setSaving(true)
+    // Изпрати първата сметка с пълна info (balance + iban + scope). При multi-file
+    // backend ще ползва тази инфо за всичкия импорт session.
+    const account = parsedAccounts[0] ? {
+      iban:            parsedAccounts[0].iban,
+      scope:           parsedAccounts[0].scope,
+      openingBalance:  parsedAccounts[0].openingBalance,
+      closingBalance:  parsedAccounts[0].closingBalance,
+      currency:        parsedAccounts[0].currency,
+    } : null
     apiFetch(`${API}/api/import/save`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ filename: fileNames.join(', '), transactions }),
+      body: JSON.stringify({ filename: fileNames.join(', '), transactions, account }),
     })
       .then(r => r.json())
       .then(data => {

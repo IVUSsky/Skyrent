@@ -76,6 +76,10 @@ module.exports = function(db) {
     } else if (operation === 'Дт') {
       if (isDeposit) {
         категория = 'депозит_върнат';
+      } else if (isSkyCap) {
+        // Прехвърляне ОТ лична сметка КЪМ Sky Capital — capital injection
+        категория = 'заем_sky';
+        scope = 'personal';
       } else if (isHousehold) {
         категория = 'друго_лично';
         scope = 'personal';
@@ -236,15 +240,19 @@ module.exports = function(db) {
   // за обратна съвместимост.
   async function parsePdfBuffer(buffer, tenantMap, rules, defaultScope = 'business') {
     const bank = await detectPdfBank(buffer);
-    let rawTx, accountIban = null;
+    let rawTx, accountIban = null, openingBalance = null, closingBalance = null, accountCurrency = null;
     if (bank === 'unicredit') {
       const { parseUniCreditPdf } = require('../lib/unicreditPdfParser');
       const r = await parseUniCreditPdf(buffer);
       rawTx = r.transactions; accountIban = r.accountIban;
+      openingBalance = r.openingBalance; closingBalance = r.closingBalance;
+      accountCurrency = r.accountCurrency;
     } else {
       const { parseProBankingPdf } = require('../lib/probankingPdfParser');
       const r = await parseProBankingPdf(buffer);
       rawTx = r.transactions; accountIban = r.accountIban;
+      openingBalance = r.openingBalance; closingBalance = r.closingBalance;
+      accountCurrency = r.accountCurrency;
     }
 
     const transactions   = [];
@@ -255,7 +263,7 @@ module.exports = function(db) {
       const tx = enrichTransaction(r, ctx);
       if (tx) transactions.push(tx);
     }
-    return { transactions, unknownTenants, accountIban };
+    return { transactions, unknownTenants, accountIban, openingBalance, closingBalance, accountCurrency };
   }
 
   // Чете account_scope_map от settings.
@@ -287,8 +295,12 @@ module.exports = function(db) {
 
     // Втори pass само ако account scope е personal — пре-парсваме с този default.
     if (accountScope === 'personal') {
+      const previous = { openingBalance: result.openingBalance, closingBalance: result.closingBalance, accountCurrency: result.accountCurrency };
       if (isPdf) result = await parsePdfBuffer(file.buffer, tenantMap, rules, 'personal');
       else       result = parseBuffer(file.buffer, tenantMap, rules, 'personal');
+      result.openingBalance ??= previous.openingBalance;
+      result.closingBalance ??= previous.closingBalance;
+      result.accountCurrency ??= previous.accountCurrency;
     }
     result.accountIban = iban;
     result.accountScope = accountScope || 'business';
@@ -308,7 +320,8 @@ module.exports = function(db) {
 
       const rules = loadRules();
       const parsed = await parseFile(req.file, normMap, rules);
-      let { transactions, unknownTenants, accountIban, accountScope, accountKnown } = parsed;
+      let { transactions, unknownTenants, accountIban, accountScope, accountKnown,
+            openingBalance, closingBalance, accountCurrency } = parsed;
       const dupCheck = db.prepare(
         'SELECT id FROM transactions WHERE дата=? AND ROUND(сума,2)=ROUND(?,2) AND operation=? AND контрагент=?'
       );
@@ -318,7 +331,8 @@ module.exports = function(db) {
       }));
       const dupCount = transactions.filter(t => t.is_duplicate).length;
       res.json({ transactions, unknownTenants, dupCount,
-                 account: { iban: accountIban, scope: accountScope, known: accountKnown } });
+                 account: { iban: accountIban, scope: accountScope, known: accountKnown,
+                            openingBalance, closingBalance, currency: accountCurrency } });
     } catch (err) {
       console.error('Parse error:', err);
       res.status(500).json({ error: err.message });
@@ -343,11 +357,13 @@ module.exports = function(db) {
 
       for (const file of req.files) {
         try {
-          const { transactions, unknownTenants, accountIban, accountScope, accountKnown } = await parseFile(file, normMap, rules);
+          const { transactions, unknownTenants, accountIban, accountScope, accountKnown,
+                  openingBalance, closingBalance, accountCurrency } = await parseFile(file, normMap, rules);
           allTx      = allTx.concat(transactions);
           allUnknown = allUnknown.concat(unknownTenants.filter(u => !allUnknown.some(x => x.контрагент === u.контрагент)));
           if (accountIban && !accounts.some(a => a.iban === accountIban)) {
-            accounts.push({ iban: accountIban, scope: accountScope, known: accountKnown });
+            accounts.push({ iban: accountIban, scope: accountScope, known: accountKnown,
+                            openingBalance, closingBalance, currency: accountCurrency });
           }
         } catch(e) {
           errors.push(`${file.originalname}: ${e.message}`);
@@ -385,8 +401,8 @@ module.exports = function(db) {
       const month_to   = months[months.length - 1] || null;
 
       const insertSession = db.prepare(`
-        INSERT INTO import_sessions (filename, tx_count, month_from, month_to, account_iban, account_scope)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO import_sessions (filename, tx_count, month_from, month_to, account_iban, account_scope, opening_balance, closing_balance, account_currency)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
 
       const insertTx = db.prepare(`
@@ -437,7 +453,10 @@ module.exports = function(db) {
       const doImport = db.transaction(() => {
         const sessionResult = insertSession.run(
           filename || 'upload.xlsx', transactions.length, month_from, month_to,
-          account?.iban || null, account?.scope || null
+          account?.iban || null, account?.scope || null,
+          account?.openingBalance != null ? Number(account.openingBalance) : null,
+          account?.closingBalance != null ? Number(account.closingBalance) : null,
+          account?.currency || null
         );
         const session_id    = sessionResult.lastInsertRowid;
 
@@ -568,7 +587,7 @@ module.exports = function(db) {
   // Auto-learns: saves a rule and retroactively applies it to matching unvalidated transactions.
   // Personal categories (заплата, управление, друго_лично) автоматично сменят scope='personal'
   // и създават personal_income запис при income типове.
-  const PERSONAL_CATS    = new Set(['заплата', 'управление', 'sky_capital', 'друго_лично']);
+  const PERSONAL_CATS    = new Set(['заплата', 'управление', 'sky_capital', 'друго_лично', 'заем_sky']);
   const PERSONAL_INCOMES = new Set(['заплата', 'управление', 'sky_capital']);
 
   router.patch('/transactions/:id/category', (req, res) => {

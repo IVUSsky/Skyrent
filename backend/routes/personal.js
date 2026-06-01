@@ -503,6 +503,47 @@ module.exports = function(db) {
     });
   });
 
+  // GET /accounts/balances → текущ баланс per IBAN от latest import session
+  router.get('/accounts/balances', (req, res) => {
+    const rows = db.prepare(`
+      SELECT account_iban, account_scope, account_currency,
+             closing_balance, month_to, imported_at, filename
+      FROM import_sessions
+      WHERE account_iban IS NOT NULL AND closing_balance IS NOT NULL
+      ORDER BY month_to DESC, imported_at DESC
+    `).all();
+
+    // Group: latest closing per IBAN
+    const seen = new Set();
+    const latest = [];
+    for (const r of rows) {
+      if (seen.has(r.account_iban)) continue;
+      seen.add(r.account_iban);
+      latest.push({
+        iban: r.account_iban,
+        scope: r.account_scope,
+        currency: r.account_currency || 'EUR',
+        balance: Number((r.closing_balance || 0).toFixed(2)),
+        as_of: r.month_to,
+        from_file: r.filename,
+      });
+    }
+
+    // Totals по scope (за KPI карта)
+    const totals = latest.reduce((acc, a) => {
+      const k = a.scope || 'unknown';
+      acc[k] = (acc[k] || 0) + a.balance;
+      return acc;
+    }, {});
+
+    res.json({
+      акаунти: latest,
+      общо_personal: Number((totals.personal || 0).toFixed(2)),
+      общо_business: Number((totals.business || 0).toFixed(2)),
+      общо: Number(Object.values(totals).reduce((s, v) => s + v, 0).toFixed(2)),
+    });
+  });
+
   // GET /last-month → връща последния месец с personal_income или
   // personal expense_invoices. По default за UI picker.
   router.get('/last-month', (req, res) => {

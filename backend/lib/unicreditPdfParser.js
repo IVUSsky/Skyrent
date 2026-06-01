@@ -40,6 +40,14 @@ async function parseUniCreditPdf(buffer) {
   const accountCurrency = curM ? curM[1].toUpperCase() : 'EUR';
   const ibanM = data.text.match(ACCT_IBAN_RE);
   const accountIban = ibanM ? ibanM[1] : null;
+  // Opening balance: "50.81 / 99.38   Начално салдо (EUR)/(BGN)"
+  const openM = data.text.match(/([\d.,]+)\s*\/\s*([\d.,]+)\s+Начално\s*салдо/);
+  let openingBalance = null;
+  if (openM) {
+    const eur = parseFloat(openM[1].replace(/,/g, ''));
+    const bgn = parseFloat(openM[2].replace(/,/g, ''));
+    openingBalance = accountCurrency === 'BGN' ? bgn : eur;
+  }
 
   // Find the transactions section header to skip preamble.
   // After lines like "Дата/Вальор" the records start.
@@ -100,7 +108,17 @@ async function parseUniCreditPdf(buffer) {
   for (const rec of records) {
     transactions.push(recordToTransaction(rec, accountCurrency));
   }
-  return { transactions, unknownTenants: [], accountCurrency, accountIban };
+  let closingBalance = null;
+  if (openingBalance !== null) {
+    let kt = 0, dt = 0;
+    for (const t of transactions) {
+      if (t.operation === 'Кт') kt += Number(t.сума) || 0;
+      else if (t.operation === 'Дт') dt += Number(t.сума) || 0;
+    }
+    closingBalance = Number((openingBalance + kt - dt).toFixed(2));
+  }
+
+  return { transactions, unknownTenants: [], accountCurrency, accountIban, openingBalance, closingBalance };
 }
 
 function recordToTransaction(rec, accountCurrency) {
