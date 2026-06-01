@@ -5,8 +5,12 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { apiFetch } from '../api'
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell,
+  PieChart, Pie, LineChart, Line,
 } from 'recharts'
+
+// Палитра за категории (циклична)
+const CAT_COLORS = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#ec4899','#06b6d4','#84cc16','#f97316','#6366f1','#14b8a6','#a855f7']
 
 const API = import.meta.env.VITE_API_URL || ''
 const INCOME_TYPES = ['заплата', 'управление', 'дивидент', 'лихва_болгар', 'друго']
@@ -23,15 +27,30 @@ const fmt0 = n => (n||0).toLocaleString('bg-BG', { minimumFractionDigits:0, maxi
 
 export default function PersonalBudget() {
   const today = new Date().toISOString().slice(0, 7)
-  const [month, setMonth]       = useState(today)
+  // period: { type: 'month'|'months'|'custom', value }
+  const [period, setPeriod]     = useState({ type: 'month', value: today })
   const [summary, setSummary]   = useState(null)
   const [income, setIncome]     = useState([])
   const [timeline, setTimeline] = useState([])
+  const [breakdown, setBreakdown] = useState(null)
   const [loading, setLoading]   = useState(false)
   const [showAdd, setShowAdd]   = useState(false)
-  const [rebuildOpen, setRebuildOpen] = useState(false)
   const [rebuildResult, setRebuildResult] = useState(null)
   const [initialized, setInitialized] = useState(false)
+  const [view, setView]         = useState('overview') // 'overview' | 'analysis'
+
+  // Period → query string
+  const periodQuery = () => {
+    if (period.type === 'month')  return `month=${period.value}`
+    if (period.type === 'months') return `months=${period.value}`
+    return `from=${period.value.from}&to=${period.value.to}`
+  }
+  // За GET income списък (винаги по месец) — ползваме последния месец от периода
+  const incomeMonth = () => {
+    if (period.type === 'month') return period.value
+    if (period.type === 'months') return today
+    return period.value.to.slice(0, 7)
+  }
   const [form, setForm]         = useState({
     дата: new Date().toISOString().slice(0, 10),
     тип:  'заплата',
@@ -43,23 +62,23 @@ export default function PersonalBudget() {
 
   const load = useCallback(() => {
     setLoading(true)
+    const q = periodQuery()
     Promise.all([
-      apiFetch(`${API}/api/personal/summary?month=${month}`).then(r => r.json()),
-      apiFetch(`${API}/api/personal/income?month=${month}`).then(r => r.json()),
+      apiFetch(`${API}/api/personal/summary?${q}`).then(r => r.json()),
+      apiFetch(`${API}/api/personal/income?month=${incomeMonth()}`).then(r => r.json()),
       apiFetch(`${API}/api/personal/summary/timeline?months=12`).then(r => r.json()),
-    ]).then(([s, i, t]) => {
-      setSummary(s); setIncome(i); setTimeline(t); setLoading(false)
+      apiFetch(`${API}/api/personal/expenses/breakdown?${q}`).then(r => r.json()),
+    ]).then(([s, i, t, b]) => {
+      setSummary(s); setIncome(i); setTimeline(t); setBreakdown(b); setLoading(false)
     }).catch(() => setLoading(false))
-  }, [month])
+  }, [period])
 
-  // На първо зареждане: попитай backend за последния месец с данни
-  // и автоматично го избери (вместо текущия, който може да е празен).
   useEffect(() => {
     if (initialized) return
     apiFetch(`${API}/api/personal/last-month`)
       .then(r => r.json())
       .then(d => {
-        if (d?.месец && d.месец !== today) setMonth(d.месец)
+        if (d?.месец && d.месец !== today) setPeriod({ type: 'month', value: d.месец })
         setInitialized(true)
       })
       .catch(() => setInitialized(true))
@@ -102,23 +121,82 @@ export default function PersonalBudget() {
 
   return (
     <div className="space-y-4">
-      {/* Header + month picker */}
-      <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4 flex flex-wrap items-end gap-4">
-        <div>
-          <div className="text-xs font-bold text-gray-500 uppercase mb-1">Месец</div>
-          <input type="month" value={month} onChange={e => setMonth(e.target.value)}
-                 className="border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400"/>
+      {/* Header — view tabs + period selector */}
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4 space-y-3">
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <div className="flex gap-1">
+            <button onClick={() => setView('overview')}
+                    className={`px-3 py-1.5 text-sm rounded font-medium ${view === 'overview' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+              📊 Преглед
+            </button>
+            <button onClick={() => setView('analysis')}
+                    className={`px-3 py-1.5 text-sm rounded font-medium ${view === 'analysis' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+              🔬 Анализ разходи
+            </button>
+          </div>
+          <div className="flex gap-2">
+            <button onClick={doRebuild}
+                    title="Сканира bank transactions и създава липсващи personal_income"
+                    className="px-3 py-1.5 bg-amber-100 hover:bg-amber-200 text-amber-800 border border-amber-300 rounded text-sm font-medium">
+              ⟳ Преизчисли
+            </button>
+            <button onClick={() => setShowAdd(true)}
+                    className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm font-medium">
+              + Добави доход
+            </button>
+          </div>
         </div>
-        <div className="ml-auto flex gap-2">
-          <button onClick={doRebuild}
-                  title="Сканира съществуващи bank transactions и създава липсващи personal_income (полезно ако си импортирал bank данни преди настройка на account scope)"
-                  className="px-4 py-1.5 bg-amber-100 hover:bg-amber-200 text-amber-800 border border-amber-300 rounded text-sm font-medium">
-            ⟳ Преизчисли от банка
-          </button>
-          <button onClick={() => setShowAdd(true)}
-                  className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm font-medium">
-            + Добави доход
-          </button>
+
+        {/* Period selector */}
+        <div className="flex items-end gap-3 flex-wrap pt-2 border-t border-gray-100">
+          <div>
+            <div className="text-xs font-bold text-gray-500 uppercase mb-1">Бърз период</div>
+            <div className="flex gap-1 flex-wrap">
+              {[
+                { lbl: '1м',  type: 'months', value: 1 },
+                { lbl: '3м',  type: 'months', value: 3 },
+                { lbl: '6м',  type: 'months', value: 6 },
+                { lbl: '12м', type: 'months', value: 12 },
+                { lbl: '24м', type: 'months', value: 24 },
+              ].map(p => (
+                <button key={p.lbl}
+                        onClick={() => setPeriod({ type: 'months', value: p.value })}
+                        className={`px-2.5 py-1 rounded text-xs font-medium border ${
+                          period.type === 'months' && period.value === p.value
+                            ? 'bg-blue-600 text-white border-blue-600'
+                            : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                        }`}>
+                  {p.lbl}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <div className="text-xs font-bold text-gray-500 uppercase mb-1">Месец</div>
+            <input type="month"
+                   value={period.type === 'month' ? period.value : ''}
+                   onChange={e => setPeriod({ type: 'month', value: e.target.value })}
+                   className="border border-gray-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400"/>
+          </div>
+          <div>
+            <div className="text-xs font-bold text-gray-500 uppercase mb-1">От</div>
+            <input type="date"
+                   value={period.type === 'custom' ? period.value.from : ''}
+                   onChange={e => setPeriod({ type: 'custom', value: { from: e.target.value, to: period.type === 'custom' ? period.value.to : new Date().toISOString().slice(0,10) }})}
+                   className="border border-gray-300 rounded px-3 py-1.5 text-sm"/>
+          </div>
+          <div>
+            <div className="text-xs font-bold text-gray-500 uppercase mb-1">До</div>
+            <input type="date"
+                   value={period.type === 'custom' ? period.value.to : ''}
+                   onChange={e => setPeriod({ type: 'custom', value: { from: period.type === 'custom' ? period.value.from : '2026-01-01', to: e.target.value }})}
+                   className="border border-gray-300 rounded px-3 py-1.5 text-sm"/>
+          </div>
+          {summary?.период && (
+            <div className="ml-auto text-xs text-gray-500">
+              Период: <code className="bg-gray-50 px-1.5 py-0.5 rounded">{summary.период.from} → {summary.период.to}</code>
+            </div>
+          )}
         </div>
       </div>
 
@@ -131,7 +209,7 @@ export default function PersonalBudget() {
 
       {/* KPI cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-        <Kpi label="Доход" value={s.доход_общо} color="text-emerald-700" suffix={` ${income[0]?.валута||'EUR'}`}/>
+        <Kpi label={`Доход (${s.период?.label || ''})`} value={s.доход_общо} color="text-emerald-700" suffix={` ${income[0]?.валута||'EUR'}`}/>
         <Kpi label="Лични разходи" value={s.разходи_общо} color="text-rose-700"/>
         <Kpi label="Свободно за инвестиране" value={s.нетен_cashflow} color="text-blue-700"
              extra={<span className="text-xs text-gray-400">savings rate: <b>{sv.rate_pct !== null ? sv.rate_pct + '%' : '—'}</b> (цел {sv.target_pct||30}%)</span>}/>
@@ -139,10 +217,13 @@ export default function PersonalBudget() {
              extra={sv.дисциплина && <span className={`text-xs font-medium ${dispKt}`}>● {sv.дисциплина}</span>}/>
       </div>
 
+      {view === 'analysis' && <ExpenseAnalysis breakdown={breakdown}/>}
+
+      {view === 'overview' && <>
       {/* Income & Expenses breakdown */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
-          <h3 className="text-sm font-bold text-gray-800 mb-3">📈 Доходи по тип ({month})</h3>
+          <h3 className="text-sm font-bold text-gray-800 mb-3">📈 Доходи по тип</h3>
           {(s.доход_по_тип || []).length === 0 ? (
             <p className="text-sm text-gray-400 py-6 text-center">Няма записани доходи за този месец.</p>
           ) : (
@@ -203,7 +284,7 @@ export default function PersonalBudget() {
 
       {/* Income list */}
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
-        <h3 className="text-sm font-bold text-gray-800 mb-3">📋 Доходи ({month})</h3>
+        <h3 className="text-sm font-bold text-gray-800 mb-3">📋 Доходи (последен месец от периода)</h3>
         {income.length === 0 ? (
           <p className="text-sm text-gray-400 py-6 text-center">Няма доходи. Добави първия или импортирай банка.</p>
         ) : (
@@ -243,6 +324,7 @@ export default function PersonalBudget() {
           </table>
         )}
       </div>
+      </>}
 
       {/* Add income modal */}
       {showAdd && (
@@ -316,6 +398,192 @@ function Field({ label, children }) {
     <div>
       <label className="block text-xs font-bold text-gray-500 uppercase mb-1">{label}</label>
       {children}
+    </div>
+  )
+}
+
+function ExpenseAnalysis({ breakdown }) {
+  if (!breakdown) return null
+  const b = breakdown
+  const byCat = (b.по_категория || []).map((r, i) => ({
+    name: r.expense_category || 'друго',
+    value: Number(r.total) || 0,
+    count: r.count,
+    color: CAT_COLORS[i % CAT_COLORS.length],
+  }))
+  const byContractor = (b.по_контрагент || []).slice(0, 20)
+  const total = b.общо || 1
+
+  // Trend по месец+категория → pivot за stacked chart
+  const monthsSet = new Set(), catSet = new Set()
+  for (const r of (b.по_месец || [])) { monthsSet.add(r.месец); catSet.add(r.expense_category || 'друго') }
+  const months = [...monthsSet].sort()
+  const cats   = [...catSet]
+  const trendData = months.map(m => {
+    const row = { месец: m }
+    for (const c of cats) {
+      const found = (b.по_месец || []).find(r => r.месец === m && (r.expense_category || 'друго') === c)
+      row[c] = found ? Number(found.total) : 0
+    }
+    return row
+  })
+
+  return (
+    <div className="space-y-4">
+      <div className="text-xs text-gray-500">
+        Общо разходи за периода: <b className="text-rose-700">{fmt(b.общо)} EUR</b> ·
+        {(b.по_категория || []).length} категории ·
+        {(b.по_контрагент || []).length} контрагенти
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+        {/* Pie по категория */}
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
+          <h3 className="text-sm font-bold text-gray-800 mb-3">🥧 Разпределение по категория</h3>
+          {byCat.length === 0 ? (
+            <p className="text-sm text-gray-400 py-6 text-center">Няма данни.</p>
+          ) : (
+            <ResponsiveContainer width="100%" height={260}>
+              <PieChart>
+                <Pie data={byCat} dataKey="value" nameKey="name" cx="50%" cy="50%"
+                     outerRadius={80} label={d => `${d.name}: ${((d.value/total)*100).toFixed(0)}%`}>
+                  {byCat.map((entry, i) => <Cell key={i} fill={entry.color}/>)}
+                </Pie>
+                <Tooltip formatter={v => fmt(v)}/>
+              </PieChart>
+            </ResponsiveContainer>
+          )}
+        </div>
+
+        {/* Категории таблица със статистики */}
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
+          <h3 className="text-sm font-bold text-gray-800 mb-3">📋 Статистики по категория</h3>
+          {byCat.length === 0 ? (
+            <p className="text-sm text-gray-400 py-6 text-center">Няма данни.</p>
+          ) : (
+            <table className="w-full text-sm">
+              <thead className="text-xs text-gray-500 uppercase border-b border-gray-200">
+                <tr>
+                  <th className="text-left py-2">Категория</th>
+                  <th className="text-right py-2">Общо</th>
+                  <th className="text-right py-2">×</th>
+                  <th className="text-right py-2">Дял</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(b.по_категория || []).map((r, i) => (
+                  <tr key={i} className="border-b border-gray-50">
+                    <td className="py-1.5">
+                      <span className="inline-block w-2 h-2 rounded-full mr-2" style={{ background: CAT_COLORS[i % CAT_COLORS.length] }}/>
+                      {r.expense_category || '—'}
+                    </td>
+                    <td className="py-1.5 text-right font-medium text-rose-700">
+                      {fmt(r.total)} {r.currency}
+                    </td>
+                    <td className="py-1.5 text-right text-xs text-gray-400">{r.count}</td>
+                    <td className="py-1.5 text-right text-xs text-gray-500">
+                      {((Number(r.total)/total)*100).toFixed(1)}%
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+
+      {/* Trend по месец stacked */}
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
+        <h3 className="text-sm font-bold text-gray-800 mb-3">📈 Месечен trend по категория</h3>
+        {trendData.length === 0 ? (
+          <p className="text-sm text-gray-400 py-6 text-center">Няма данни.</p>
+        ) : (
+          <ResponsiveContainer width="100%" height={280}>
+            <BarChart data={trendData}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#eee"/>
+              <XAxis dataKey="месец" tick={{ fontSize: 11 }}/>
+              <YAxis tick={{ fontSize: 11 }}/>
+              <Tooltip formatter={v => fmt(v)}/>
+              <Legend wrapperStyle={{ fontSize: 11 }}/>
+              {cats.map((c, i) => (
+                <Bar key={c} dataKey={c} stackId="a" fill={CAT_COLORS[i % CAT_COLORS.length]}/>
+              ))}
+            </BarChart>
+          </ResponsiveContainer>
+        )}
+      </div>
+
+      {/* Топ контрагенти */}
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
+        <h3 className="text-sm font-bold text-gray-800 mb-3">🏆 Топ контрагенти (къде харчиш най-много)</h3>
+        {byContractor.length === 0 ? (
+          <p className="text-sm text-gray-400 py-6 text-center">Няма данни.</p>
+        ) : (
+          <table className="w-full text-sm">
+            <thead className="text-xs text-gray-500 uppercase border-b border-gray-200">
+              <tr>
+                <th className="text-left py-2">#</th>
+                <th className="text-left py-2">Контрагент</th>
+                <th className="text-right py-2">Общо</th>
+                <th className="text-right py-2">Брой</th>
+                <th className="text-right py-2">Средно</th>
+                <th className="text-right py-2">Дял</th>
+              </tr>
+            </thead>
+            <tbody>
+              {byContractor.map((r, i) => (
+                <tr key={i} className="border-b border-gray-50 hover:bg-gray-50">
+                  <td className="py-1.5 text-gray-400">{i+1}.</td>
+                  <td className="py-1.5 text-gray-700 max-w-[300px] truncate" title={r.supplier_name}>
+                    {r.supplier_name}
+                  </td>
+                  <td className="py-1.5 text-right font-medium text-rose-700">
+                    {fmt(r.total)} {r.currency}
+                  </td>
+                  <td className="py-1.5 text-right text-xs text-gray-500">{r.count}</td>
+                  <td className="py-1.5 text-right text-xs text-gray-500">{fmt(r.total / r.count)}</td>
+                  <td className="py-1.5 text-right text-xs text-gray-500">
+                    {((Number(r.total)/total)*100).toFixed(1)}%
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {/* Топ 30 най-големи разходи */}
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
+        <h3 className="text-sm font-bold text-gray-800 mb-3">💸 Топ 30 най-големи единични разходи</h3>
+        {(b.топ_30 || []).length === 0 ? (
+          <p className="text-sm text-gray-400 py-6 text-center">Няма данни.</p>
+        ) : (
+          <div className="max-h-96 overflow-y-auto">
+            <table className="w-full text-sm">
+              <thead className="text-xs text-gray-500 uppercase border-b border-gray-200 sticky top-0 bg-white">
+                <tr>
+                  <th className="text-left py-2">Дата</th>
+                  <th className="text-left py-2">Контрагент</th>
+                  <th className="text-left py-2">Категория</th>
+                  <th className="text-right py-2">Сума</th>
+                  <th className="text-left py-2 pl-3">Бележка</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(b.топ_30 || []).map((r, i) => (
+                  <tr key={r.id} className="border-b border-gray-50 hover:bg-gray-50">
+                    <td className="py-1.5 text-gray-500 text-xs">{r.дата}</td>
+                    <td className="py-1.5 text-gray-700 max-w-[200px] truncate" title={r.supplier_name}>{r.supplier_name}</td>
+                    <td className="py-1.5"><span className="px-1.5 py-0.5 rounded text-xs bg-rose-50 text-rose-700 border border-rose-200">{r.expense_category}</span></td>
+                    <td className="py-1.5 text-right font-bold text-rose-700">{fmt(r.amount)} {r.currency}</td>
+                    <td className="py-1.5 pl-3 text-gray-500 text-xs max-w-[280px] truncate" title={r.reason}>{r.reason}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
   )
 }

@@ -130,26 +130,50 @@ module.exports = function(db) {
     res.json({ ok: true, scope });
   });
 
-  // ── Monthly summary ──────────────────────────────────────────────────────
+  // ── Helper: parse period query (?month=YYYY-MM | ?from=YYYY-MM-DD&to=... | ?months=N)
+  // Връща { from, to, label } като ISO дати.
+  function parsePeriod(q) {
+    if (q.month && /^\d{4}-\d{2}$/.test(q.month)) {
+      const [y, m] = q.month.split('-');
+      const last = new Date(Number(y), Number(m), 0).toISOString().slice(0, 10);
+      return { from: `${q.month}-01`, to: last, label: q.month };
+    }
+    if (q.from && q.to) {
+      return { from: q.from, to: q.to, label: `${q.from}…${q.to}` };
+    }
+    if (q.months) {
+      const n = Math.min(60, Math.max(1, Number(q.months) || 1));
+      const today = new Date();
+      const from = new Date(today.getFullYear(), today.getMonth() - n + 1, 1);
+      return { from: from.toISOString().slice(0, 10), to: today.toISOString().slice(0, 10), label: `последни ${n} мес` };
+    }
+    // default: current month
+    const t = new Date().toISOString().slice(0, 7);
+    const last = new Date(Number(t.slice(0,4)), Number(t.slice(5,7)), 0).toISOString().slice(0, 10);
+    return { from: `${t}-01`, to: last, label: t };
+  }
+
+  // ── Period summary ────────────────────────────────────────────────────────
   // Връща: доходи (по тип), разходи (по категория), нетен cashflow, savings rate.
-  // savings_target_pct се чете от settings.
+  // Параметри: ?month=YYYY-MM ИЛИ ?from=YYYY-MM-DD&to=YYYY-MM-DD ИЛИ ?months=N
   router.get('/summary', (req, res) => {
-    const month = req.query.month; // YYYY-MM, optional → текущ
-    const m = month || new Date().toISOString().slice(0, 7);
+    const { from, to, label } = parsePeriod(req.query);
 
     const incomeByType = db.prepare(`
       SELECT тип, валута, SUM(сума) AS total, COUNT(*) AS count
       FROM personal_income
-      WHERE strftime('%Y-%m', дата) = ?
+      WHERE дата BETWEEN ? AND ?
       GROUP BY тип, валута
-    `).all(m);
+    `).all(from, to);
 
     const expensesByCat = db.prepare(`
       SELECT expense_category, currency, SUM(amount) AS total, COUNT(*) AS count
       FROM expense_invoices
-      WHERE scope='personal' AND месец = ?
+      WHERE scope='personal'
+        AND (invoice_date BETWEEN ? AND ?
+             OR (invoice_date IS NULL AND месец BETWEEN ? AND ?))
       GROUP BY expense_category, currency
-    `).all(m);
+    `).all(from, to, from.slice(0, 7), to.slice(0, 7));
 
     const incomeTotal = incomeByType.reduce((s, r) => s + (Number(r.total) || 0), 0);
     const expenseTotal = expensesByCat.reduce((s, r) => s + (Number(r.total) || 0), 0);
@@ -160,20 +184,27 @@ module.exports = function(db) {
     const targetAmount = Number(((incomeTotal * targetPct) / 100).toFixed(2));
     const savingsRate = incomeTotal > 0 ? Number(((cashflow / incomeTotal) * 100).toFixed(2)) : null;
 
-    // Колко вече е инвестирано този месец (метали + Болгар лихва не се брои, само нови вложения)
-    const investedThisMonth = db.prepare(`
+    // Инвестирано за периода: gold/silver покупки + Bulgar влогове + Bulgar такси
+    const invMetals = db.prepare(`
       SELECT SUM(обща_сума) AS total
       FROM gold_investments
-      WHERE strftime('%Y-%m', дата) = ? AND тип='покупка'
-    `).get(m);
+      WHERE дата BETWEEN ? AND ? AND тип='покупка'
+    `).get(from, to);
+    const invBulgar = db.prepare(`
+      SELECT SUM(сума) AS total
+      FROM bulgar_transactions
+      WHERE дата BETWEEN ? AND ? AND тип='влог'
+    `).get(from, to);
+    const invested = (invMetals?.total || 0) + (invBulgar?.total || 0);
 
     res.json({
-      месец: m,
-      доход_общо: Number(incomeTotal.toFixed(2)),
-      разходи_общо: Number(expenseTotal.toFixed(2)),
+      период: { from, to, label },
+      месец: label,
+      доход_общо:     Number(incomeTotal.toFixed(2)),
+      разходи_общо:   Number(expenseTotal.toFixed(2)),
       нетен_cashflow: Number(cashflow.toFixed(2)),
-      доход_по_тип: incomeByType,
-      разходи_по_категория: expensesByCat,
+      доход_по_тип:           incomeByType,
+      разходи_по_категория:   expensesByCat,
       savings: {
         rate_pct: savingsRate,
         target_pct: targetPct,
@@ -181,7 +212,74 @@ module.exports = function(db) {
         свободно_за_инвестиране: Number(cashflow.toFixed(2)),
         дисциплина: savingsRate !== null ? (savingsRate >= targetPct ? 'над цел' : 'под цел') : null,
       },
-      инвестирано_месец: Number((investedThisMonth?.total || 0).toFixed(2)),
+      инвестирано_месец: Number(invested.toFixed(2)),
+    });
+  });
+
+  // ── Детайлен анализ на разходи за период ────────────────────────────────
+  // GET /expenses/breakdown?month= | ?from=&to= | ?months=
+  // Връща: топ контрагенти, top 30 разходи, дневен/месечен trend, breakdown по категория.
+  router.get('/expenses/breakdown', (req, res) => {
+    const { from, to, label } = parsePeriod(req.query);
+
+    const byCategory = db.prepare(`
+      SELECT expense_category, currency,
+             SUM(amount) AS total, COUNT(*) AS count,
+             AVG(amount) AS средно, MAX(amount) AS макс, MIN(amount) AS мин
+      FROM expense_invoices
+      WHERE scope='personal'
+        AND (invoice_date BETWEEN ? AND ?
+             OR (invoice_date IS NULL AND месец BETWEEN ? AND ?))
+      GROUP BY expense_category, currency
+      ORDER BY total DESC
+    `).all(from, to, from.slice(0, 7), to.slice(0, 7));
+
+    const byContractor = db.prepare(`
+      SELECT supplier_name, currency,
+             SUM(amount) AS total, COUNT(*) AS count
+      FROM expense_invoices
+      WHERE scope='personal'
+        AND (invoice_date BETWEEN ? AND ?
+             OR (invoice_date IS NULL AND месец BETWEEN ? AND ?))
+        AND supplier_name IS NOT NULL AND supplier_name != ''
+      GROUP BY supplier_name, currency
+      ORDER BY total DESC
+      LIMIT 30
+    `).all(from, to, from.slice(0, 7), to.slice(0, 7));
+
+    const byMonth = db.prepare(`
+      SELECT
+        COALESCE(strftime('%Y-%m', invoice_date), месец) AS месец,
+        expense_category,
+        SUM(amount) AS total
+      FROM expense_invoices
+      WHERE scope='personal'
+        AND (invoice_date BETWEEN ? AND ?
+             OR (invoice_date IS NULL AND месец BETWEEN ? AND ?))
+      GROUP BY месец, expense_category
+      ORDER BY месец ASC
+    `).all(from, to, from.slice(0, 7), to.slice(0, 7));
+
+    const top = db.prepare(`
+      SELECT id, COALESCE(invoice_date, месец) AS дата,
+             supplier_name, expense_category, amount, currency, reason
+      FROM expense_invoices
+      WHERE scope='personal'
+        AND (invoice_date BETWEEN ? AND ?
+             OR (invoice_date IS NULL AND месец BETWEEN ? AND ?))
+      ORDER BY amount DESC
+      LIMIT 30
+    `).all(from, to, from.slice(0, 7), to.slice(0, 7));
+
+    const total = byCategory.reduce((s, r) => s + Number(r.total || 0), 0);
+
+    res.json({
+      период: { from, to, label },
+      общо: Number(total.toFixed(2)),
+      по_категория:   byCategory,
+      по_контрагент:  byContractor,
+      по_месец:       byMonth,
+      топ_30:         top,
     });
   });
 
