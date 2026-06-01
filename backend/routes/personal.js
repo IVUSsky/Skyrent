@@ -8,7 +8,7 @@
 
 const express = require('express');
 
-const INCOME_TYPES = ['заплата', 'управление', 'дивидент', 'лихва_болгар', 'друго'];
+const INCOME_TYPES = ['заплата', 'управление', 'дивидент', 'лихва_болгар', 'sky_capital', 'друго'];
 
 module.exports = function(db) {
   const router = express.Router();
@@ -156,6 +156,13 @@ module.exports = function(db) {
   // ── Period summary ────────────────────────────────────────────────────────
   // Връща: доходи (по тип), разходи (по категория), нетен cashflow, savings rate.
   // Параметри: ?month=YYYY-MM ИЛИ ?from=YYYY-MM-DD&to=YYYY-MM-DD ИЛИ ?months=N
+  //
+  // ВАЖНО за формулата:
+  // - доход_общо = personal_income (заплати, наеми, дивиденти, и т.н.)
+  // - разходи_общо = ВСИЧКИ Дт от personal transactions за периода
+  //   (включително инвестиции, прехвърления, кеш, не само "лични разходи")
+  // - реално_свободно = доход - всичко излязло (включително инвестираното)
+  //   → това е действителната сума, с която сметката е нараснала/намаляла
   router.get('/summary', (req, res) => {
     const { from, to, label } = parsePeriod(req.query);
 
@@ -166,25 +173,49 @@ module.exports = function(db) {
       GROUP BY тип, валута
     `).all(from, to);
 
-    const expensesByCat = db.prepare(`
-      SELECT expense_category, currency, SUM(amount) AS total, COUNT(*) AS count
+    // ВСИЧКИ Дт от personal сметки (от bank transactions)
+    const personalOut = db.prepare(`
+      SELECT категория, currency, SUM(сума) AS total, COUNT(*) AS count
+      FROM transactions
+      WHERE scope='personal' AND operation='Дт'
+        AND дата BETWEEN ? AND ?
+      GROUP BY категория, currency
+    `).all(from, to);
+
+    // Ръчни expense_invoices без bank_tx_id (manual cash/cards)
+    const manualExp = db.prepare(`
+      SELECT expense_category AS категория, currency, SUM(amount) AS total, COUNT(*) AS count
       FROM expense_invoices
-      WHERE scope='personal'
+      WHERE scope='personal' AND (bank_tx_id IS NULL)
         AND (invoice_date BETWEEN ? AND ?
              OR (invoice_date IS NULL AND месец BETWEEN ? AND ?))
       GROUP BY expense_category, currency
     `).all(from, to, from.slice(0, 7), to.slice(0, 7));
 
-    const incomeTotal = incomeByType.reduce((s, r) => s + (Number(r.total) || 0), 0);
+    // Merge personalOut + manualExp по категория
+    const expMap = new Map();
+    const addExp = (rows) => {
+      for (const r of rows) {
+        const key = `${r.категория || '—'}::${r.currency || 'EUR'}`;
+        const existing = expMap.get(key) || { expense_category: r.категория || '—', currency: r.currency || 'EUR', total: 0, count: 0 };
+        existing.total += Number(r.total) || 0;
+        existing.count += Number(r.count) || 0;
+        expMap.set(key, existing);
+      }
+    };
+    addExp(personalOut);
+    addExp(manualExp);
+    const expensesByCat = [...expMap.values()].sort((a, b) => b.total - a.total);
+
+    const incomeTotal  = incomeByType.reduce((s, r) => s + (Number(r.total) || 0), 0);
     const expenseTotal = expensesByCat.reduce((s, r) => s + (Number(r.total) || 0), 0);
-    const cashflow = incomeTotal - expenseTotal;
+    const cashflow     = incomeTotal - expenseTotal;
 
     const settingsRow = db.prepare("SELECT value FROM settings WHERE key='savings_target_pct'").get();
     const targetPct = settingsRow ? Number(settingsRow.value) || 0 : 30;
     const targetAmount = Number(((incomeTotal * targetPct) / 100).toFixed(2));
     const savingsRate = incomeTotal > 0 ? Number(((cashflow / incomeTotal) * 100).toFixed(2)) : null;
 
-    // Инвестирано за периода: gold/silver покупки + Bulgar влогове + Bulgar такси
     const invMetals = db.prepare(`
       SELECT SUM(обща_сума) AS total
       FROM gold_investments
@@ -295,7 +326,7 @@ module.exports = function(db) {
       SELECT t.* FROM transactions t
       WHERE t.operation = 'Кт'
         AND t.scope = 'personal'
-        AND t.категория IN ('заплата', 'управление', 'наем')
+        AND t.категория IN ('заплата', 'управление', 'наем', 'sky_capital')
         AND NOT EXISTS (SELECT 1 FROM personal_income pi WHERE pi.bank_tx_id = t.id)
     `).all();
 
@@ -305,8 +336,9 @@ module.exports = function(db) {
     let createdIncome = 0;
     for (const t of ktRows) {
       let pincomeType = 'друго';
-      if (t.категория === 'заплата')    pincomeType = 'заплата';
+      if (t.категория === 'заплата')         pincomeType = 'заплата';
       else if (t.категория === 'управление') pincomeType = 'управление';
+      else if (t.категория === 'sky_capital') pincomeType = 'sky_capital';
       // наем → 'друго' (личен наем)
       insertPi.run(
         t.дата, pincomeType, t.сума,

@@ -36,6 +36,8 @@ module.exports = function(db) {
     // Personal income keywords (Кт): заплата, договор за управление, ДУ, salary
     const isSalary  = ['заплата','salary','net salary','net pay'].some(kw => kontLower.includes(kw) || osnLower.includes(kw));
     const isMgmtFee = ['договор за управление','договор управление','управителски','дог. упр.','ду възнагр'].some(kw => osnLower.includes(kw) || kontLower.includes(kw));
+    // Sky Capital — приходи от собствените имоти / прехвърления от Sky фирмата
+    const isSkyCap  = ['sky capital','skycapital','sky кап','скай капитал','скай кап','skayrent','skyrent','sky-rent'].some(kw => kontLower.includes(kw) || osnLower.includes(kw));
     // Personal expense keywords (Дт): супермаркети, аптеки, горива, ресторанти и т.н.
     const HOUSEHOLD_KW = [
       'kaufland','lidl','billa','fantastico','t-market','metro','praktis','praktiker','ikea','jumbo',
@@ -55,6 +57,9 @@ module.exports = function(db) {
         scope = 'personal';
       } else if (isMgmtFee) {
         категория = 'управление';
+        scope = 'personal';
+      } else if (isSkyCap) {
+        категория = 'sky_capital';
         scope = 'personal';
       } else {
         const hasRentKw = ['наем','rent'].some(kw => osnLower.includes(kw) || kontLower.includes(kw));
@@ -468,14 +473,14 @@ module.exports = function(db) {
             );
           }
 
-          // Кт personal income (заплата / договор управление / личен наем) →
-          // personal_income row. За личен наем (personal scope + категория='наем')
-          // пишем тип 'друго' с източник контрагента.
+          // Кт personal income (заплата / договор управление / личен наем /
+          // Sky Capital) → personal_income row.
           if (tx.operation === 'Кт' && txScope === 'personal') {
             let pincomeType = null;
-            if (tx.категория === 'заплата')    pincomeType = 'заплата';
+            if (tx.категория === 'заплата')         pincomeType = 'заплата';
             else if (tx.категория === 'управление') pincomeType = 'управление';
-            else if (tx.категория === 'наем')  pincomeType = 'друго'; // личен наем
+            else if (tx.категория === 'sky_capital') pincomeType = 'sky_capital';
+            else if (tx.категория === 'наем')       pincomeType = 'друго'; // личен наем
             if (pincomeType) {
               insertPersonalIncome.run(
                 tx.дата || null,
@@ -560,8 +565,8 @@ module.exports = function(db) {
   // Auto-learns: saves a rule and retroactively applies it to matching unvalidated transactions.
   // Personal categories (заплата, управление, друго_лично) автоматично сменят scope='personal'
   // и създават personal_income запис при income типове.
-  const PERSONAL_CATS    = new Set(['заплата', 'управление', 'друго_лично']);
-  const PERSONAL_INCOMES = new Set(['заплата', 'управление']);
+  const PERSONAL_CATS    = new Set(['заплата', 'управление', 'sky_capital', 'друго_лично']);
+  const PERSONAL_INCOMES = new Set(['заплата', 'управление', 'sky_capital']);
 
   router.patch('/transactions/:id/category', (req, res) => {
     try {
