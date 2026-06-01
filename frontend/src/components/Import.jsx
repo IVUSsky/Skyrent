@@ -16,8 +16,12 @@ const CATEGORY_STYLES = {
   'депозит_получен':   'bg-teal-100 text-teal-800 border-teal-200',
   'депозит_върнат':    'bg-teal-50 text-teal-700 border-teal-200',
   'депозит_задържан':  'bg-amber-100 text-amber-800 border-amber-200',
+  // Лични (scope=personal). При избор → auto scope+personal_income.
+  'заплата':           'bg-emerald-100 text-emerald-800 border-emerald-200',
+  'управление':        'bg-indigo-100 text-indigo-800 border-indigo-200',
+  'друго_лично':       'bg-pink-50 text-pink-700 border-pink-200',
 }
-const ALL_CATS = ['наем','вноска','разход','разход_друг','нап_ддс','equity_inject','приход_друг','депозит_получен','депозит_върнат','депозит_задържан','друго']
+const ALL_CATS = ['наем','вноска','разход','разход_друг','нап_ддс','equity_inject','приход_друг','депозит_получен','депозит_върнат','депозит_задържан','заплата','управление','друго_лично','друго']
 
 const fmt  = n => (n||0).toLocaleString('bg-BG', { minimumFractionDigits:2, maximumFractionDigits:2 })
 const fmt0 = n => (n||0).toLocaleString('bg-BG', { minimumFractionDigits:0, maximumFractionDigits:0 })

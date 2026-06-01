@@ -22,17 +22,39 @@ module.exports = function(db) {
   }
 
   // ── Helper: categorize one row ─────────────────────────────
+  // Returns { категория, property_id, scope }.
+  // scope: 'personal' за заплата/договор управление/домакински разходи; иначе 'business'.
   function categorizeRow({ operation, контрагент, основание, property_id_from_map }) {
     const kontLower = контрагент.toLowerCase();
     const osnLower  = основание.toLowerCase();
     let категория  = '';
     let property_id = property_id_from_map;
+    let scope = 'business';
 
     const isDeposit = ['депозит','deposit','гаранция','garantion'].some(kw => kontLower.includes(kw) || osnLower.includes(kw));
+    // Personal income keywords (Кт): заплата, договор за управление, ДУ, salary
+    const isSalary  = ['заплата','salary','net salary','net pay'].some(kw => kontLower.includes(kw) || osnLower.includes(kw));
+    const isMgmtFee = ['договор за управление','договор управление','управителски','дог. упр.','ду възнагр'].some(kw => osnLower.includes(kw) || kontLower.includes(kw));
+    // Personal expense keywords (Дт): супермаркети, аптеки, горива, ресторанти и т.н.
+    const HOUSEHOLD_KW = [
+      'kaufland','lidl','billa','fantastico','t-market','metro','praktis','praktiker','ikea','jumbo',
+      'shell','omv','lukoil','eko ','rompetrol',
+      'restorant','restaurant','mcdonalds','kfc','starbucks',
+      'apteka','аптека','pharmacy',
+      'h&m','zara','decathlon',
+      'netflix','spotify','apple.com/bill','google',
+    ];
+    const isHousehold = operation === 'Дт' && HOUSEHOLD_KW.some(kw => kontLower.includes(kw) || osnLower.includes(kw));
 
     if (operation === 'Кт') {
       if (isDeposit) {
         категория = 'депозит_получен';
+      } else if (isSalary) {
+        категория = 'заплата';
+        scope = 'personal';
+      } else if (isMgmtFee) {
+        категория = 'управление';
+        scope = 'personal';
       } else {
         const hasRentKw = ['наем','rent'].some(kw => osnLower.includes(kw) || kontLower.includes(kw));
         if (hasRentKw || property_id !== null) {
@@ -48,6 +70,9 @@ module.exports = function(db) {
     } else if (operation === 'Дт') {
       if (isDeposit) {
         категория = 'депозит_върнат';
+      } else if (isHousehold) {
+        категория = 'друго_лично';
+        scope = 'personal';
       } else {
         const isLoan    = ['прокредит','unicredit','уникредит','пощенска','вноска','кредит'].some(kw => kontLower.includes(kw) || osnLower.includes(kw));
         const isExpense = ['такса','застраховка','счетоводство','поддръжка','нотариус'].some(kw => kontLower.includes(kw) || osnLower.includes(kw));
@@ -59,7 +84,7 @@ module.exports = function(db) {
       категория = 'друго';
     }
 
-    return { категория, property_id };
+    return { категория, property_id, scope };
   }
 
   // ── Helper: parse one XLSX buffer ─────────────────────────
@@ -126,7 +151,7 @@ module.exports = function(db) {
       }
 
       // Auto-categorize (built-in logic)
-      let { категория, property_id } = categorizeRow({ operation, контрагент, основание, property_id_from_map });
+      let { категория, property_id, scope } = categorizeRow({ operation, контрагент, основание, property_id_from_map });
 
       // Track unknown tenants
       if (категория === 'наем' && !property_id_from_map && контрагент && !unknownSet.has(контрагент)) {
@@ -142,6 +167,7 @@ module.exports = function(db) {
         if (kontLower.includes(pat) || osnLower.includes(pat)) {
           категория  = rule.категория;
           if (rule.property_id) property_id = rule.property_id;
+          if (rule.scope) scope = rule.scope;
           rule_id   = rule.id;
           validated = 0; // rule-matched → needs user validation
           break;
@@ -151,7 +177,7 @@ module.exports = function(db) {
       // Currency: BGN before 2026-01-01, EUR from 2026-01-01 onward
       const currency = дата >= '2026-01-01' ? 'EUR' : 'BGN';
 
-      transactions.push({ дата, контрагент, контрагент_iban, контрагент_bic, основание, сума, operation, категория, property_id, месец, rule_id, validated, currency });
+      transactions.push({ дата, контрагент, контрагент_iban, контрагент_bic, основание, сума, operation, категория, property_id, месец, rule_id, validated, currency, scope });
     }
 
     return { transactions, unknownTenants };
@@ -248,8 +274,8 @@ module.exports = function(db) {
       `);
 
       const insertTx = db.prepare(`
-        INSERT INTO transactions (session_id, дата, контрагент, основание, сума, operation, категория, property_id, месец, validated, rule_id, currency)
-        VALUES (@session_id, @дата, @контрагент, @основание, @сума, @operation, @категория, @property_id, @месец, @validated, @rule_id, @currency)
+        INSERT INTO transactions (session_id, дата, контрагент, основание, сума, operation, категория, property_id, месец, validated, rule_id, currency, scope)
+        VALUES (@session_id, @дата, @контрагент, @основание, @сума, @operation, @категория, @property_id, @месец, @validated, @rule_id, @currency, @scope)
       `);
 
       // Check for duplicate
@@ -265,8 +291,13 @@ module.exports = function(db) {
 
       const insertExpense = db.prepare(`
         INSERT OR IGNORE INTO expense_invoices
-          (filename, status, supplier_name, amount, currency, reason, property_id, expense_category, месец, payment_type, bank_tx_id, paid, paid_date)
-        VALUES (?, 'done', ?, ?, ?, ?, ?, ?, ?, 'банков_импорт', ?, 1, ?)
+          (filename, status, supplier_name, amount, currency, reason, property_id, expense_category, месец, payment_type, bank_tx_id, paid, paid_date, scope)
+        VALUES (?, 'done', ?, ?, ?, ?, ?, ?, ?, 'банков_импорт', ?, 1, ?, ?)
+      `);
+
+      const insertPersonalIncome = db.prepare(`
+        INSERT INTO personal_income (дата, тип, сума, валута, източник, бележка, bank_tx_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
       `);
 
       // Find existing unpaid invoice matching this bank payment (amount + currency + date within 60 days)
@@ -298,6 +329,7 @@ module.exports = function(db) {
             continue;
           }
 
+          const txScope = tx.scope || 'business';
           const txResult = insertTx.run({
             session_id,
             дата:       tx.дата       || null,
@@ -311,6 +343,7 @@ module.exports = function(db) {
             validated:  tx.validated  != null ? tx.validated : 1,
             rule_id:    tx.rule_id    || null,
             currency:   tx.currency   || (tx.дата >= '2026-01-01' ? 'EUR' : 'BGN'),
+            scope:      txScope,
           });
           saved++;
 
@@ -324,14 +357,32 @@ module.exports = function(db) {
             );
           }
 
+          // Кт personal income (заплата / договор управление) → personal_income row
+          if (tx.operation === 'Кт' && txScope === 'personal' && (tx.категория === 'заплата' || tx.категория === 'управление')) {
+            insertPersonalIncome.run(
+              tx.дата || null,
+              tx.категория,
+              tx.сума || 0,
+              tx.currency || (tx.дата >= '2026-01-01' ? 'EUR' : 'BGN'),
+              tx.контрагент || '',
+              tx.основание || '',
+              txResult.lastInsertRowid
+            );
+          }
+
           // Дт разходи → link to existing invoice or create new expense record
-          if (tx.operation === 'Дт' && (tx.категория === 'разход' || tx.категория === 'разход_друг')) {
+          // Business: категория='разход'/'разход_друг'. Personal: scope='personal'.
+          if (tx.operation === 'Дт' && (tx.категория === 'разход' || tx.категория === 'разход_друг' || txScope === 'personal')) {
             const currency = tx.currency || (tx.дата >= '2026-01-01' ? 'EUR' : 'BGN');
-            const matched = findMatchingInvoice.get(tx.сума || 0, currency, tx.дата, tx.дата);
+            const matched = txScope === 'business'
+              ? findMatchingInvoice.get(tx.сума || 0, currency, tx.дата, tx.дата)
+              : null;
             if (matched) {
-              // Link bank payment to existing invoice instead of creating duplicate
               linkInvoice.run(tx.дата || null, txResult.lastInsertRowid, matched.id);
             } else {
+              const expCat = txScope === 'personal'
+                ? (tx.категория || 'друго_лично')
+                : (tx.категория === 'разход' ? 'разход' : 'друго');
               insertExpense.run(
                 `🏦 ${tx.контрагент || 'Банков разход'}`,
                 tx.контрагент || '',
@@ -339,10 +390,11 @@ module.exports = function(db) {
                 currency,
                 tx.основание || '',
                 tx.property_id || null,
-                tx.категория === 'разход' ? 'разход' : 'друго',
+                expCat,
                 tx.месец || null,
                 txResult.lastInsertRowid,
-                tx.дата || null
+                tx.дата || null,
+                txScope
               );
             }
           }
@@ -386,32 +438,66 @@ module.exports = function(db) {
   });
 
   // ── PATCH /transactions/:id/category ──────────────────────
-  // Auto-learns: saves a rule and retroactively applies it to matching unvalidated transactions
+  // Auto-learns: saves a rule and retroactively applies it to matching unvalidated transactions.
+  // Personal categories (заплата, управление, друго_лично) автоматично сменят scope='personal'
+  // и създават personal_income запис при income типове.
+  const PERSONAL_CATS    = new Set(['заплата', 'управление', 'друго_лично']);
+  const PERSONAL_INCOMES = new Set(['заплата', 'управление']);
+
   router.patch('/transactions/:id/category', (req, res) => {
     try {
       const { категория, property_id } = req.body;
       if (!категория) return res.status(400).json({ error: 'категория е задължителна' });
 
-      // Update this transaction
-      db.prepare('UPDATE transactions SET категория=?, property_id=COALESCE(?,property_id), validated=1 WHERE id=?')
-        .run(категория, property_id || null, req.params.id);
+      const newScope = PERSONAL_CATS.has(категория) ? 'personal' : 'business';
 
-      // Get the counterparty name to learn from
-      const tx = db.prepare('SELECT контрагент FROM transactions WHERE id=?').get(req.params.id);
+      // Update this transaction (including scope)
+      db.prepare('UPDATE transactions SET категория=?, property_id=COALESCE(?,property_id), scope=?, validated=1 WHERE id=?')
+        .run(категория, property_id || null, newScope, req.params.id);
+
+      // Get the counterparty for learning + the full row for personal_income creation
+      const tx = db.prepare('SELECT * FROM transactions WHERE id=?').get(req.params.id);
       let affected = 0;
       let rule_saved = false;
+      let personal_income_id = null;
+
+      // Ако е личен доход — създай или обнови personal_income
+      if (tx && tx.operation === 'Кт' && PERSONAL_INCOMES.has(категория)) {
+        const existing = db.prepare('SELECT id FROM personal_income WHERE bank_tx_id=?').get(tx.id);
+        if (existing) {
+          db.prepare('UPDATE personal_income SET тип=?, сума=?, дата=?, валута=? WHERE id=?')
+            .run(категория, tx.сума, tx.дата, tx.currency || 'EUR', existing.id);
+          personal_income_id = existing.id;
+        } else {
+          const r = db.prepare(`INSERT INTO personal_income
+            (дата, тип, сума, валута, източник, бележка, bank_tx_id)
+            VALUES (?,?,?,?,?,?,?)`).run(
+            tx.дата, категория, tx.сума,
+            tx.currency || (tx.дата >= '2026-01-01' ? 'EUR' : 'BGN'),
+            tx.контрагент || '',
+            tx.основание || '',
+            tx.id
+          );
+          personal_income_id = r.lastInsertRowid;
+        }
+      }
+
+      // Ако сменяме категория към личен разход — sync expense_invoices.scope
+      if (tx && tx.operation === 'Дт') {
+        db.prepare('UPDATE expense_invoices SET scope=? WHERE bank_tx_id=?').run(newScope, tx.id);
+      }
 
       if (tx && tx.контрагент) {
         const pattern = tx.контрагент.trim();
 
-        // Upsert rule
+        // Upsert rule (включително scope, за auto-apply при бъдещ импорт)
         const existing = db.prepare('SELECT id FROM tx_rules WHERE LOWER(pattern)=LOWER(?)').get(pattern);
         if (existing) {
-          db.prepare('UPDATE tx_rules SET категория=?, property_id=? WHERE id=?')
-            .run(категория, property_id || null, existing.id);
+          db.prepare('UPDATE tx_rules SET категория=?, property_id=?, scope=? WHERE id=?')
+            .run(категория, property_id || null, newScope, existing.id);
         } else {
-          db.prepare('INSERT INTO tx_rules (pattern, категория, property_id) VALUES (?,?,?)')
-            .run(pattern, категория, property_id || null);
+          db.prepare('INSERT INTO tx_rules (pattern, категория, property_id, scope) VALUES (?,?,?,?)')
+            .run(pattern, категория, property_id || null, newScope);
         }
         rule_saved = true;
 
@@ -420,14 +506,14 @@ module.exports = function(db) {
         const unvalidated = db.prepare('SELECT id, контрагент FROM transactions WHERE validated=0 AND id != ?').all(req.params.id);
         const toUpdate = unvalidated.filter(t => t.контрагент && t.контрагент.toLowerCase().includes(patLower));
         if (toUpdate.length) {
-          const upd = db.prepare('UPDATE transactions SET категория=?, property_id=COALESCE(?,property_id), validated=1 WHERE id=?');
-          const run = db.transaction(list => list.forEach(t => upd.run(категория, property_id || null, t.id)));
+          const upd = db.prepare('UPDATE transactions SET категория=?, property_id=COALESCE(?,property_id), scope=?, validated=1 WHERE id=?');
+          const run = db.transaction(list => list.forEach(t => upd.run(категория, property_id || null, newScope, t.id)));
           run(toUpdate);
           affected = toUpdate.length;
         }
       }
 
-      res.json({ ok: true, rule_saved, affected });
+      res.json({ ok: true, rule_saved, affected, scope: newScope, personal_income_id });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }

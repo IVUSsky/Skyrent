@@ -489,11 +489,16 @@ module.exports = function(db) {
     }
   });
 
-  // GET /?month=&category=&paid=
+  // GET /?month=&category=&paid=&scope=
+  // scope: 'business' (default), 'personal', 'all'. Legacy NULL = business.
   expRouter.get('/', (req, res) => {
-    const { month, category, paid } = req.query;
+    const { month, category, paid, scope } = req.query;
     let sql = 'SELECT * FROM expense_invoices WHERE 1=1';
     const p = [];
+    const requestedScope = (scope || 'business').toLowerCase();
+    if (requestedScope === 'business')      { sql += " AND (scope IS NULL OR scope='business')"; }
+    else if (requestedScope === 'personal') { sql += " AND scope='personal'"; }
+    // 'all' → no scope filter
     if (month)                    { sql += ' AND месец = ?';            p.push(month); }
     if (category)                 { sql += ' AND expense_category = ?'; p.push(category); }
     if (paid !== undefined && paid !== '') {
@@ -506,11 +511,13 @@ module.exports = function(db) {
 
   // PUT /:id
   expRouter.put('/:id', (req, res) => {
-    const { supplier_name, supplier_iban, supplier_bic, amount, currency, reason, property_id, expense_category, месец } = req.body;
+    const { supplier_name, supplier_iban, supplier_bic, amount, currency, reason, property_id, expense_category, месец, scope } = req.body;
+    const existing = db.prepare('SELECT scope FROM expense_invoices WHERE id=?').get(req.params.id);
+    const finalScope = scope !== undefined ? scope : (existing?.scope || 'business');
     db.prepare(`UPDATE expense_invoices SET
       supplier_name=?, supplier_iban=?, supplier_bic=?, amount=?, currency=?,
-      reason=?, property_id=?, expense_category=?, месец=?, status='done' WHERE id=?`
-    ).run(supplier_name, supplier_iban, supplier_bic, amount, currency, reason, property_id||null, expense_category, месец, req.params.id);
+      reason=?, property_id=?, expense_category=?, месец=?, scope=?, status='done' WHERE id=?`
+    ).run(supplier_name, supplier_iban, supplier_bic, amount, currency, reason, property_id||null, expense_category, месец, finalScope, req.params.id);
     res.json({ ok: true });
   });
 
@@ -560,6 +567,9 @@ module.exports = function(db) {
 
       const INVEST_CATS = `('инвестиция', 'благородни метали')`
       const NON_OPEX    = `('инвестиция', 'благородни метали', 'ремонт', 'ремонт д')`
+      // Бизнес метриките винаги изключват личните разходи. Legacy NULL = business.
+      const BIZ        = `(scope IS NULL OR scope='business')`
+      const BIZ_EI     = `(ei.scope IS NULL OR ei.scope='business')`
 
       // Operational totals (excluding инвестиция, благородни метали, ремонт)
       const totals = db.prepare(`
@@ -571,7 +581,7 @@ module.exports = function(db) {
           SUM(CASE WHEN paid=1 THEN amount ELSE 0 END) as paid_amount,
           SUM(CASE WHEN paid=0 THEN amount ELSE 0 END) as unpaid_amount
         FROM expense_invoices
-        WHERE (expense_category IS NULL OR expense_category NOT IN ${NON_OPEX}) ${mf}`).get(...p);
+        WHERE ${BIZ} AND (expense_category IS NULL OR expense_category NOT IN ${NON_OPEX}) ${mf}`).get(...p);
 
       // Investment totals (инвестиция + благородни метали)
       const investTotals = db.prepare(`
@@ -580,7 +590,7 @@ module.exports = function(db) {
           SUM(CASE WHEN currency='EUR' THEN amount ELSE 0 END) as total_eur,
           COUNT(*) as count
         FROM expense_invoices
-        WHERE expense_category IN ${INVEST_CATS} ${mf}`).get(...p);
+        WHERE ${BIZ} AND expense_category IN ${INVEST_CATS} ${mf}`).get(...p);
 
       // Investment items list
       const investItems = db.prepare(`
@@ -588,7 +598,7 @@ module.exports = function(db) {
                ei.месец, ei.property_id, ei.paid, ei.paid_date, p.адрес
         FROM expense_invoices ei
         LEFT JOIN properties p ON p.id = ei.property_id
-        WHERE ei.expense_category IN ${INVEST_CATS} ${mfe}
+        WHERE ${BIZ_EI} AND ei.expense_category IN ${INVEST_CATS} ${mfe}
         ORDER BY ei.месец DESC`).all(...p);
 
       // Renovation totals
@@ -598,7 +608,7 @@ module.exports = function(db) {
           SUM(CASE WHEN currency='EUR' THEN amount ELSE 0 END) as total_eur,
           COUNT(*) as count
         FROM expense_invoices
-        WHERE expense_category = 'ремонт' ${mf}`).get(...p);
+        WHERE ${BIZ} AND expense_category = 'ремонт' ${mf}`).get(...p);
 
       // Renovation D totals (external / non-business)
       const renovDTotals = db.prepare(`
@@ -607,7 +617,7 @@ module.exports = function(db) {
           SUM(CASE WHEN currency='EUR' THEN amount ELSE 0 END) as total_eur,
           COUNT(*) as count
         FROM expense_invoices
-        WHERE expense_category = 'ремонт д' ${mf}`).get(...p);
+        WHERE ${BIZ} AND expense_category = 'ремонт д' ${mf}`).get(...p);
 
       // Operational by category (expense_category + currency + total)
       const byCategory = db.prepare(`
@@ -619,7 +629,7 @@ module.exports = function(db) {
           SUM(CASE WHEN paid=1 THEN amount ELSE 0 END) as paid_amount,
           SUM(CASE WHEN paid=1 THEN 1 ELSE 0 END) as paid_count
         FROM expense_invoices
-        WHERE (expense_category IS NULL OR expense_category NOT IN ${NON_OPEX}) ${mf}
+        WHERE ${BIZ} AND (expense_category IS NULL OR expense_category NOT IN ${NON_OPEX}) ${mf}
         GROUP BY expense_category, currency`).all(...p);
 
       // By property (operational only, with currency)
@@ -628,6 +638,7 @@ module.exports = function(db) {
         FROM expense_invoices ei
         LEFT JOIN properties p ON p.id = ei.property_id
         WHERE ei.property_id IS NOT NULL
+          AND ${BIZ_EI}
           AND (ei.expense_category IS NULL OR ei.expense_category NOT IN ${NON_OPEX}) ${mfe}
         GROUP BY ei.property_id, ei.currency`).all(...p);
 

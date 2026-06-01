@@ -117,6 +117,16 @@ async function main() {
   db.exec("UPDATE expense_invoices SET currency='EUR' WHERE (currency IS NULL OR currency='BGN') AND месец >= '2026-01'");
   db.exec("UPDATE expense_invoices SET currency='BGN' WHERE currency IS NULL");
 
+  // ── Personal vs Business scope ────────────────────────────────────────
+  // scope='business' (default) → имотен бизнес: ОПР, наеми, кредити, ремонти
+  // scope='personal'           → личен бюджет: заплата, договор управление,
+  //                              домакински разходи. НЕ влиза в Dashboard метриките.
+  try { db.exec("ALTER TABLE transactions ADD COLUMN scope TEXT DEFAULT 'business'");      console.log('Migration: added transactions.scope'); }      catch(_) {}
+  try { db.exec("ALTER TABLE expense_invoices ADD COLUMN scope TEXT DEFAULT 'business'"); console.log('Migration: added expense_invoices.scope'); } catch(_) {}
+  try { db.exec("ALTER TABLE tx_rules ADD COLUMN scope TEXT DEFAULT 'business'");          console.log('Migration: added tx_rules.scope'); }          catch(_) {}
+  try { db.exec("CREATE INDEX IF NOT EXISTS idx_transactions_scope ON transactions(scope, дата)"); } catch(_) {}
+  try { db.exec("CREATE INDEX IF NOT EXISTS idx_expense_invoices_scope ON expense_invoices(scope, месец)"); } catch(_) {}
+
   // ── Investments module: precious metals (gold, silver, platinum) ──────
   // Tables are named gold_* for historical reasons but contain a 'метал'
   // column distinguishing 'gold' | 'silver' | 'platinum'.
@@ -228,6 +238,24 @@ async function main() {
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`);
   console.log('investments tables ready (multi-metal + t212_snapshots + wealth_snapshots + wealth_goals)');
+
+  // ── Personal income (заплата / договор управление / дивидент / лихва / друго)
+  // Източник: ProBanking импорт (link чрез bank_tx_id), друга банка (manual),
+  // или директно ръчно въвеждане.
+  db.exec(`CREATE TABLE IF NOT EXISTS personal_income (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    дата DATE NOT NULL,
+    тип TEXT NOT NULL,
+    сума REAL NOT NULL,
+    валута TEXT DEFAULT 'EUR',
+    източник TEXT DEFAULT '',
+    бележка TEXT DEFAULT '',
+    bank_tx_id INTEGER REFERENCES transactions(id),
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+  try { db.exec("CREATE INDEX IF NOT EXISTS idx_personal_income_date ON personal_income(дата DESC)"); } catch(_) {}
+  try { db.exec("CREATE INDEX IF NOT EXISTS idx_personal_income_tx ON personal_income(bank_tx_id) WHERE bank_tx_id IS NOT NULL"); } catch(_) {}
+  console.log('personal_income table ready');
 
   // Contract templates & contracts
   db.exec(`CREATE TABLE IF NOT EXISTS contract_templates (
@@ -777,6 +805,7 @@ async function main() {
   app.use('/api/smart', require('./routes/smart')(db));
   app.use('/api/inventory', require('./routes/inventory')(db));
   app.use('/api/investments', require('./routes/investments')(db));
+  app.use('/api/personal', require('./routes/personal')(db));
   app.use('/api/tenant', require('./routes/tenant')(db));
   app.use('/api/chat-learning', require('./routes/chatLearning')(db));
   app.use('/api/addons', require('./routes/addons')(db));

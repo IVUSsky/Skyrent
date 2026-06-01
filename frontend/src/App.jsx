@@ -14,6 +14,7 @@ import Settings from './components/Settings'
 import Expenses from './components/Expenses'
 import Smart from './components/Smart'
 import Investments from './components/Investments'
+import PersonalBudget from './components/PersonalBudget'
 import Addons from './components/Addons'
 import Support from './components/Support'
 import Internet from './components/Internet'
@@ -40,6 +41,7 @@ const ALL_TABS = [
   { id: 'expenses',    label: '💸 Разходи',     roles: ['admin'] },
   { id: 'import',      label: '📥 Банка',       roles: ['admin'] },
   { id: 'investments', label: '📈 Инвестиции',  roles: ['admin'] },
+  { id: 'personal',    label: '💰 Личен бюджет', roles: ['admin'] },
   { id: 'smart',       label: '⚡ Смарт',       roles: ['admin'] },
   { id: 'settings',    label: '⚙️ Настройки',  roles: ['admin'] },
 ]
@@ -199,6 +201,7 @@ export default function App() {
         {validTab === 'import'    && <Import API={API} />}
         {validTab === 'smart'        && <Smart API={API} />}
         {validTab === 'investments'  && <Investments API={API} />}
+        {validTab === 'personal'     && <PersonalBudget />}
         {validTab === 'settings'     && <Settings API={API} />}
       </main>
     </div>
