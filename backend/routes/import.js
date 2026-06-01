@@ -200,10 +200,36 @@ module.exports = function(db) {
     return { transactions, unknownTenants };
   }
 
-  // ── Helper: parse one PDF buffer (ProBanking) ─────────────
+  // ── Helper: detect bank от съдържание на PDF (sniff first 4KB на текста).
+  // Връща 'probanking' | 'unicredit' | null.
+  async function detectPdfBank(buffer) {
+    const pdfParse = require('pdf-parse');
+    try {
+      // pdf-parse приема max option — но е по-просто да направим pre-parse и
+      // да гледаме първите няколко KB. Само за detection.
+      const d = await pdfParse(buffer);
+      const head = d.text.slice(0, 4000);
+      if (/PRCBBGSF|ПРОКРЕДИТ\s+БАНК/i.test(head)) return 'probanking';
+      if (/UNCRBGSF|UniCredit\s+Bulbank|УниКредит\s+Булбанк/i.test(head)) return 'unicredit';
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  // ── Helper: parse PDF (auto-detect bank). По default → ProBanking
+  // за обратна съвместимост.
   async function parsePdfBuffer(buffer, tenantMap, rules) {
-    const { parseProBankingPdf } = require('../lib/probankingPdfParser');
-    const { transactions: rawTx } = await parseProBankingPdf(buffer);
+    const bank = await detectPdfBank(buffer);
+    let rawTx;
+    if (bank === 'unicredit') {
+      const { parseUniCreditPdf } = require('../lib/unicreditPdfParser');
+      ({ transactions: rawTx } = await parseUniCreditPdf(buffer));
+    } else {
+      // probanking или unknown → пробвай ProBanking
+      const { parseProBankingPdf } = require('../lib/probankingPdfParser');
+      ({ transactions: rawTx } = await parseProBankingPdf(buffer));
+    }
 
     const transactions   = [];
     const unknownTenants = [];
