@@ -112,6 +112,22 @@ export default function PersonalBudget() {
       })
   }
 
+  const doFixLoans = () => {
+    if (!confirm('Намира loan tx-те с year-merge бъг (24,XXX EUR) и:\n- ако има sibling с правилна сума → изтрива buggy\n- иначе поправя амоунта\n\nПродължаваме?')) return
+    apiFetch(`${API}/api/personal/debug/fix-loan-amounts`, { method: 'POST' })
+      .then(r => r.json())
+      .then(d => {
+        setRebuildResult({
+          создадени_доходи: 0,
+          Кт_намерени: 0,
+          синхронизирани_разходи: (d.fixed_count || 0) + (d.deleted_count || 0),
+          extra: `Loan fix: поправени ${d.fixed_count}, изтрити ${d.deleted_count}, корекция ${(d.total_correction || 0).toFixed(2)} EUR`,
+        })
+        load()
+        setTimeout(() => setRebuildResult(null), 12000)
+      })
+  }
+
   const openAccountsModal = () => {
     apiFetch(`${API}/api/personal/accounts`)
       .then(r => r.json())
@@ -228,6 +244,11 @@ export default function PersonalBudget() {
                     title="Сканира bank transactions и създава липсващи personal_income"
                     className="px-3 py-1.5 bg-amber-100 hover:bg-amber-200 text-amber-800 border border-amber-300 rounded text-sm font-medium">
               ⟳ Преизчисли
+            </button>
+            <button onClick={doFixLoans}
+                    title="Поправя ProBanking year-merge бъг — 24,XXX EUR loan amounts"
+                    className="px-3 py-1.5 bg-rose-100 hover:bg-rose-200 text-rose-800 border border-rose-300 rounded text-sm font-medium">
+              🔧 Поправи loan
             </button>
             <button onClick={() => setShowAdd(true)}
                     className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm font-medium">
