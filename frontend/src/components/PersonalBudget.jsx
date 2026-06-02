@@ -41,6 +41,9 @@ export default function PersonalBudget() {
   const [showMovements, setShowMovements] = useState(null) // 'in' | 'out' | null
   const [movements, setMovements] = useState(null)
   const [showRemaining, setShowRemaining] = useState(false)
+  const [showCategorize, setShowCategorize] = useState(false)
+  const [categorizeData, setCategorizeData] = useState(null)
+  const [categorizeFilter, setCategorizeFilter] = useState({ category: 'разход_друг', op: 'Дт' })
   const [loading, setLoading]   = useState(false)
   const [showAdd, setShowAdd]   = useState(false)
   const [rebuildResult, setRebuildResult] = useState(null)
@@ -110,6 +113,30 @@ export default function PersonalBudget() {
         load()
         setTimeout(() => setRebuildResult(null), 8000)
       })
+  }
+
+  const openCategorize = () => {
+    setShowCategorize(true)
+    loadCategorize(categorizeFilter)
+  }
+
+  const loadCategorize = (f) => {
+    setCategorizeData(null)
+    apiFetch(`${API}/api/personal/categorize/contractors?category=${encodeURIComponent(f.category)}&op=${f.op}`)
+      .then(r => r.json()).then(setCategorizeData)
+  }
+
+  const applyCategoryFor = (contractor, newCat) => {
+    if (!newCat) return
+    apiFetch(`${API}/api/personal/categorize/contractor`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contractor, category: newCat, scope: 'personal' }),
+    }).then(r => r.json()).then(() => {
+      // Re-load list
+      loadCategorize(categorizeFilter)
+      load()
+    })
   }
 
   const doFixLoans = () => {
@@ -249,6 +276,11 @@ export default function PersonalBudget() {
                     title="Поправя ProBanking year-merge бъг — 24,XXX EUR loan amounts"
                     className="px-3 py-1.5 bg-rose-100 hover:bg-rose-200 text-rose-800 border border-rose-300 rounded text-sm font-medium">
               🔧 Поправи loan
+            </button>
+            <button onClick={openCategorize}
+                    title="Категоризирай 'разход_друг' по контрагент — batch update"
+                    className="px-3 py-1.5 bg-indigo-100 hover:bg-indigo-200 text-indigo-800 border border-indigo-300 rounded text-sm font-medium">
+              🏷️ Категоризирай
             </button>
             <button onClick={() => setShowAdd(true)}
                     className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm font-medium">
@@ -597,6 +629,102 @@ export default function PersonalBudget() {
         )}
       </div>
       </>}
+
+      {/* Категоризирай modal — batch по контрагент */}
+      {showCategorize && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={() => setShowCategorize(false)}>
+          <div className="bg-white rounded-xl shadow-2xl p-5 max-w-5xl w-full m-4 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-start mb-3">
+              <div>
+                <h3 className="text-lg font-bold text-gray-900">🏷️ Категоризирай по контрагент</h3>
+                <p className="text-xs text-gray-500 mt-1">
+                  Избор на категория за контрагент → батч update на ВСИЧКИТЕ му tx-те + auto-rule за бъдеще.
+                </p>
+              </div>
+              <button onClick={() => setShowCategorize(false)} className="text-gray-400 hover:text-gray-700 text-2xl leading-none">×</button>
+            </div>
+
+            {/* Filter */}
+            <div className="flex gap-2 mb-3 flex-wrap">
+              <select value={categorizeFilter.category}
+                      onChange={e => { const f = { ...categorizeFilter, category: e.target.value }; setCategorizeFilter(f); loadCategorize(f) }}
+                      className="border border-gray-300 rounded px-2 py-1 text-sm">
+                <option value="разход_друг">разход_друг (некатегоризирани)</option>
+                <option value="приход_друг">приход_друг</option>
+                <option value="друго_лично">друго_лично</option>
+                <option value="разход">разход</option>
+                <option value="заем_sky">заем_sky</option>
+                <option value="инвестиция">инвестиция</option>
+                <option value="вноска">вноска</option>
+                <option value="заплата">заплата</option>
+                <option value="наем">наем</option>
+              </select>
+              <select value={categorizeFilter.op}
+                      onChange={e => { const f = { ...categorizeFilter, op: e.target.value }; setCategorizeFilter(f); loadCategorize(f) }}
+                      className="border border-gray-300 rounded px-2 py-1 text-sm">
+                <option value="Дт">Дт (изходящи)</option>
+                <option value="Кт">Кт (входящи)</option>
+              </select>
+              {categorizeData && (
+                <div className="ml-auto text-xs text-gray-500 pt-1">
+                  <b>{categorizeData.brой_контрагенти}</b> контрагенти · общо <b>{fmt(categorizeData.общо_сума)} EUR</b>
+                </div>
+              )}
+            </div>
+
+            {!categorizeData ? (
+              <p className="text-center text-gray-400 py-8">Зарежда...</p>
+            ) : (
+              <table className="w-full text-sm">
+                <thead className="text-xs text-gray-500 uppercase border-b border-gray-200">
+                  <tr>
+                    <th className="text-left py-2 w-8">#</th>
+                    <th className="text-left py-2">Контрагент</th>
+                    <th className="text-right py-2">Общо</th>
+                    <th className="text-right py-2">Брой</th>
+                    <th className="text-left py-2 pl-3">Пример основание</th>
+                    <th className="text-left py-2 pl-3">Категоризирай като</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {categorizeData.контрагенти.slice(0, 100).map((g, i) => (
+                    <tr key={g.контрагент} className="border-b border-gray-50 hover:bg-gray-50">
+                      <td className="py-1.5 text-gray-400">{i+1}</td>
+                      <td className="py-1.5 font-medium text-gray-800 max-w-[200px] truncate" title={g.контрагент}>
+                        {g.контрагент}
+                      </td>
+                      <td className="py-1.5 text-right font-bold text-rose-700">{fmt(g.total)}</td>
+                      <td className="py-1.5 text-right text-xs text-gray-500">{g.count}</td>
+                      <td className="py-1.5 pl-3 text-xs text-gray-500 max-w-[280px] truncate" title={g.sample}>
+                        {(g.sample || '').slice(0, 60)}
+                      </td>
+                      <td className="py-1.5 pl-3">
+                        <select onChange={e => { if (e.target.value) applyCategoryFor(g.контрагент, e.target.value) }}
+                                defaultValue=""
+                                className="text-xs border border-gray-300 rounded px-2 py-1">
+                          <option value="">— избери —</option>
+                          <option value="друго_лично">друго_лично (личен)</option>
+                          <option value="разход">разход</option>
+                          <option value="заем_sky">заем_sky (към Sky Capital)</option>
+                          <option value="инвестиция">инвестиция (T212/брокери)</option>
+                          <option value="вноска">вноска (кредит)</option>
+                          <option value="ремонт">ремонт</option>
+                          <option value="приход_друг">приход_друг</option>
+                          <option value="наем">наем (получен)</option>
+                        </select>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+
+            <div className="flex justify-end mt-3">
+              <button onClick={() => setShowCategorize(false)} className="px-4 py-1.5 text-sm text-gray-600 hover:text-gray-900">Затвори</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Remaining modal — детайли при click на Останах */}
       {showRemaining && (

@@ -292,6 +292,77 @@ module.exports = function(db) {
     });
   });
 
+  // ── Категоризация по контрагент (batch) ─────────────────────────────────
+  // GET /categorize/contractors?category=X&op=Дт
+  // Връща групи контрагенти със същата текуща категория, сортирани по сума.
+  router.get('/categorize/contractors', (req, res) => {
+    const cat = req.query.category;
+    const op = req.query.op || 'Дт';
+    const scope = req.query.scope || 'personal';
+    if (!cat) return res.status(400).json({ error: 'category е задължителна' });
+
+    // Use JS-side grouping за case-insensitive cyrillic match
+    const rows = db.prepare(`
+      SELECT id, дата, контрагент, основание, сума, operation, scope, категория
+      FROM transactions
+      WHERE категория = ? AND operation = ? AND scope = ?
+        AND контрагент IS NOT NULL AND контрагент != ''
+    `).all(cat, op, scope);
+
+    const groups = new Map();
+    for (const r of rows) {
+      const key = r.контрагент.trim();
+      if (!groups.has(key)) groups.set(key, { контрагент: key, count: 0, total: 0, sample: r.основание, ids: [] });
+      const g = groups.get(key);
+      g.count++;
+      g.total += Number(r.сума) || 0;
+      if (g.ids.length < 100) g.ids.push(r.id);
+    }
+    const list = [...groups.values()].sort((a, b) => b.total - a.total);
+    res.json({
+      brой_контрагенти: list.length,
+      общо_сума: Number(list.reduce((s, g) => s + g.total, 0).toFixed(2)),
+      контрагенти: list.map(g => ({ ...g, total: Number(g.total.toFixed(2)) })),
+    });
+  });
+
+  // POST /categorize/contractor { contractor, category, scope?, save_rule? }
+  // Batch update на всички tx-те от този контрагент + (optional) tx_rule.
+  router.post('/categorize/contractor', (req, res) => {
+    const { contractor, category, scope } = req.body || {};
+    if (!contractor || !category) return res.status(400).json({ error: 'contractor + category са задължителни' });
+
+    // JS-side filter за кириличен match
+    const candidates = db.prepare(`SELECT id, контрагент FROM transactions WHERE контрагент IS NOT NULL`).all();
+    const target = contractor.toLowerCase();
+    const matchIds = candidates.filter(t => (t.контрагент || '').toLowerCase().includes(target)).map(t => t.id);
+
+    let updated = 0;
+    const upd = scope
+      ? db.prepare('UPDATE transactions SET категория = ?, scope = ? WHERE id = ?')
+      : db.prepare('UPDATE transactions SET категория = ? WHERE id = ?');
+    const updExp = db.prepare('UPDATE expense_invoices SET expense_category = ?, scope = COALESCE(?, scope) WHERE bank_tx_id = ?');
+
+    const doIt = db.transaction(() => {
+      for (const id of matchIds) {
+        if (scope) upd.run(category, scope, id);
+        else       upd.run(category, id);
+        updExp.run(category, scope || null, id);
+        updated++;
+      }
+      // Save tx_rule (upsert)
+      const existing = db.prepare('SELECT id FROM tx_rules WHERE LOWER(pattern) = LOWER(?)').get(contractor);
+      if (existing) {
+        db.prepare('UPDATE tx_rules SET категория = ?, scope = ? WHERE id = ?').run(category, scope || 'business', existing.id);
+      } else {
+        db.prepare('INSERT INTO tx_rules (pattern, категория, scope) VALUES (?, ?, ?)').run(contractor, category, scope || 'business');
+      }
+    });
+    doIt();
+
+    res.json({ updated, contractor, category, scope: scope || 'unchanged', rule_saved: true });
+  });
+
   // ── Movements per direction (за clickable KPI cards) ────────────────────
   // GET /movements?direction=in|out&month= | from=&to= | months=
   // direction=in:  Кт от personal сметка + personal_income
