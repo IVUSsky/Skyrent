@@ -44,6 +44,7 @@ export default function PersonalBudget() {
   const [showCategorize, setShowCategorize] = useState(false)
   const [categorizeData, setCategorizeData] = useState(null)
   const [categorizeFilter, setCategorizeFilter] = useState({ category: 'разход_друг', op: 'Дт' })
+  const [customCategories, setCustomCategories] = useState([])
   const [loading, setLoading]   = useState(false)
   const [showAdd, setShowAdd]   = useState(false)
   const [rebuildResult, setRebuildResult] = useState(null)
@@ -118,6 +119,22 @@ export default function PersonalBudget() {
   const openCategorize = () => {
     setShowCategorize(true)
     loadCategorize(categorizeFilter)
+    // Load custom categories от settings
+    apiFetch(`${API}/api/settings`).then(r => r.json()).then(s => {
+      const cats = Array.isArray(s.custom_categories) ? s.custom_categories : []
+      setCustomCategories(cats)
+    })
+  }
+
+  const saveNewCategory = (newCat) => {
+    if (!newCat) return
+    const merged = [...new Set([...customCategories, newCat])]
+    setCustomCategories(merged)
+    apiFetch(`${API}/api/settings`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ custom_categories: merged }),
+    })
   }
 
   const loadCategorize = (f) => {
@@ -699,18 +716,51 @@ export default function PersonalBudget() {
                         {(g.sample || '').slice(0, 60)}
                       </td>
                       <td className="py-1.5 pl-3">
-                        <select onChange={e => { if (e.target.value) applyCategoryFor(g.контрагент, e.target.value) }}
+                        <select onChange={e => {
+                                  const v = e.target.value
+                                  if (!v) return
+                                  if (v === '__new__') {
+                                    const name = prompt(`Име на нова категория за "${g.контрагент}":\n(напр. "Антон_заем", "ремонт_кола", "храна_кафенета")`)
+                                    if (name && name.trim()) {
+                                      const cleanName = name.trim().toLowerCase().replace(/\s+/g, '_')
+                                      saveNewCategory(cleanName)
+                                      applyCategoryFor(g.контрагент, cleanName)
+                                    }
+                                  } else {
+                                    applyCategoryFor(g.контрагент, v)
+                                  }
+                                  e.target.value = ''
+                                }}
                                 defaultValue=""
                                 className="text-xs border border-gray-300 rounded px-2 py-1">
                           <option value="">— избери —</option>
-                          <option value="друго_лично">друго_лично (личен)</option>
-                          <option value="разход">разход</option>
-                          <option value="заем_sky">заем_sky (към Sky Capital)</option>
-                          <option value="инвестиция">инвестиция (T212/брокери)</option>
-                          <option value="вноска">вноска (кредит)</option>
-                          <option value="ремонт">ремонт</option>
-                          <option value="приход_друг">приход_друг</option>
-                          <option value="наем">наем (получен)</option>
+                          <optgroup label="Лични разходи">
+                            <option value="друго_лично">друго_лично</option>
+                            <option value="храна">храна</option>
+                            <option value="битови">битови (ток/вода/нет)</option>
+                            <option value="транспорт">транспорт</option>
+                            <option value="облекло">облекло</option>
+                            <option value="здраве">здраве</option>
+                            <option value="забавление">забавление</option>
+                          </optgroup>
+                          <optgroup label="Capital / Инвестиции">
+                            <option value="заем_sky">заем_sky</option>
+                            <option value="заем_лице">заем към лице</option>
+                            <option value="инвестиция">инвестиция</option>
+                            <option value="ремонт">ремонт</option>
+                          </optgroup>
+                          <optgroup label="Други">
+                            <option value="разход">разход</option>
+                            <option value="вноска">вноска</option>
+                            <option value="приход_друг">приход_друг</option>
+                            <option value="наем">наем</option>
+                          </optgroup>
+                          {customCategories.length > 0 && (
+                            <optgroup label="🏷️ Мои категории">
+                              {customCategories.map(c => <option key={c} value={c}>{c}</option>)}
+                            </optgroup>
+                          )}
+                          <option value="__new__">➕ Нова категория...</option>
                         </select>
                       </td>
                     </tr>
