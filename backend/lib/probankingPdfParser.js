@@ -29,8 +29,10 @@ const pdfParse = require('pdf-parse');
 
 // Reф + дата (YYYY-MM-DD). reф = 9-11 цифри.
 const RECORD_START_RE = /^(\d{9,11})(\d{4}-\d{2}-\d{2})(.*)$/;
-// Сума_eur + сума_bgn + ОП в края на ред. Поддържа space като thousand sep.
-const AMOUNT_END_RE   = /^([\d ]{1,7}\.\d{2})([\d ]{1,9}\.\d{2})(ДТ|КТ)$/;
+// Сума_eur + сума_bgn + ОП в края на ред. СТРОГ thousand sep:
+// `\d{1,3}(?: \d{3})*\.\d{2}` — иначе цифри от датата (напр. "22.03.24")
+// се сливаха с амоунта (24587.31 вместо 587.31).
+const AMOUNT_END_RE   = /^(\d{1,3}(?: \d{3})*\.\d{2})(\d{1,3}(?: \d{3})*\.\d{2})(ДТ|КТ)$/;
 // Шум който се отрязва между записи (page separators).
 const NOISE_RE        = /^(-{20,}|Стр:\s*\d+|\s*)$/;
 // Линии които НЕ са основание (вътре в record body).
@@ -169,7 +171,9 @@ async function parseProBankingPdf(buffer) {
 // { index, eur, bgn, op, endsAtLineEnd }.
 function matchAmountAnywhere(str) {
   if (!str) return null;
-  const re = /([\d ]{1,7}\.\d{2})([\d ]{1,9}\.\d{2})(ДТ|КТ)/g;
+  // СТРОГА thousand separator format за да избегнем year-merge bug:
+  // "/22.03.24587.31" → не трябва да match-не "24587.31" а "587.31".
+  const re = /(\d{1,3}(?: \d{3})*\.\d{2})(\d{1,3}(?: \d{3})*\.\d{2})(ДТ|КТ)/g;
   let m, last = null;
   while ((m = re.exec(str)) !== null) {
     last = m;
