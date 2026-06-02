@@ -292,6 +292,14 @@ module.exports = function(db) {
     });
   });
 
+  // PATCH /loans/:id/external — маркира кредит като плащан externally (от друг)
+  router.patch('/loans/:id/external', (req, res) => {
+    const { paid_external, paid_external_note } = req.body || {};
+    db.prepare('UPDATE loans SET paid_external = ?, paid_external_note = ? WHERE id = ?')
+      .run(paid_external ? 1 : 0, paid_external_note || null, req.params.id);
+    res.json({ ok: true });
+  });
+
   // ── Loans summary (ипотеки + плащания) ──────────────────────────────────
   // Match-ва loans.договор с tx.основание (търси "договор" pattern в основание).
   // За всеки loan: сума платена досега, # вноски, очаквана следваща дата/сума.
@@ -301,6 +309,11 @@ module.exports = function(db) {
 
     const result = [];
     for (const loan of loans) {
+      // External-paid loans: skip bank tx-те matching, no payments expected here
+      if (loan.paid_external) {
+        result.push({ ...loan, платено: 0, брой_вноски: 0, последна_дата: null, search_key: null });
+        continue;
+      }
       const dog = (loan.договор || '').trim();
       if (!dog) {
         result.push({ ...loan, платено: 0, брой_вноски: 0, последна_дата: null });

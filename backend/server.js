@@ -88,6 +88,8 @@ async function main() {
   try { db.exec("ALTER TABLE properties ADD COLUMN абонат_вход TEXT"); console.log('Migration: added абонат_вход'); } catch(_) {}
 
   try { db.exec("ALTER TABLE loans ADD COLUMN balance_date DATE"); console.log('Migration: added balance_date'); } catch(_) {}
+  try { db.exec("ALTER TABLE loans ADD COLUMN paid_external INTEGER DEFAULT 0"); console.log('Migration: added loans.paid_external'); } catch(_) {}
+  try { db.exec("ALTER TABLE loans ADD COLUMN paid_external_note TEXT"); console.log('Migration: added loans.paid_external_note'); } catch(_) {}
   // Set balance_date to today for loans that don't have one
   db.exec("UPDATE loans SET balance_date = date('now') WHERE balance_date IS NULL");
 

@@ -620,29 +620,45 @@ export default function PersonalBudget() {
                 <th className="text-right py-2">Платено</th>
                 <th className="text-right py-2">#</th>
                 <th className="text-left py-2 pl-3">Последна</th>
+                <th className="text-center py-2">Плаща</th>
               </tr>
             </thead>
             <tbody>
-              {loansSummary.loans.map(l => {
-                const доля = l.остатък > 0 ? (l.платено / (l.платено + l.остатък)) * 100 : 0
-                return (
-                  <tr key={l.id} className="border-b border-gray-50 hover:bg-gray-50">
-                    <td className="py-1.5">
-                      <div className="font-medium text-gray-800">{l.банка}</div>
-                      <div className="text-xs text-gray-500">{l.договор}</div>
-                    </td>
-                    <td className="py-1.5 text-gray-700">{l.кредитополучател}</td>
-                    <td className="py-1.5 text-right font-medium text-rose-700">{fmt(l.остатък)}</td>
-                    <td className="py-1.5 text-right text-gray-700">{fmt(l.вноска)}</td>
-                    <td className="py-1.5 text-right font-medium text-emerald-700">{fmt(l.платено)}</td>
-                    <td className="py-1.5 text-right text-xs text-gray-500">{l.брой_вноски}</td>
-                    <td className="py-1.5 pl-3 text-xs text-gray-500">
-                      {l.последна_вноска || '—'}
-                      {l.последна_сума && <span className="ml-1">({fmt(l.последна_сума)})</span>}
-                    </td>
-                  </tr>
-                )
-              })}
+              {loansSummary.loans.map(l => (
+                <tr key={l.id} className={`border-b border-gray-50 ${l.paid_external ? 'bg-violet-50/40' : 'hover:bg-gray-50'}`}>
+                  <td className="py-1.5">
+                    <div className="font-medium text-gray-800">{l.банка}</div>
+                    <div className="text-xs text-gray-500">{l.договор}</div>
+                  </td>
+                  <td className="py-1.5 text-gray-700">{l.кредитополучател}</td>
+                  <td className="py-1.5 text-right font-medium text-rose-700">{fmt(l.остатък)}</td>
+                  <td className="py-1.5 text-right text-gray-700">{fmt(l.вноска)}</td>
+                  <td className="py-1.5 text-right font-medium text-emerald-700">
+                    {l.paid_external ? <span className="text-gray-400 text-xs">N/A (външен)</span> : fmt(l.платено)}
+                  </td>
+                  <td className="py-1.5 text-right text-xs text-gray-500">{l.paid_external ? '—' : l.брой_вноски}</td>
+                  <td className="py-1.5 pl-3 text-xs text-gray-500">
+                    {l.paid_external ? (
+                      <span className="text-violet-700">{l.paid_external_note || 'external payer'}</span>
+                    ) : (
+                      <>{l.последна_вноска || '—'}{l.последна_сума && <span className="ml-1">({fmt(l.последна_сума)})</span>}</>
+                    )}
+                  </td>
+                  <td className="py-1.5 text-center">
+                    <button onClick={() => {
+                      const note = l.paid_external ? null : (prompt('Кой плаща тоя кредит? (напр. "жена ми", "съсобственик", "external")', 'жена ми') || 'external')
+                      apiFetch(`${API}/api/personal/loans/${l.id}/external`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ paid_external: !l.paid_external, paid_external_note: note }),
+                      }).then(() => load())
+                    }} title="Маркирай че кредитът се плаща от друг (жена/external)"
+                       className={`px-2 py-0.5 rounded text-xs font-medium ${l.paid_external ? 'bg-violet-200 text-violet-800' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+                      {l.paid_external ? '💑 външно' : '🏦 mine'}
+                    </button>
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
           <p className="text-xs text-gray-400 mt-3">
