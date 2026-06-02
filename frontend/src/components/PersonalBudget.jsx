@@ -288,8 +288,22 @@ export default function PersonalBudget() {
         <Kpi label="Лични разходи" value={s.разходи_общо} color="text-rose-700"/>
         <Kpi label="Свободно за инвестиране" value={s.нетен_cashflow} color="text-blue-700"
              extra={<span className="text-xs text-gray-400">savings rate: <b>{sv.rate_pct !== null ? sv.rate_pct + '%' : '—'}</b> (цел {sv.target_pct||30}%)</span>}/>
-        <Kpi label="Вече инвестирано" value={s.инвестирано_месец} color="text-indigo-700"
-             extra={sv.дисциплина && <span className={`text-xs font-medium ${dispKt}`}>● {sv.дисциплина}</span>}/>
+        <Kpi label="Инвестирано (период)" value={s.инвестирано_месец} color="text-indigo-700"
+             title="Сума на покупките/влоговете в инвестиционни активи за избрания период: Bulgar Capital влогове + Злато/Сребро покупки + брокерски Дт-та (Trading 212, Revolut Invest, и т.н.)"
+             extra={
+               <div className="space-y-0.5">
+                 {(s.инвестирано_по_източник || []).map((b, i) => (
+                   <div key={i} className="text-xs text-gray-500 flex justify-between gap-2">
+                     <span>{b.източник}</span>
+                     <span className="font-medium text-indigo-700">{fmt(b.сума)} ({b.брой})</span>
+                   </div>
+                 ))}
+                 {!(s.инвестирано_по_източник || []).length && (
+                   <span className="text-xs text-gray-400">няма инвестиции за периода</span>
+                 )}
+                 {sv.дисциплина && <span className={`text-xs font-medium ${dispKt}`}>● {sv.дисциплина}</span>}
+               </div>
+             }/>
         <Kpi label="💳 Налично в сметката" value={balances?.общо_personal || 0} color="text-violet-700"
              extra={(balances?.акаунти || []).filter(a => a.scope === 'personal').length > 0 && (
                <span className="text-xs text-gray-400">{(balances?.акаунти || []).filter(a => a.scope === 'personal').length} лични сметки · по {balances?.акаунти?.[0]?.as_of || ''}</span>
@@ -684,10 +698,13 @@ export default function PersonalBudget() {
   )
 }
 
-function Kpi({ label, value, color = 'text-gray-700', suffix = ' EUR', extra }) {
+function Kpi({ label, value, color = 'text-gray-700', suffix = ' EUR', extra, title }) {
   return (
-    <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
-      <div className="text-xs font-bold text-gray-500 uppercase mb-1">{label}</div>
+    <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4" title={title}>
+      <div className="text-xs font-bold text-gray-500 uppercase mb-1 flex items-center gap-1">
+        {label}
+        {title && <span className="text-gray-400 cursor-help" title={title}>ⓘ</span>}
+      </div>
       <div className={`text-2xl font-bold ${color}`}>{fmt0(value)}{suffix}</div>
       {extra && <div className="mt-1">{extra}</div>}
     </div>

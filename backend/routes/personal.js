@@ -234,17 +234,37 @@ module.exports = function(db) {
     const targetAmount = Number(((incomeTotal * targetPct) / 100).toFixed(2));
     const savingsRate = incomeTotal > 0 ? Number(((cashflow / incomeTotal) * 100).toFixed(2)) : null;
 
-    const invMetals = db.prepare(`
-      SELECT SUM(обща_сума) AS total
+    // Инвестирано за периода — разбивка по източник
+    const invGoldRow = db.prepare(`
+      SELECT SUM(обща_сума) AS total, COUNT(*) AS count
       FROM gold_investments
-      WHERE дата BETWEEN ? AND ? AND тип='покупка'
+      WHERE дата BETWEEN ? AND ? AND тип='покупка' AND метал='gold'
     `).get(from, to);
-    const invBulgar = db.prepare(`
-      SELECT SUM(сума) AS total
+    const invSilverRow = db.prepare(`
+      SELECT SUM(обща_сума) AS total, COUNT(*) AS count
+      FROM gold_investments
+      WHERE дата BETWEEN ? AND ? AND тип='покупка' AND метал='silver'
+    `).get(from, to);
+    const invBulgarRow = db.prepare(`
+      SELECT SUM(сума) AS total, COUNT(*) AS count
       FROM bulgar_transactions
       WHERE дата BETWEEN ? AND ? AND тип='влог'
     `).get(from, to);
-    const invested = (invMetals?.total || 0) + (invBulgar?.total || 0);
+    // Trading 212 + други брокери от bank transactions с категория='инвестиция'
+    const invBrokerRow = db.prepare(`
+      SELECT SUM(сума) AS total, COUNT(*) AS count
+      FROM transactions
+      WHERE operation='Дт' AND категория='инвестиция'
+        AND дата BETWEEN ? AND ?
+    `).get(from, to);
+
+    const invBreakdown = [
+      { източник: 'Bulgar Capital', сума: invBulgarRow?.total || 0, брой: invBulgarRow?.count || 0 },
+      { източник: 'Злато',          сума: invGoldRow?.total   || 0, брой: invGoldRow?.count   || 0 },
+      { източник: 'Сребро',         сума: invSilverRow?.total || 0, брой: invSilverRow?.count || 0 },
+      { източник: 'Брокери (T212/др.)', сума: invBrokerRow?.total || 0, брой: invBrokerRow?.count || 0 },
+    ].filter(b => b.сума > 0);
+    const invested = invBreakdown.reduce((s, b) => s + b.сума, 0);
 
     res.json({
       период: { from, to, label },
@@ -265,6 +285,10 @@ module.exports = function(db) {
         дисциплина: savingsRate !== null ? (savingsRate >= targetPct ? 'над цел' : 'под цел') : null,
       },
       инвестирано_месец: Number(invested.toFixed(2)),
+      инвестирано_по_източник: invBreakdown.map(b => ({
+        ...b,
+        сума: Number(b.сума.toFixed(2)),
+      })),
     });
   });
 
