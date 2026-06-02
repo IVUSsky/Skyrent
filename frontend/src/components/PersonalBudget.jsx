@@ -35,6 +35,7 @@ export default function PersonalBudget() {
   const [timeline, setTimeline] = useState([])
   const [breakdown, setBreakdown] = useState(null)
   const [balances, setBalances]   = useState(null)
+  const [wealth, setWealth]       = useState(null)
   const [showBaseline, setShowBaseline] = useState(null)
   const [baselineForm, setBaselineForm] = useState({ opening: '', as_of: '' })
   const [loading, setLoading]   = useState(false)
@@ -79,8 +80,9 @@ export default function PersonalBudget() {
       apiFetch(`${API}/api/personal/summary/timeline?months=12`).then(r => r.json()),
       apiFetch(`${API}/api/personal/expenses/breakdown?${q}`).then(r => r.json()),
       apiFetch(`${API}/api/personal/accounts/balances`).then(r => r.json()),
-    ]).then(([s, i, t, b, bal]) => {
-      setSummary(s); setIncome(i); setTimeline(t); setBreakdown(b); setBalances(bal); setLoading(false)
+      apiFetch(`${API}/api/investments/wealth/summary`).then(r => r.json()).catch(() => null),
+    ]).then(([s, i, t, b, bal, w]) => {
+      setSummary(s); setIncome(i); setTimeline(t); setBreakdown(b); setBalances(bal); setWealth(w); setLoading(false)
     }).catch(() => setLoading(false))
   }, [period])
 
@@ -282,32 +284,73 @@ export default function PersonalBudget() {
         </div>
       )}
 
-      {/* KPI cards */}
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
-        <Kpi label={`Доход (${s.период?.label || ''})`} value={s.доход_общо} color="text-emerald-700" suffix={` ${income[0]?.валута||'EUR'}`}/>
-        <Kpi label="Лични разходи" value={s.разходи_общо} color="text-rose-700"/>
-        <Kpi label="Свободно за инвестиране" value={s.нетен_cashflow} color="text-blue-700"
-             extra={<span className="text-xs text-gray-400">savings rate: <b>{sv.rate_pct !== null ? sv.rate_pct + '%' : '—'}</b> (цел {sv.target_pct||30}%)</span>}/>
-        <Kpi label="Инвестирано (период)" value={s.инвестирано_месец} color="text-indigo-700"
-             title="Сума на покупките/влоговете в инвестиционни активи за избрания период: Bulgar Capital влогове + Злато/Сребро покупки + брокерски Дт-та (Trading 212, Revolut Invest, и т.н.)"
-             extra={
-               <div className="space-y-0.5">
-                 {(s.инвестирано_по_източник || []).map((b, i) => (
-                   <div key={i} className="text-xs text-gray-500 flex justify-between gap-2">
-                     <span>{b.източник}</span>
-                     <span className="font-medium text-indigo-700">{fmt(b.сума)} ({b.брой})</span>
-                   </div>
-                 ))}
-                 {!(s.инвестирано_по_източник || []).length && (
-                   <span className="text-xs text-gray-400">няма инвестиции за периода</span>
-                 )}
-                 {sv.дисциплина && <span className={`text-xs font-medium ${dispKt}`}>● {sv.дисциплина}</span>}
-               </div>
-             }/>
-        <Kpi label="💳 Налично в сметката" value={balances?.общо_personal || 0} color="text-violet-700"
-             extra={(balances?.акаунти || []).filter(a => a.scope === 'personal').length > 0 && (
-               <span className="text-xs text-gray-400">{(balances?.акаунти || []).filter(a => a.scope === 'personal').length} лични сметки · по {balances?.акаунти?.[0]?.as_of || ''}</span>
-             )}/>
+      {/* HERO: Нетно богатство */}
+      {wealth && (
+        <div className="rounded-2xl p-5 shadow-lg" style={{ background: 'linear-gradient(135deg, #1e293b 0%, #4338ca 100%)' }}>
+          <div className="text-xs font-bold text-blue-200 uppercase mb-1">💎 Нетно богатство</div>
+          <div className="text-4xl font-bold text-white mb-3">{fmt0(wealth.общо)} EUR</div>
+          <div className="flex flex-wrap gap-3 text-sm">
+            <WealthChip emoji="🏠" label="Имоти" value={wealth.имоти?.equity} color="bg-amber-400/20 text-amber-100"/>
+            <WealthChip emoji="💳" label="Банки" value={balances?.общо_personal} color="bg-violet-400/20 text-violet-100"/>
+            <WealthChip emoji="🏦" label="T212" value={wealth.t212?.обща_стойност} color="bg-blue-400/20 text-blue-100"/>
+            <WealthChip emoji="💼" label="Bulgar" value={wealth.болгар?.текуща_стойност} color="bg-purple-400/20 text-purple-100"/>
+            <WealthChip emoji="🥇" label="Злато" value={wealth.злато?.текуща_стойност} color="bg-yellow-400/20 text-yellow-100"/>
+            <WealthChip emoji="🥈" label="Сребро" value={wealth.сребро?.текуща_стойност} color="bg-gray-400/20 text-gray-100"/>
+          </div>
+        </div>
+      )}
+
+      {/* 3 главни KPI: Влязох / Излязох / Останах */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div className="bg-white rounded-xl border-l-4 border-emerald-500 shadow-sm p-4">
+          <div className="text-xs font-bold text-gray-500 uppercase mb-1 flex justify-between">
+            <span>⬆️ Влязох ({s.период?.label || ''})</span>
+            <span className="text-emerald-700">{(s.доход_по_тип || []).length} източника</span>
+          </div>
+          <div className="text-3xl font-bold text-emerald-700">+{fmt0(s.доход_общо)} EUR</div>
+          {(s.доход_по_тип || []).slice(0, 3).map((r, i) => (
+            <div key={i} className="text-xs text-gray-500 flex justify-between mt-0.5">
+              <span>{INCOME_LABEL[r.тип] || r.тип}</span>
+              <span className="font-medium text-emerald-700">{fmt0(r.total)}</span>
+            </div>
+          ))}
+        </div>
+
+        <div className="bg-white rounded-xl border-l-4 border-rose-500 shadow-sm p-4">
+          <div className="text-xs font-bold text-gray-500 uppercase mb-1 flex justify-between">
+            <span>⬇️ Излязох</span>
+            <span className="text-rose-700">лични + капитал</span>
+          </div>
+          <div className="text-3xl font-bold text-rose-700">−{fmt0(s.разходи_общо + (s.капитал_общо || 0))} EUR</div>
+          <div className="text-xs text-gray-500 flex justify-between mt-0.5">
+            <span>Лични разходи</span>
+            <span className="font-medium text-rose-700">{fmt0(s.разходи_общо)}</span>
+          </div>
+          <div className="text-xs text-gray-500 flex justify-between mt-0.5">
+            <span>Кредити/Капитал/Инв.</span>
+            <span className="font-medium text-amber-700">{fmt0(s.капитал_общо || 0)}</span>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-xl border-l-4 border-blue-500 shadow-sm p-4">
+          <div className="text-xs font-bold text-gray-500 uppercase mb-1 flex justify-between">
+            <span>💰 Останах</span>
+            <span className={sv.rate_pct !== null && sv.rate_pct >= sv.target_pct ? 'text-emerald-700' : 'text-amber-700'}>
+              {sv.rate_pct !== null ? sv.rate_pct + '%' : '—'}
+            </span>
+          </div>
+          <div className={`text-3xl font-bold ${(s.реално_свободно || 0) < 0 ? 'text-rose-700' : 'text-blue-700'}`}>
+            {(s.реално_свободно || 0) >= 0 ? '+' : ''}{fmt0(s.реално_свободно || 0)} EUR
+          </div>
+          <div className="text-xs text-gray-500 mt-1">
+            Цел savings: <b>{sv.target_pct || 30}%</b> · Инвест. {fmt0(s.инвестирано_месец)} EUR
+          </div>
+          {sv.дисциплина && (
+            <div className={`text-xs font-medium mt-0.5 ${(s.реално_свободно || 0) >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+              ● {sv.дисциплина}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Account balances detail */}
@@ -385,39 +428,6 @@ export default function PersonalBudget() {
       {view === 'analysis' && <ExpenseAnalysis breakdown={breakdown}/>}
 
       {view === 'overview' && <>
-      {/* Cashflow breakdown — visual baleance */}
-      {(s.доход_общо > 0 || s.разходи_общо > 0 || s.капитал_общо > 0) && (
-        <div className="bg-gradient-to-r from-emerald-50 to-rose-50 rounded-xl border border-gray-200 shadow-sm p-4">
-          <div className="text-sm font-bold text-gray-800 mb-2">💧 Cash flow за периода</div>
-          <div className="grid grid-cols-1 md:grid-cols-5 gap-2 text-sm">
-            <div className="bg-white rounded p-2">
-              <div className="text-xs text-gray-500">Доход</div>
-              <div className="font-bold text-emerald-700">+{fmt(s.доход_общо)}</div>
-            </div>
-            <div className="bg-white rounded p-2">
-              <div className="text-xs text-gray-500">Лични разходи</div>
-              <div className="font-bold text-rose-700">−{fmt(s.разходи_общо)}</div>
-            </div>
-            <div className="bg-white rounded p-2">
-              <div className="text-xs text-gray-500">Кредити/Капитал/Инв.</div>
-              <div className="font-bold text-amber-700">−{fmt(s.капитал_общо || 0)}</div>
-            </div>
-            <div className="bg-white rounded p-2 border-2 border-blue-200">
-              <div className="text-xs text-gray-500">Реално остава</div>
-              <div className={`font-bold ${(s.реално_свободно || 0) < 0 ? 'text-rose-700' : 'text-blue-700'}`}>
-                {fmt(s.реално_свободно || 0)}
-              </div>
-            </div>
-            <div className="bg-white rounded p-2">
-              <div className="text-xs text-gray-500">Cashflow (без капитал)</div>
-              <div className={`font-bold ${(s.нетен_cashflow || 0) < 0 ? 'text-rose-700' : 'text-emerald-700'}`}>
-                {fmt(s.нетен_cashflow || 0)}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Income & Expenses breakdown */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
@@ -487,23 +497,23 @@ export default function PersonalBudget() {
         </div>
       )}
 
-      {/* Timeline chart */}
+      {/* Trend chart — line за по-лесно проследяване */}
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
-        <h3 className="text-sm font-bold text-gray-800 mb-3">📊 Последните 12 месеца</h3>
+        <h3 className="text-sm font-bold text-gray-800 mb-3">📊 Тренд (последните 12 месеца)</h3>
         {timeline.length === 0 ? (
           <p className="text-sm text-gray-400 py-6 text-center">Няма данни.</p>
         ) : (
           <ResponsiveContainer width="100%" height={260}>
-            <BarChart data={timeline}>
+            <LineChart data={timeline}>
               <CartesianGrid strokeDasharray="3 3" stroke="#eee"/>
               <XAxis dataKey="месец" tick={{ fontSize: 11 }}/>
               <YAxis tick={{ fontSize: 11 }}/>
               <Tooltip formatter={v => fmt(v)}/>
               <Legend/>
-              <Bar dataKey="доход" fill="#10b981" name="Доход"/>
-              <Bar dataKey="разход" fill="#ef4444" name="Разход"/>
-              <Bar dataKey="нетно" fill="#3b82f6" name="Нетно"/>
-            </BarChart>
+              <Line type="monotone" dataKey="доход" stroke="#10b981" strokeWidth={2} name="Доход" dot={{ r: 3 }}/>
+              <Line type="monotone" dataKey="разход" stroke="#ef4444" strokeWidth={2} name="Разход" dot={{ r: 3 }}/>
+              <Line type="monotone" dataKey="нетно" stroke="#3b82f6" strokeWidth={2.5} name="Спестено (нетно)" dot={{ r: 4 }}/>
+            </LineChart>
           </ResponsiveContainer>
         )}
       </div>
@@ -694,6 +704,16 @@ export default function PersonalBudget() {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+function WealthChip({ emoji, label, value, color }) {
+  if (!value && value !== 0) return null
+  return (
+    <div className={`px-3 py-1.5 rounded-lg ${color} backdrop-blur-sm`}>
+      <div className="text-[10px] opacity-80">{emoji} {label}</div>
+      <div className="font-bold">{fmt0(value)}</div>
     </div>
   )
 }
