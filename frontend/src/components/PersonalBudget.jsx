@@ -40,6 +40,7 @@ export default function PersonalBudget() {
   const [baselineForm, setBaselineForm] = useState({ opening: '', as_of: '' })
   const [showMovements, setShowMovements] = useState(null) // 'in' | 'out' | null
   const [movements, setMovements] = useState(null)
+  const [showRemaining, setShowRemaining] = useState(false)
   const [loading, setLoading]   = useState(false)
   const [showAdd, setShowAdd]   = useState(false)
   const [rebuildResult, setRebuildResult] = useState(null)
@@ -345,9 +346,10 @@ export default function PersonalBudget() {
           </div>
         </button>
 
-        <div className="bg-white rounded-xl border-l-4 border-blue-500 shadow-sm p-4">
+        <button onClick={() => setShowRemaining(true)}
+                className="bg-white rounded-xl border-l-4 border-blue-500 shadow-sm p-4 text-left hover:shadow-md transition-shadow">
           <div className="text-xs font-bold text-gray-500 uppercase mb-1 flex justify-between">
-            <span>💰 Останах</span>
+            <span>💰 Останах →</span>
             <span className={sv.rate_pct !== null && sv.rate_pct >= sv.target_pct ? 'text-emerald-700' : 'text-amber-700'}>
               {sv.rate_pct !== null ? sv.rate_pct + '%' : '—'}
             </span>
@@ -363,7 +365,7 @@ export default function PersonalBudget() {
               ● {sv.дисциплина}
             </div>
           )}
-        </div>
+        </button>
       </div>
 
       {/* Account balances detail */}
@@ -575,6 +577,114 @@ export default function PersonalBudget() {
       </div>
       </>}
 
+      {/* Remaining modal — детайли при click на Останах */}
+      {showRemaining && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={() => setShowRemaining(false)}>
+          <div className="bg-white rounded-xl shadow-2xl p-6 max-w-2xl w-full m-4 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-start mb-4">
+              <div>
+                <h3 className="text-xl font-bold text-gray-900">💰 Останах ({s.период?.label || ''})</h3>
+                <p className="text-xs text-gray-500 mt-1">Разбивка на изчислението + препоръка какво да направиш с парите</p>
+              </div>
+              <button onClick={() => setShowRemaining(false)}
+                      className="text-gray-400 hover:text-gray-700 text-2xl leading-none">×</button>
+            </div>
+
+            {/* Формула visualization */}
+            <div className="bg-gradient-to-r from-emerald-50 via-rose-50 to-blue-50 rounded-lg p-4 mb-4">
+              <div className="grid grid-cols-4 gap-2 text-center">
+                <div>
+                  <div className="text-xs text-gray-500">⬆️ Влязох</div>
+                  <div className="font-bold text-emerald-700 text-lg">+{fmt0(s.доход_общо)}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-gray-500">− Лични</div>
+                  <div className="font-bold text-rose-700 text-lg">{fmt0(s.разходи_общо)}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-gray-500">− Капитал/Инв.</div>
+                  <div className="font-bold text-amber-700 text-lg">{fmt0(s.капитал_общо || 0)}</div>
+                </div>
+                <div className="border-l-2 border-blue-300 pl-2">
+                  <div className="text-xs text-gray-500">= Останах</div>
+                  <div className={`font-bold text-lg ${(s.реално_свободно || 0) < 0 ? 'text-rose-700' : 'text-blue-700'}`}>
+                    {fmt0(s.реално_свободно || 0)}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Savings rate progress bar */}
+            <div className="mb-4">
+              <div className="flex justify-between text-sm font-medium mb-1">
+                <span className="text-gray-700">Savings rate</span>
+                <span className={sv.rate_pct >= sv.target_pct ? 'text-emerald-700' : 'text-amber-700'}>
+                  {sv.rate_pct !== null ? sv.rate_pct + '%' : '—'} от доход
+                </span>
+              </div>
+              <div className="w-full bg-gray-200 rounded-full h-3 relative overflow-hidden">
+                <div className={`h-3 rounded-full ${sv.rate_pct >= sv.target_pct ? 'bg-emerald-500' : 'bg-amber-500'}`}
+                     style={{ width: `${Math.min(100, Math.max(0, sv.rate_pct || 0))}%` }}/>
+                <div className="absolute top-0 h-3 border-r-2 border-gray-800"
+                     style={{ left: `${sv.target_pct || 30}%` }} title={`Цел: ${sv.target_pct || 30}%`}/>
+              </div>
+              <div className="text-xs text-gray-500 mt-1">
+                Цел: {sv.target_pct || 30}% (черна линия) · {sv.дисциплина || 'без оценка'}
+              </div>
+            </div>
+
+            {/* Където отиде парите */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
+              <div className="border border-emerald-200 rounded-lg p-3">
+                <h4 className="text-sm font-bold text-emerald-800 mb-2">⬆️ Откъде дойдоха</h4>
+                {(s.доход_по_тип || []).length === 0 ? (
+                  <p className="text-xs text-gray-400">няма доход</p>
+                ) : (
+                  <div className="space-y-1">
+                    {(s.доход_по_тип || []).map((r, i) => (
+                      <div key={i} className="flex justify-between text-sm">
+                        <span className="text-gray-700">{INCOME_LABEL[r.тип] || r.тип}</span>
+                        <span className="font-medium text-emerald-700">+{fmt0(r.total)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="border border-rose-200 rounded-lg p-3">
+                <h4 className="text-sm font-bold text-rose-800 mb-2">⬇️ Къде отидоха</h4>
+                {((s.разходи_по_категория || []).length + (s.капитал_по_категория || []).length) === 0 ? (
+                  <p className="text-xs text-gray-400">няма разходи</p>
+                ) : (
+                  <div className="space-y-1">
+                    {(s.разходи_по_категория || []).map((r, i) => (
+                      <div key={`p${i}`} className="flex justify-between text-sm">
+                        <span className="text-gray-700">{r.expense_category}</span>
+                        <span className="font-medium text-rose-700">−{fmt0(r.total)}</span>
+                      </div>
+                    ))}
+                    {(s.капитал_по_категория || []).map((r, i) => (
+                      <div key={`c${i}`} className="flex justify-between text-sm">
+                        <span className="text-gray-700">{r.expense_category} <span className="text-xs text-amber-600">(капитал)</span></span>
+                        <span className="font-medium text-amber-700">−{fmt0(r.total)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Препоръка */}
+            <RecommendationBox s={s} sv={sv}/>
+
+            <div className="flex justify-end mt-5">
+              <button onClick={() => setShowRemaining(false)}
+                      className="px-4 py-1.5 text-sm text-gray-600 hover:text-gray-900">Затвори</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Movements modal — детайли при click на Влязох/Излязох */}
       {showMovements && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={() => setShowMovements(null)}>
@@ -778,6 +888,36 @@ export default function PersonalBudget() {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+function RecommendationBox({ s, sv }) {
+  const free = s.реално_свободно || 0
+  const targetSavings = (s.доход_общо || 0) * (sv.target_pct || 30) / 100
+  const overSavings = free - targetSavings
+  const invested = s.инвестирано_месец || 0
+  if (free <= 0) {
+    return (
+      <div className="bg-rose-50 border border-rose-200 rounded-lg p-3 text-sm">
+        ⚠️ <b>Внимание:</b> Изхарчил си повече отколкото си спечелил тоя период. Прегледай големите разходи или увеличи дохода.
+      </div>
+    )
+  }
+  if (sv.rate_pct >= sv.target_pct) {
+    return (
+      <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 text-sm space-y-1">
+        <div>🎯 <b>Над цел!</b> Savings rate {sv.rate_pct}% &gt; цел {sv.target_pct}%.</div>
+        {overSavings > 0 && (
+          <div>💡 От {fmt0(free)} EUR останали, можеш да заделиш {fmt0(overSavings)} EUR в инвестиции (вече инвестира {fmt0(invested)} EUR тоя период).</div>
+        )}
+        <div className="text-xs text-gray-500 pt-1">Идеи: Bulgar Capital, Trading 212, злато/сребро, допълнителна вноска по кредитите.</div>
+      </div>
+    )
+  }
+  return (
+    <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm">
+      ⚠️ <b>Под цел.</b> Savings rate {sv.rate_pct}% &lt; цел {sv.target_pct}%. За да стигнеш целта, трябваше да харчиш с {fmt0(targetSavings - free)} EUR по-малко или да заделиш още.
     </div>
   )
 }
