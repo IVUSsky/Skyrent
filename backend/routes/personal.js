@@ -889,6 +889,56 @@ module.exports = function(db) {
     res.json({ count: rows.length, incomes: rows });
   });
 
+  // POST /debug/fix-loan-amounts
+  // Поправя ProBanking loan interest tx-те с year-merge bug.
+  // Pattern: основание завършва с DD.MM.YY → сума беше парсната като YY*1000 + real.
+  // Решение: за всяка tx с (сума >= YY*1000 AND сума < (YY+1)*1000) → real = сума - YY*1000.
+  router.post('/debug/fix-loan-amounts', (req, res) => {
+    const candidates = db.prepare(`
+      SELECT id, дата, сума, основание, контрагент
+      FROM transactions
+      WHERE operation = 'Дт'
+        AND основание LIKE '%ПОГАСЯВАНЕ%'
+        AND сума >= 10000
+    `).all();
+
+    const fixed = [];
+    const upd = db.prepare('UPDATE transactions SET сума = ? WHERE id = ?');
+    const updExp = db.prepare('UPDATE expense_invoices SET amount = ? WHERE bank_tx_id = ?');
+
+    const doFix = db.transaction(() => {
+      for (const tx of candidates) {
+        const osn = tx.основание || '';
+        // Извлечи последния DD.MM.YY от основание
+        const m = osn.match(/(\d{2})\.(\d{2})\.(\d{2})/g);
+        if (!m) continue;
+        const lastDate = m[m.length - 1];
+        const yy = parseInt(lastDate.slice(-2), 10);
+        if (isNaN(yy)) continue;
+        const yyPrefix = yy * 1000;
+        // Проверка: сумата трябва да е в диапазон [YY*1000, (YY+1)*1000)
+        if (tx.сума < yyPrefix || tx.сума >= yyPrefix + 1000) continue;
+        const realAmount = Number((tx.сума - yyPrefix).toFixed(2));
+        upd.run(realAmount, tx.id);
+        updExp.run(realAmount, tx.id);
+        fixed.push({
+          id: tx.id,
+          дата: tx.дата,
+          основание: (osn || '').slice(0, 60),
+          старо: tx.сума,
+          ново: realAmount,
+        });
+      }
+    });
+    doFix();
+
+    res.json({
+      fixed_count: fixed.length,
+      examples: fixed.slice(0, 10),
+      total_correction: fixed.reduce((s, f) => s + (f.старо - f.ново), 0),
+    });
+  });
+
   // POST /debug/delete-duplicates — изтрива дубликати (запазва най-стария id)
   // Връща списък изтрити. Преди delete прави cleanup на свързаните
   // personal_income/expense_invoices.
