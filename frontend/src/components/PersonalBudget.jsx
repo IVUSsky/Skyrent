@@ -156,6 +156,23 @@ export default function PersonalBudget() {
     })
   }
 
+  const doWipeImports = () => {
+    if (!confirm('⚠️ ВНИМАНИЕ ⚠️\n\nЩе изтрия ВСИЧКИ:\n- bank transactions\n- import sessions\n- expense_invoices\n- personal_income\n\nЗапазват се:\n✓ account_scope_map (Прокредит/UC scope)\n✓ tx_rules (auto-learn правила)\n✓ custom_categories\n✓ properties, contracts, Bulgar Capital\n\nСлед това можеш да реимпортираш PDFs за чист резултат.\n\nСигурен ли си?')) return
+    if (!confirm('Потвърди още веднъж — НЕ МОЖЕ ДА СЕ ОТМЕНИ.')) return
+    apiFetch(`${API}/api/personal/debug/wipe-imports`, { method: 'POST' })
+      .then(r => r.json())
+      .then(d => {
+        setRebuildResult({
+          создадени_доходи: 0,
+          Кт_намерени: 0,
+          синхронизирани_разходи: d.total || 0,
+          extra: `Изтрити: tx=${d.wiped.transactions}, sessions=${d.wiped.import_sessions}, expenses=${d.wiped.expense_invoices}, income=${d.wiped.personal_income}. Иди в '📥 Банка' и реимпортирай PDFs.`,
+        })
+        load()
+        setTimeout(() => setRebuildResult(null), 20000)
+      })
+  }
+
   const doDeleteDuplicates = () => {
     if (!confirm('Намира tx-те с еднаква (дата + сума + operation), запазва най-стария id и трие останалите.\n\nПреди това: cleanup на свързани personal_income и expense_invoices.\n\nПродължаваме?')) return
     apiFetch(`${API}/api/personal/debug/delete-duplicates`, { method: 'POST' })
@@ -319,6 +336,11 @@ export default function PersonalBudget() {
                     title="Намира tx-те с еднаква дата+сума+operation и трие дубликатите"
                     className="px-3 py-1.5 bg-orange-100 hover:bg-orange-200 text-orange-800 border border-orange-300 rounded text-sm font-medium">
               🗑️ Изтрий дубликати
+            </button>
+            <button onClick={doWipeImports}
+                    title="Изтрива всички импорти за чист старт (запазва scope_map и tx_rules)"
+                    className="px-3 py-1.5 bg-red-100 hover:bg-red-200 text-red-800 border border-red-300 rounded text-sm font-medium">
+              💣 Изтрий всичко
             </button>
             <button onClick={() => setShowAdd(true)}
                     className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm font-medium">

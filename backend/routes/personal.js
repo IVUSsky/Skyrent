@@ -1047,6 +1047,23 @@ module.exports = function(db) {
     });
   });
 
+  // POST /debug/wipe-imports — изтрива ВСИЧКИ импортирани bank данни.
+  // Запазва: settings (включително account_scope_map и custom_categories),
+  // tx_rules (заучените правила), properties, contracts, и т.н.
+  // Изтрива: transactions, import_sessions, expense_invoices (от bank), personal_income (от bank).
+  // ВНИМАНИЕ: Ръчно въведени expense_invoices/personal_income също се трият.
+  router.post('/debug/wipe-imports', (req, res) => {
+    const counts = {};
+    const doWipe = db.transaction(() => {
+      counts.personal_income = db.prepare('DELETE FROM personal_income').run().changes;
+      counts.expense_invoices = db.prepare('DELETE FROM expense_invoices').run().changes;
+      counts.transactions = db.prepare('DELETE FROM transactions').run().changes;
+      counts.import_sessions = db.prepare('DELETE FROM import_sessions').run().changes;
+    });
+    doWipe();
+    res.json({ wiped: counts, total: Object.values(counts).reduce((s, v) => s + v, 0) });
+  });
+
   // POST /debug/delete-duplicates — изтрива дубликати (запазва най-стария id)
   // Връща списък изтрити. Преди delete прави cleanup на свързаните
   // personal_income/expense_invoices.
