@@ -890,52 +890,89 @@ module.exports = function(db) {
   });
 
   // POST /debug/fix-loan-amounts
-  // Поправя ProBanking loan interest tx-те с year-merge bug.
-  // Pattern: основание завършва с DD.MM.YY → сума беше парсната като YY*1000 + real.
-  // Решение: за всяка tx с (сума >= YY*1000 AND сума < (YY+1)*1000) → real = сума - YY*1000.
+  // Намира tx-те с year-merge bug — основание завършва с "/DD.MM." (truncated,
+  // без YY защото е било слято с амоунта). Опитва да намери "сибилинг" tx
+  // със същия loan number и правилна сума → ако има, изтрива buggy-то;
+  // ако няма, поправя амоунта (приема YY=24 от loan дата).
   router.post('/debug/fix-loan-amounts', (req, res) => {
     const candidates = db.prepare(`
-      SELECT id, дата, сума, основание, контрагент
+      SELECT id, session_id, дата, сума, основание, контрагент
       FROM transactions
       WHERE operation = 'Дт'
         AND основание LIKE '%ПОГАСЯВАНЕ%'
-        AND сума >= 10000
+        AND (
+          сума >= 10000
+          OR основание GLOB '*/__.__.'
+        )
     `).all();
 
-    const fixed = [];
+    // Buggy = основание завършва с "/DD.MM." (точка след месеца, без година)
+    const buggyRe = /\/(\d{2})\.(\d{2})\.$/;
+
     const upd = db.prepare('UPDATE transactions SET сума = ? WHERE id = ?');
     const updExp = db.prepare('UPDATE expense_invoices SET amount = ? WHERE bank_tx_id = ?');
+    const delTx = db.prepare('DELETE FROM transactions WHERE id = ?');
+    const delExp = db.prepare('DELETE FROM expense_invoices WHERE bank_tx_id = ?');
+    const findSibling = db.prepare(`
+      SELECT id, сума, основание FROM transactions
+      WHERE дата = ? AND operation = 'Дт'
+        AND основание LIKE ?
+        AND id != ?
+        AND ABS(сума - ?) < 0.02
+    `);
+
+    const fixed = [];
+    const deleted = [];
 
     const doFix = db.transaction(() => {
       for (const tx of candidates) {
         const osn = tx.основание || '';
-        // Извлечи последния DD.MM.YY от основание
-        const m = osn.match(/(\d{2})\.(\d{2})\.(\d{2})/g);
+        const m = osn.match(buggyRe);
         if (!m) continue;
-        const lastDate = m[m.length - 1];
-        const yy = parseInt(lastDate.slice(-2), 10);
-        if (isNaN(yy)) continue;
-        const yyPrefix = yy * 1000;
-        // Проверка: сумата трябва да е в диапазон [YY*1000, (YY+1)*1000)
-        if (tx.сума < yyPrefix || tx.сума >= yyPrefix + 1000) continue;
-        const realAmount = Number((tx.сума - yyPrefix).toFixed(2));
-        upd.run(realAmount, tx.id);
-        updExp.run(realAmount, tx.id);
-        fixed.push({
-          id: tx.id,
-          дата: tx.дата,
-          основание: (osn || '').slice(0, 60),
-          старо: tx.сума,
-          ново: realAmount,
-        });
+        const dd = m[1], mm = m[2];
+        // Predict real amount: assume YY=24 (loans started 2024)
+        // wrong = YY*1000 + real → real = wrong - YY*1000
+        let realAmount = null;
+        for (const yy of [24, 23, 22, 25]) {
+          if (tx.сума >= yy * 1000 && tx.сума < (yy + 1) * 1000) {
+            realAmount = Number((tx.сума - yy * 1000).toFixed(2));
+            break;
+          }
+        }
+        if (realAmount === null) continue;
+
+        // Извлечи loan number от основание (между "902-" и "/")
+        const loanM = osn.match(/902-(\d+)/);
+        const loanNum = loanM ? loanM[1] : null;
+
+        // Търси sibling с правилна сума и същи loan number
+        let sibling = null;
+        if (loanNum) {
+          sibling = findSibling.get(tx.дата, `%902-${loanNum}%`, tx.id, realAmount);
+        }
+
+        if (sibling) {
+          // Дубликат → изтрий buggy-то
+          delExp.run(tx.id);
+          delTx.run(tx.id);
+          deleted.push({ id: tx.id, дата: tx.дата, основание: osn.slice(0, 60), сума: tx.сума, sibling_id: sibling.id, sibling_сума: sibling.сума });
+        } else {
+          // Няма sibling → поправи амоунта
+          upd.run(realAmount, tx.id);
+          updExp.run(realAmount, tx.id);
+          fixed.push({ id: tx.id, дата: tx.дата, основание: osn.slice(0, 60), старо: tx.сума, ново: realAmount });
+        }
       }
     });
     doFix();
 
     res.json({
       fixed_count: fixed.length,
-      examples: fixed.slice(0, 10),
-      total_correction: fixed.reduce((s, f) => s + (f.старо - f.ново), 0),
+      deleted_count: deleted.length,
+      examples_fixed: fixed.slice(0, 5),
+      examples_deleted: deleted.slice(0, 5),
+      total_correction: fixed.reduce((s, f) => s + (f.старо - f.ново), 0)
+                      + deleted.reduce((s, d) => s + d.сума, 0),
     });
   });
 
