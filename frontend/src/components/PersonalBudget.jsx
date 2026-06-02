@@ -156,6 +156,22 @@ export default function PersonalBudget() {
     })
   }
 
+  const doDeleteDuplicates = () => {
+    if (!confirm('Намира tx-те с еднаква (дата + сума + operation), запазва най-стария id и трие останалите.\n\nПреди това: cleanup на свързани personal_income и expense_invoices.\n\nПродължаваме?')) return
+    apiFetch(`${API}/api/personal/debug/delete-duplicates`, { method: 'POST' })
+      .then(r => r.json())
+      .then(d => {
+        setRebuildResult({
+          создадени_доходи: 0,
+          Кт_намерени: 0,
+          синхронизирани_разходи: d.deleted_count || 0,
+          extra: `Изтрити дубликати: ${d.deleted_count} tx-те`,
+        })
+        load()
+        setTimeout(() => setRebuildResult(null), 12000)
+      })
+  }
+
   const doFixLoans = () => {
     if (!confirm('Намира loan tx-те с year-merge бъг (24,XXX EUR) и:\n- ако има sibling с правилна сума → изтрива buggy\n- иначе поправя амоунта\n\nПродължаваме?')) return
     apiFetch(`${API}/api/personal/debug/fix-loan-amounts`, { method: 'POST' })
@@ -298,6 +314,11 @@ export default function PersonalBudget() {
                     title="Категоризирай 'разход_друг' по контрагент — batch update"
                     className="px-3 py-1.5 bg-indigo-100 hover:bg-indigo-200 text-indigo-800 border border-indigo-300 rounded text-sm font-medium">
               🏷️ Категоризирай
+            </button>
+            <button onClick={doDeleteDuplicates}
+                    title="Намира tx-те с еднаква дата+сума+operation и трие дубликатите"
+                    className="px-3 py-1.5 bg-orange-100 hover:bg-orange-200 text-orange-800 border border-orange-300 rounded text-sm font-medium">
+              🗑️ Изтрий дубликати
             </button>
             <button onClick={() => setShowAdd(true)}
                     className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm font-medium">
