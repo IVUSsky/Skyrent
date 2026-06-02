@@ -408,20 +408,28 @@ module.exports = function(db) {
 
   // POST /categorize/contractor { contractor, category, scope?, save_rule? }
   // Batch update на всички tx-те от този контрагент + (optional) tx_rule.
+  // Auto-rebuild на personal_income за income категории (заплата, упрedение,
+  // sky_capital, лихва_болгар, наем на personal scope).
+  const PERSONAL_INCOME_CATS_SET = new Set(['заплата','управление','sky_capital','лихва_болгар','наем']);
+
   router.post('/categorize/contractor', (req, res) => {
     const { contractor, category, scope } = req.body || {};
     if (!contractor || !category) return res.status(400).json({ error: 'contractor + category са задължителни' });
 
-    // JS-side filter за кириличен match
     const candidates = db.prepare(`SELECT id, контрагент FROM transactions WHERE контрагент IS NOT NULL`).all();
     const target = contractor.toLowerCase();
     const matchIds = candidates.filter(t => (t.контрагент || '').toLowerCase().includes(target)).map(t => t.id);
 
     let updated = 0;
+    let pincomeCreated = 0;
     const upd = scope
       ? db.prepare('UPDATE transactions SET категория = ?, scope = ? WHERE id = ?')
       : db.prepare('UPDATE transactions SET категория = ? WHERE id = ?');
     const updExp = db.prepare('UPDATE expense_invoices SET expense_category = ?, scope = COALESCE(?, scope) WHERE bank_tx_id = ?');
+    const getTx = db.prepare('SELECT * FROM transactions WHERE id = ?');
+    const hasPi = db.prepare('SELECT id FROM personal_income WHERE bank_tx_id = ?');
+    const insertPi = db.prepare(`INSERT INTO personal_income
+      (дата, тип, сума, валута, източник, бележка, bank_tx_id) VALUES (?,?,?,?,?,?,?)`);
 
     const doIt = db.transaction(() => {
       for (const id of matchIds) {
@@ -429,8 +437,23 @@ module.exports = function(db) {
         else       upd.run(category, id);
         updExp.run(category, scope || null, id);
         updated++;
+        // Auto-rebuild personal_income за income категории при personal scope
+        if (PERSONAL_INCOME_CATS_SET.has(category)) {
+          const tx = getTx.get(id);
+          if (tx && tx.operation === 'Кт' && tx.scope === 'personal' && !hasPi.get(id)) {
+            let pincomeType = 'друго';
+            if (category === 'заплата')       pincomeType = 'заплата';
+            else if (category === 'управление') pincomeType = 'управление';
+            else if (category === 'sky_capital') pincomeType = 'sky_capital';
+            else if (category === 'лихва_болгар') pincomeType = 'лихва_болгар';
+            // наем → 'друго' (личен)
+            insertPi.run(tx.дата, pincomeType, tx.сума, tx.currency || 'EUR',
+                         tx.контрагент || '', tx.основание || '', tx.id);
+            pincomeCreated++;
+          }
+        }
       }
-      // Save tx_rule (upsert)
+      // tx_rule upsert
       const existing = db.prepare('SELECT id FROM tx_rules WHERE LOWER(pattern) = LOWER(?)').get(contractor);
       if (existing) {
         db.prepare('UPDATE tx_rules SET категория = ?, scope = ? WHERE id = ?').run(category, scope || 'business', existing.id);
@@ -440,7 +463,22 @@ module.exports = function(db) {
     });
     doIt();
 
-    res.json({ updated, contractor, category, scope: scope || 'unchanged', rule_saved: true });
+    res.json({ updated, contractor, category, scope: scope || 'unchanged', rule_saved: true, personal_income_created: pincomeCreated });
+  });
+
+  // GET /search/tx?q=keyword — намира tx-те съдържащи keyword в контрагент
+  // или основание. Полезно за намиране на Bulgar дивиденти, който може да
+  // не са в обичайните места.
+  router.get('/search/tx', (req, res) => {
+    const q = (req.query.q || '').toLowerCase().trim();
+    if (!q) return res.status(400).json({ error: 'q е задължително' });
+    const all = db.prepare(`SELECT id, дата, контрагент, основание, сума, operation, категория, scope
+                            FROM transactions ORDER BY дата DESC LIMIT 5000`).all();
+    const matches = all.filter(t =>
+      (t.контрагент || '').toLowerCase().includes(q) ||
+      (t.основание  || '').toLowerCase().includes(q)
+    );
+    res.json({ q, count: matches.length, tx: matches.slice(0, 100) });
   });
 
   // ── Movements per direction (за clickable KPI cards) ────────────────────
