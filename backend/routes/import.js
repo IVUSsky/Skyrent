@@ -38,6 +38,8 @@ module.exports = function(db) {
     const isMgmtFee = ['договор за управление','договор управление','управителски','дог. упр.','ду възнагр'].some(kw => osnLower.includes(kw) || kontLower.includes(kw));
     // Sky Capital — приходи от собствените имоти / прехвърления от Sky фирмата
     const isSkyCap  = ['sky capital','skycapital','sky кап','скай капитал','скай кап','skayrent','skyrent','sky-rent'].some(kw => kontLower.includes(kw) || osnLower.includes(kw));
+    // Bulgar Capital — дивиденти на дялов фонд (от BG17FINV915010E0396846 или контрагент "БОЛГАР КАПИТАЛ")
+    const isBulgar  = ['болгар капитал','bulgar capital','bg17finv915010e0396846','болгар кап','bulgar кап'].some(kw => kontLower.includes(kw) || osnLower.includes(kw));
     // Инвестиции (Дт): Trading 212, brokers, crypto exchanges → category='инвестиция'
     const isInvest  = ['trading 212','trading212','t212','revolut invest','binance','coinbase','kraken','interactive brokers','etoro','xtb','degiro'].some(kw => kontLower.includes(kw) || osnLower.includes(kw));
     // Personal expense keywords (Дт): супермаркети, аптеки, горива, ресторанти и т.н.
@@ -62,6 +64,9 @@ module.exports = function(db) {
         scope = 'personal';
       } else if (isSkyCap) {
         категория = 'sky_capital';
+        scope = 'personal';
+      } else if (isBulgar) {
+        категория = 'лихва_болгар';
         scope = 'personal';
       } else {
         const hasRentKw = ['наем','rent'].some(kw => osnLower.includes(kw) || kontLower.includes(kw));
@@ -506,6 +511,7 @@ module.exports = function(db) {
             if (tx.категория === 'заплата')         pincomeType = 'заплата';
             else if (tx.категория === 'управление') pincomeType = 'управление';
             else if (tx.категория === 'sky_capital') pincomeType = 'sky_capital';
+            else if (tx.категория === 'лихва_болгар') pincomeType = 'лихва_болгар';
             else if (tx.категория === 'наем')       pincomeType = 'друго'; // личен наем
             if (pincomeType) {
               insertPersonalIncome.run(
@@ -591,8 +597,8 @@ module.exports = function(db) {
   // Auto-learns: saves a rule and retroactively applies it to matching unvalidated transactions.
   // Personal categories (заплата, управление, друго_лично) автоматично сменят scope='personal'
   // и създават personal_income запис при income типове.
-  const PERSONAL_CATS    = new Set(['заплата', 'управление', 'sky_capital', 'друго_лично', 'заем_sky']);
-  const PERSONAL_INCOMES = new Set(['заплата', 'управление', 'sky_capital']);
+  const PERSONAL_CATS    = new Set(['заплата', 'управление', 'sky_capital', 'лихва_болгар', 'друго_лично', 'заем_sky']);
+  const PERSONAL_INCOMES = new Set(['заплата', 'управление', 'sky_capital', 'лихва_болгар']);
 
   router.patch('/transactions/:id/category', (req, res) => {
     try {

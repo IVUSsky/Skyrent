@@ -564,7 +564,7 @@ module.exports = function(db) {
       SELECT t.* FROM transactions t
       WHERE t.operation = 'Кт'
         AND t.scope = 'personal'
-        AND t.категория IN ('заплата', 'управление', 'наем', 'sky_capital')
+        AND t.категория IN ('заплата', 'управление', 'наем', 'sky_capital', 'лихва_болгар')
         AND NOT EXISTS (SELECT 1 FROM personal_income pi WHERE pi.bank_tx_id = t.id)
     `).all();
 
@@ -577,6 +577,7 @@ module.exports = function(db) {
       if (t.категория === 'заплата')         pincomeType = 'заплата';
       else if (t.категория === 'управление') pincomeType = 'управление';
       else if (t.категория === 'sky_capital') pincomeType = 'sky_capital';
+      else if (t.категория === 'лихва_болгар') pincomeType = 'лихва_болгар';
       // наем → 'друго' (личен наем)
       insertPi.run(
         t.дата, pincomeType, t.сума,
@@ -648,7 +649,7 @@ module.exports = function(db) {
       SELECT t.* FROM transactions t
       WHERE t.operation = 'Кт'
         AND t.scope = 'personal'
-        AND t.категория IN ('заплата','управление','наем','sky_capital')
+        AND t.категория IN ('заплата','управление','наем','sky_capital','лихва_болгар')
         AND NOT EXISTS (SELECT 1 FROM personal_income pi WHERE pi.bank_tx_id = t.id)
     `).all();
     const insertPi = db.prepare(`INSERT INTO personal_income
@@ -659,6 +660,7 @@ module.exports = function(db) {
       if (t.категория === 'заплата')          pincomeType = 'заплата';
       else if (t.категория === 'управление')  pincomeType = 'управление';
       else if (t.категория === 'sky_capital') pincomeType = 'sky_capital';
+      else if (t.категория === 'лихва_болгар') pincomeType = 'лихва_болгар';
       insertPi.run(t.дата, pincomeType, t.сума, t.currency || 'EUR',
                    t.контрагент || '', t.основание || '', t.id);
       createdIncome++;
@@ -779,7 +781,7 @@ module.exports = function(db) {
       SELECT t.* FROM transactions t
       WHERE t.operation = 'Кт'
         AND t.scope = 'personal'
-        AND t.категория IN ('заплата','управление','наем','sky_capital')
+        AND t.категория IN ('заплата','управление','наем','sky_capital','лихва_болгар')
         AND NOT EXISTS (SELECT 1 FROM personal_income pi WHERE pi.bank_tx_id = t.id)
     `).all();
     const insertPi = db.prepare(`INSERT INTO personal_income
@@ -790,6 +792,7 @@ module.exports = function(db) {
       if (t.категория === 'заплата')         pincomeType = 'заплата';
       else if (t.категория === 'управление') pincomeType = 'управление';
       else if (t.категория === 'sky_capital') pincomeType = 'sky_capital';
+      else if (t.категория === 'лихва_болгар') pincomeType = 'лихва_болгар';
       insertPi.run(t.дата, pincomeType, t.сума, t.currency || 'EUR',
                    t.контрагент || '', t.основание || '', t.id);
       createdIncome++;
