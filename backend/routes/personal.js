@@ -341,7 +341,7 @@ module.exports = function(db) {
         брой_вноски: payments.length,
         първа_вноска: първа?.дата || null,
         последна_вноска: последна?.дата || null,
-        последна_сума: последна ? Number(последна.сума.toFixed(2)) : null,
+        последна_сума: последна ? Number((Number(последна.сума) || 0).toFixed(2)) : null,
         search_key: searchKey,
       });
     }
