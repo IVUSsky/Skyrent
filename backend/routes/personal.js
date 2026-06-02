@@ -292,6 +292,48 @@ module.exports = function(db) {
     });
   });
 
+  // ── Movements per direction (за clickable KPI cards) ────────────────────
+  // GET /movements?direction=in|out&month= | from=&to= | months=
+  // direction=in:  Кт от personal сметка + personal_income
+  // direction=out: Дт от personal сметка
+  router.get('/movements', (req, res) => {
+    const { from, to, label } = parsePeriod(req.query);
+    const direction = (req.query.direction || 'out').toLowerCase();
+    const op = direction === 'in' ? 'Кт' : 'Дт';
+
+    const rows = db.prepare(`
+      SELECT t.id, t.дата, t.контрагент, t.основание, t.сума, t.operation,
+             t.категория, t.scope, t.currency
+      FROM transactions t
+      WHERE t.scope = 'personal'
+        AND t.operation = ?
+        AND t.дата BETWEEN ? AND ?
+      ORDER BY t.дата DESC, t.сума DESC
+    `).all(op, from, to);
+
+    // Group by категория за визуални секции
+    const byCategory = {};
+    let total = 0;
+    for (const r of rows) {
+      const key = r.категория || 'друго';
+      if (!byCategory[key]) byCategory[key] = { категория: key, total: 0, count: 0, items: [] };
+      byCategory[key].total += Number(r.сума) || 0;
+      byCategory[key].count++;
+      byCategory[key].items.push(r);
+      total += Number(r.сума) || 0;
+    }
+    const groups = Object.values(byCategory).sort((a, b) => b.total - a.total);
+
+    res.json({
+      период: { from, to, label },
+      direction,
+      общо: Number(total.toFixed(2)),
+      брой: rows.length,
+      групи: groups,
+      tx: rows,
+    });
+  });
+
   // ── Детайлен анализ на разходи за период ────────────────────────────────
   // GET /expenses/breakdown?month= | ?from=&to= | ?months=
   // Връща: топ контрагенти, top 30 разходи, дневен/месечен trend, breakdown по категория.

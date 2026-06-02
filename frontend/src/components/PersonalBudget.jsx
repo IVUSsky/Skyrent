@@ -38,6 +38,8 @@ export default function PersonalBudget() {
   const [wealth, setWealth]       = useState(null)
   const [showBaseline, setShowBaseline] = useState(null)
   const [baselineForm, setBaselineForm] = useState({ opening: '', as_of: '' })
+  const [showMovements, setShowMovements] = useState(null) // 'in' | 'out' | null
+  const [movements, setMovements] = useState(null)
   const [loading, setLoading]   = useState(false)
   const [showAdd, setShowAdd]   = useState(false)
   const [rebuildResult, setRebuildResult] = useState(null)
@@ -113,6 +115,15 @@ export default function PersonalBudget() {
     apiFetch(`${API}/api/personal/accounts`)
       .then(r => r.json())
       .then(d => { setAccounts(d); setShowAccounts(true) })
+  }
+
+  const openMovements = (direction) => {
+    setShowMovements(direction)
+    setMovements(null)
+    const q = periodQuery()
+    apiFetch(`${API}/api/personal/movements?direction=${direction}&${q}`)
+      .then(r => r.json())
+      .then(setMovements)
   }
 
   const openBaseline = (acc) => {
@@ -302,9 +313,10 @@ export default function PersonalBudget() {
 
       {/* 3 главни KPI: Влязох / Излязох / Останах */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        <div className="bg-white rounded-xl border-l-4 border-emerald-500 shadow-sm p-4">
+        <button onClick={() => openMovements('in')}
+                className="bg-white rounded-xl border-l-4 border-emerald-500 shadow-sm p-4 text-left hover:shadow-md transition-shadow">
           <div className="text-xs font-bold text-gray-500 uppercase mb-1 flex justify-between">
-            <span>⬆️ Влязох ({s.период?.label || ''})</span>
+            <span>⬆️ Влязох ({s.период?.label || ''}) →</span>
             <span className="text-emerald-700">{(s.доход_по_тип || []).length} източника</span>
           </div>
           <div className="text-3xl font-bold text-emerald-700">+{fmt0(s.доход_общо)} EUR</div>
@@ -314,11 +326,12 @@ export default function PersonalBudget() {
               <span className="font-medium text-emerald-700">{fmt0(r.total)}</span>
             </div>
           ))}
-        </div>
+        </button>
 
-        <div className="bg-white rounded-xl border-l-4 border-rose-500 shadow-sm p-4">
+        <button onClick={() => openMovements('out')}
+                className="bg-white rounded-xl border-l-4 border-rose-500 shadow-sm p-4 text-left hover:shadow-md transition-shadow">
           <div className="text-xs font-bold text-gray-500 uppercase mb-1 flex justify-between">
-            <span>⬇️ Излязох</span>
+            <span>⬇️ Излязох →</span>
             <span className="text-rose-700">лични + капитал</span>
           </div>
           <div className="text-3xl font-bold text-rose-700">−{fmt0(s.разходи_общо + (s.капитал_общо || 0))} EUR</div>
@@ -330,7 +343,7 @@ export default function PersonalBudget() {
             <span>Кредити/Капитал/Инв.</span>
             <span className="font-medium text-amber-700">{fmt0(s.капитал_общо || 0)}</span>
           </div>
-        </div>
+        </button>
 
         <div className="bg-white rounded-xl border-l-4 border-blue-500 shadow-sm p-4">
           <div className="text-xs font-bold text-gray-500 uppercase mb-1 flex justify-between">
@@ -561,6 +574,67 @@ export default function PersonalBudget() {
         )}
       </div>
       </>}
+
+      {/* Movements modal — детайли при click на Влязох/Излязох */}
+      {showMovements && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={() => setShowMovements(null)}>
+          <div className="bg-white rounded-xl shadow-2xl p-5 max-w-4xl w-full m-4 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-start mb-3">
+              <div>
+                <h3 className="text-lg font-bold text-gray-900">
+                  {showMovements === 'in' ? '⬆️ Всички входящи (Кт)' : '⬇️ Всички изходящи (Дт)'}
+                </h3>
+                <p className="text-xs text-gray-500 mt-1">
+                  Период: {movements?.период?.from} → {movements?.период?.to}
+                  {movements && ` · ${movements.брой} tx · Общо ${fmt(movements.общо)} EUR`}
+                </p>
+              </div>
+              <button onClick={() => setShowMovements(null)}
+                      className="text-gray-400 hover:text-gray-700 text-2xl leading-none">×</button>
+            </div>
+
+            {!movements ? (
+              <p className="text-center text-gray-400 py-8">Зарежда...</p>
+            ) : movements.брой === 0 ? (
+              <p className="text-center text-gray-400 py-8">Няма движения за периода.</p>
+            ) : (
+              <div className="space-y-4">
+                {(movements.групи || []).map(g => (
+                  <div key={g.категория} className="border border-gray-200 rounded-lg overflow-hidden">
+                    <div className="bg-gray-50 px-3 py-2 flex justify-between items-center">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-gray-800">{g.категория}</span>
+                        <span className="text-xs text-gray-500">{g.count} tx</span>
+                      </div>
+                      <span className={`font-bold ${showMovements === 'in' ? 'text-emerald-700' : 'text-rose-700'}`}>
+                        {showMovements === 'in' ? '+' : '−'}{fmt(g.total)} EUR
+                      </span>
+                    </div>
+                    <table className="w-full text-sm">
+                      <tbody>
+                        {g.items.map(t => (
+                          <tr key={t.id} className="border-t border-gray-100 hover:bg-gray-50">
+                            <td className="px-3 py-1.5 text-gray-500 text-xs whitespace-nowrap">{t.дата}</td>
+                            <td className="px-3 py-1.5 text-gray-700 max-w-[200px] truncate" title={t.контрагент}>
+                              {t.контрагент || '—'}
+                            </td>
+                            <td className={`px-3 py-1.5 text-right font-medium whitespace-nowrap ${showMovements === 'in' ? 'text-emerald-700' : 'text-rose-700'}`}>
+                              {showMovements === 'in' ? '+' : '−'}{fmt(t.сума)} {t.currency}
+                            </td>
+                            <td className="px-3 py-1.5 text-gray-500 text-xs max-w-[300px] truncate" title={t.основание}>
+                              {t.основание}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Accounts modal — маркирай сесии като personal/business + ретро */}
       {showAccounts && (
