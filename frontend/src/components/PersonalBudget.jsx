@@ -349,7 +349,7 @@ export default function PersonalBudget() {
         <button onClick={() => setShowRemaining(true)}
                 className="bg-white rounded-xl border-l-4 border-blue-500 shadow-sm p-4 text-left hover:shadow-md transition-shadow">
           <div className="text-xs font-bold text-gray-500 uppercase mb-1 flex justify-between">
-            <span>💰 Останах →</span>
+            <span>💰 Налични →</span>
             <span className={sv.rate_pct !== null && sv.rate_pct >= sv.target_pct ? 'text-emerald-700' : 'text-amber-700'}>
               {sv.rate_pct !== null ? sv.rate_pct + '%' : '—'}
             </span>
@@ -583,7 +583,7 @@ export default function PersonalBudget() {
           <div className="bg-white rounded-xl shadow-2xl p-6 max-w-2xl w-full m-4 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <div className="flex justify-between items-start mb-4">
               <div>
-                <h3 className="text-xl font-bold text-gray-900">💰 Останах ({s.период?.label || ''})</h3>
+                <h3 className="text-xl font-bold text-gray-900">💰 Налични ({s.период?.label || ''})</h3>
                 <p className="text-xs text-gray-500 mt-1">Разбивка на изчислението + препоръка какво да направиш с парите</p>
               </div>
               <button onClick={() => setShowRemaining(false)}
@@ -606,7 +606,7 @@ export default function PersonalBudget() {
                   <div className="font-bold text-amber-700 text-lg">{fmt0(s.капитал_общо || 0)}</div>
                 </div>
                 <div className="border-l-2 border-blue-300 pl-2">
-                  <div className="text-xs text-gray-500">= Останах</div>
+                  <div className="text-xs text-gray-500">= Налични</div>
                   <div className={`font-bold text-lg ${(s.реално_свободно || 0) < 0 ? 'text-rose-700' : 'text-blue-700'}`}>
                     {fmt0(s.реално_свободно || 0)}
                   </div>
