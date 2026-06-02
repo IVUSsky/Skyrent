@@ -1,27 +1,39 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, lazy, Suspense } from 'react'
 import Login from './components/Login'
-import Portfolio from './components/Portfolio'
-import List from './components/List'
-import Dashboard from './components/Dashboard'
-import Loans from './components/Loans'
-import Analysis from './components/Analysis'
-import History from './components/History'
-import Import from './components/Import'
-import Tenants from './components/Tenants'
-import Invoices from './components/Invoices'
-import Contracts from './components/Contracts'
-import Settings from './components/Settings'
-import Expenses from './components/Expenses'
-import Smart from './components/Smart'
-import Investments from './components/Investments'
-import PersonalBudget from './components/PersonalBudget'
-import Addons from './components/Addons'
-import Support from './components/Support'
-import Internet from './components/Internet'
-import TenantApp from './components/TenantApp'
-import ChatLearning from './components/ChatLearning'
 import NotificationBell from './components/NotificationBell'
 import { apiFetch } from './api'
+
+// Lazy-loaded tabs — намалява initial bundle (само избраното се сваля)
+const Portfolio      = lazy(() => import('./components/Portfolio'))
+const List           = lazy(() => import('./components/List'))
+const Dashboard      = lazy(() => import('./components/Dashboard'))
+const Loans          = lazy(() => import('./components/Loans'))
+const Analysis       = lazy(() => import('./components/Analysis'))
+const History        = lazy(() => import('./components/History'))
+const Import         = lazy(() => import('./components/Import'))
+const Tenants        = lazy(() => import('./components/Tenants'))
+const Invoices       = lazy(() => import('./components/Invoices'))
+const Contracts      = lazy(() => import('./components/Contracts'))
+const Settings       = lazy(() => import('./components/Settings'))
+const Expenses       = lazy(() => import('./components/Expenses'))
+const Smart          = lazy(() => import('./components/Smart'))
+const Investments    = lazy(() => import('./components/Investments'))
+const PersonalBudget = lazy(() => import('./components/PersonalBudget'))
+const Addons         = lazy(() => import('./components/Addons'))
+const Support        = lazy(() => import('./components/Support'))
+const Internet       = lazy(() => import('./components/Internet'))
+const TenantApp      = lazy(() => import('./components/TenantApp'))
+const ChatLearning   = lazy(() => import('./components/ChatLearning'))
+
+const TabFallback = () => (
+  <div className="flex items-center justify-center py-20 text-gray-400">
+    <svg className="animate-spin h-6 w-6 mr-3" fill="none" viewBox="0 0 24 24">
+      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
+    </svg>
+    Зарежда таб...
+  </div>
+)
 
 const API = import.meta.env.VITE_API_URL || ''
 
@@ -110,7 +122,11 @@ export default function App() {
   }
 
   if (role === 'tenant') {
-    return <TenantApp userName={userName} onLogout={handleLogout} mustChangePassword={mustChangePwd} />
+    return (
+      <Suspense fallback={<TabFallback/>}>
+        <TenantApp userName={userName} onLogout={handleLogout} mustChangePassword={mustChangePwd} />
+      </Suspense>
+    )
   }
 
   const tabs = ALL_TABS.filter(t => t.roles.includes(role))
@@ -181,28 +197,32 @@ export default function App() {
       </header>
 
       {showLearning && (
-        <ChatLearning API={API} onClose={() => setShowLearning(false)} onChanged={refreshLearningCount} />
+        <Suspense fallback={null}>
+          <ChatLearning API={API} onClose={() => setShowLearning(false)} onChanged={refreshLearningCount} />
+        </Suspense>
       )}
 
       <main className="max-w-7xl mx-auto px-4 py-6">
-        {validTab === 'dashboard' && <Dashboard API={API} />}
-        {validTab === 'portfolio' && <Portfolio API={API} />}
-        {validTab === 'list'      && <List API={API} />}
-        {validTab === 'tenants'   && <Tenants API={API} />}
-        {validTab === 'invoices'  && <Invoices API={API} role={role} />}
-        {validTab === 'contracts' && <Contracts API={API} role={role} />}
-        {validTab === 'addons'    && <Addons API={API} />}
-        {validTab === 'internet'  && <Internet API={API} />}
-        {validTab === 'support'   && <Support API={API} />}
-        {validTab === 'loans'     && <Loans API={API} />}
-        {validTab === 'history'   && <History API={API} />}
-        {validTab === 'analysis'  && <Analysis API={API} />}
-        {validTab === 'expenses'  && <Expenses API={API} />}
-        {validTab === 'import'    && <Import API={API} />}
-        {validTab === 'smart'        && <Smart API={API} />}
-        {validTab === 'investments'  && <Investments API={API} />}
-        {validTab === 'personal'     && <PersonalBudget />}
-        {validTab === 'settings'     && <Settings API={API} />}
+        <Suspense fallback={<TabFallback/>}>
+          {validTab === 'dashboard' && <Dashboard API={API} />}
+          {validTab === 'portfolio' && <Portfolio API={API} />}
+          {validTab === 'list'      && <List API={API} />}
+          {validTab === 'tenants'   && <Tenants API={API} />}
+          {validTab === 'invoices'  && <Invoices API={API} role={role} />}
+          {validTab === 'contracts' && <Contracts API={API} role={role} />}
+          {validTab === 'addons'    && <Addons API={API} />}
+          {validTab === 'internet'  && <Internet API={API} />}
+          {validTab === 'support'   && <Support API={API} />}
+          {validTab === 'loans'     && <Loans API={API} />}
+          {validTab === 'history'   && <History API={API} />}
+          {validTab === 'analysis'  && <Analysis API={API} />}
+          {validTab === 'expenses'  && <Expenses API={API} />}
+          {validTab === 'import'    && <Import API={API} />}
+          {validTab === 'smart'        && <Smart API={API} />}
+          {validTab === 'investments'  && <Investments API={API} />}
+          {validTab === 'personal'     && <PersonalBudget />}
+          {validTab === 'settings'     && <Settings API={API} />}
+        </Suspense>
       </main>
     </div>
   )
