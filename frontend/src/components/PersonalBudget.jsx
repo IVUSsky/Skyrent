@@ -459,6 +459,12 @@ export default function PersonalBudget() {
             <span>Кредити/Капитал/Инв.</span>
             <span className="font-medium text-amber-700">{fmt0(s.капитал_общо || 0)}</span>
           </div>
+          {(s.неутрален_общо > 0) && (
+            <div className="text-xs text-blue-600 flex justify-between mt-0.5">
+              <span>+ Кредитен поток (pass-through)</span>
+              <span className="font-medium">↻ {fmt0(s.неутрален_общо)}</span>
+            </div>
+          )}
         </button>
 
         <button onClick={() => setShowRemaining(true)}
@@ -665,6 +671,36 @@ export default function PersonalBudget() {
             💡 Системата търси tx-те по номера на договора (напр. <code>902-1212686</code>) в основанието.
             Ако вноска не се мапва, провери че loans.договор е попълнен в "Кредити" tab.
           </p>
+        </div>
+      )}
+
+      {/* 🔄 Кредитен поток (bank → ти → Sky) — pass-through, не се брои в "Налични" */}
+      {(s.неутрален_по_категория || []).length > 0 && (
+        <div className="bg-blue-50 border border-blue-200 rounded-xl shadow-sm p-4">
+          <h3 className="text-sm font-bold text-blue-900 mb-2">🔄 Кредитен поток (pass-through)</h3>
+          <p className="text-xs text-blue-700 mb-2">
+            Това НЕ са реални твои изходящи. Това са кредити от банката, които си препратил към Sky Capital.
+            Парите минават през сметката ти, но не са твои. <b>Не се брои в "Налични".</b>
+            <br/>Месечните вноски (които наистина плащаш) са в "Кредитни вноски / Капитал" по-долу.
+          </p>
+          <table className="w-full text-sm">
+            <tbody>
+              {(s.неутрален_по_категория || []).map((r, i) => (
+                <tr key={i} className="border-t border-blue-100">
+                  <td className="py-1.5 text-gray-700">{r.expense_category}</td>
+                  <td className="py-1.5 text-right font-medium text-blue-700">↻ {fmt(r.total)} {r.currency}</td>
+                  <td className="py-1.5 text-right text-gray-400 text-xs w-12">×{r.count}</td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot className="border-t-2 border-blue-300">
+              <tr>
+                <td className="py-2 font-bold text-blue-900">Общо pass-through</td>
+                <td className="py-2 text-right font-bold text-blue-700">↻ {fmt(s.неутрален_общо || 0)}</td>
+                <td></td>
+              </tr>
+            </tfoot>
+          </table>
         </div>
       )}
 

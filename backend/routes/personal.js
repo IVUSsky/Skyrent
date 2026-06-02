@@ -168,6 +168,11 @@ module.exports = function(db) {
   const NOT_PERSONAL_EXPENSE = ['вноска', 'заем_sky', 'инвестиция', 'благородни метали',
                                  'ремонт', 'ремонт д', 'нап_ддс'];
 
+  // BALANCE-NEUTRAL: тези категории представляват bank loan pass-through
+  // (банка дава кредит → user → Sky). НЕ са реален outflow от собствените пари.
+  // Изключват се от "Излязох" / "Налични" формулата. Показват се само като info.
+  const BALANCE_NEUTRAL = ['заем_sky', 'кредит_получен'];
+
   // ── Period summary ────────────────────────────────────────────────────────
   // Връща: доходи (по тип), разходи (по категория), нетен cashflow, savings rate.
   // Параметри: ?month=YYYY-MM ИЛИ ?from=YYYY-MM-DD&to=YYYY-MM-DD ИЛИ ?months=N
@@ -219,15 +224,25 @@ module.exports = function(db) {
     addExp(manualExp);
     const allOutflows = [...expMap.values()].sort((a, b) => b.total - a.total);
 
-    // Раздели на: реални лични разходи / капитал-loans-инвестиции
-    const expensesByCat = allOutflows.filter(r => !NOT_PERSONAL_EXPENSE.includes(r.expense_category));
-    const capitalByCat  = allOutflows.filter(r =>  NOT_PERSONAL_EXPENSE.includes(r.expense_category));
+    // Раздели на 3:
+    //   1. реални лични разходи
+    //   2. капитал/кредитни вноски/инвестиции (реален outflow)
+    //   3. balance-neutral pass-through (заем_sky от bank loan)
+    const expensesByCat = allOutflows.filter(r =>
+      !NOT_PERSONAL_EXPENSE.includes(r.expense_category) &&
+      !BALANCE_NEUTRAL.includes(r.expense_category));
+    const capitalByCat  = allOutflows.filter(r =>
+      NOT_PERSONAL_EXPENSE.includes(r.expense_category) &&
+      !BALANCE_NEUTRAL.includes(r.expense_category));
+    const neutralByCat  = allOutflows.filter(r =>
+      BALANCE_NEUTRAL.includes(r.expense_category));
 
     const incomeTotal  = incomeByType.reduce((s, r) => s + (Number(r.total) || 0), 0);
     const expenseTotal = expensesByCat.reduce((s, r) => s + (Number(r.total) || 0), 0);
     const capitalTotal = capitalByCat.reduce((s, r) => s + (Number(r.total) || 0), 0);
+    const neutralTotal = neutralByCat.reduce((s, r) => s + (Number(r.total) || 0), 0);
     const cashflow     = incomeTotal - expenseTotal;
-    const realFree     = incomeTotal - expenseTotal - capitalTotal;
+    const realFree     = incomeTotal - expenseTotal - capitalTotal; // НЕ изважда neutral
 
     const settingsRow = db.prepare("SELECT value FROM settings WHERE key='savings_target_pct'").get();
     const targetPct = settingsRow ? Number(settingsRow.value) || 0 : 30;
@@ -272,11 +287,13 @@ module.exports = function(db) {
       доход_общо:     Number(incomeTotal.toFixed(2)),
       разходи_общо:   Number(expenseTotal.toFixed(2)),
       капитал_общо:   Number(capitalTotal.toFixed(2)),
+      неутрален_общо: Number(neutralTotal.toFixed(2)),
       нетен_cashflow: Number(cashflow.toFixed(2)),
       реално_свободно: Number(realFree.toFixed(2)),
       доход_по_тип:           incomeByType,
       разходи_по_категория:   expensesByCat,
       капитал_по_категория:   capitalByCat,
+      неутрален_по_категория: neutralByCat,
       savings: {
         rate_pct: savingsRate,
         target_pct: targetPct,
