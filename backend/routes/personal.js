@@ -292,6 +292,56 @@ module.exports = function(db) {
     });
   });
 
+  // ── Loans summary (ипотеки + плащания) ──────────────────────────────────
+  // Match-ва loans.договор с tx.основание (търси "договор" pattern в основание).
+  // За всеки loan: сума платена досега, # вноски, очаквана следваща дата/сума.
+  router.get('/loans/summary', (req, res) => {
+    const loans = db.prepare('SELECT * FROM loans').all();
+    if (!loans.length) return res.json({ loans: [], общо_дълг: 0, общо_платено: 0 });
+
+    const result = [];
+    for (const loan of loans) {
+      const dog = (loan.договор || '').trim();
+      if (!dog) {
+        result.push({ ...loan, платено: 0, брой_вноски: 0, последна_дата: null });
+        continue;
+      }
+      // Извлечи числов част от договора (напр. "902-1212686" → "1212686")
+      const numMatch = dog.match(/(\d{5,})/);
+      const searchKey = numMatch ? numMatch[1] : dog;
+
+      const payments = db.prepare(`
+        SELECT id, дата, сума, основание FROM transactions
+        WHERE operation = 'Дт'
+          AND категория = 'вноска'
+          AND основание LIKE ?
+        ORDER BY дата ASC
+      `).all(`%${searchKey}%`);
+
+      const платено = payments.reduce((s, p) => s + Number(p.сума || 0), 0);
+      const последна = payments[payments.length - 1];
+      const първа = payments[0];
+
+      result.push({
+        ...loan,
+        платено: Number(платено.toFixed(2)),
+        брой_вноски: payments.length,
+        първа_вноска: първа?.дата || null,
+        последна_вноска: последна?.дата || null,
+        последна_сума: последна ? Number(последна.сума.toFixed(2)) : null,
+        search_key: searchKey,
+      });
+    }
+
+    res.json({
+      loans: result,
+      общо_дълг:     Number(loans.reduce((s, l) => s + (Number(l.остатък) || 0), 0).toFixed(2)),
+      общо_месечна:  Number(loans.reduce((s, l) => s + (Number(l.вноска) || 0), 0).toFixed(2)),
+      общо_платено:  Number(result.reduce((s, l) => s + l.платено, 0).toFixed(2)),
+      общо_вноски:   result.reduce((s, l) => s + l.брой_вноски, 0),
+    });
+  });
+
   // ── Категоризация по контрагент (batch) ─────────────────────────────────
   // GET /categorize/contractors?category=X&op=Дт
   // Връща групи контрагенти със същата текуща категория, сортирани по сума.

@@ -36,6 +36,7 @@ export default function PersonalBudget() {
   const [breakdown, setBreakdown] = useState(null)
   const [balances, setBalances]   = useState(null)
   const [wealth, setWealth]       = useState(null)
+  const [loansSummary, setLoansSummary] = useState(null)
   const [showBaseline, setShowBaseline] = useState(null)
   const [baselineForm, setBaselineForm] = useState({ opening: '', as_of: '' })
   const [showMovements, setShowMovements] = useState(null) // 'in' | 'out' | null
@@ -88,8 +89,9 @@ export default function PersonalBudget() {
       apiFetch(`${API}/api/personal/expenses/breakdown?${q}`).then(r => r.json()),
       apiFetch(`${API}/api/personal/accounts/balances`).then(r => r.json()),
       apiFetch(`${API}/api/investments/wealth/summary`).then(r => r.json()).catch(() => null),
-    ]).then(([s, i, t, b, bal, w]) => {
-      setSummary(s); setIncome(i); setTimeline(t); setBreakdown(b); setBalances(bal); setWealth(w); setLoading(false)
+      apiFetch(`${API}/api/personal/loans/summary`).then(r => r.json()).catch(() => null),
+    ]).then(([s, i, t, b, bal, w, ls]) => {
+      setSummary(s); setIncome(i); setTimeline(t); setBreakdown(b); setBalances(bal); setWealth(w); setLoansSummary(ls); setLoading(false)
     }).catch(() => setLoading(false))
   }, [period])
 
@@ -596,6 +598,59 @@ export default function PersonalBudget() {
           )}
         </div>
       </div>
+
+      {/* 🏠 Ипотеки / Кредити — мапинг с tx-те */}
+      {loansSummary?.loans?.length > 0 && (
+        <div className="bg-white rounded-xl border border-amber-200 shadow-sm p-4">
+          <div className="flex justify-between items-start mb-3">
+            <h3 className="text-sm font-bold text-gray-800">🏠 Ипотеки / Кредити</h3>
+            <div className="text-xs text-gray-500">
+              Общо дълг: <b className="text-rose-700">{fmt(loansSummary.общо_дълг)} EUR</b> ·
+              месечно: <b>{fmt(loansSummary.общо_месечна)}</b> ·
+              платено досега: <b className="text-emerald-700">{fmt(loansSummary.общо_платено)}</b> ({loansSummary.общо_вноски} вноски)
+            </div>
+          </div>
+          <table className="w-full text-sm">
+            <thead className="text-xs text-gray-500 uppercase border-b border-gray-200">
+              <tr>
+                <th className="text-left py-2">Банка / Договор</th>
+                <th className="text-left py-2">Кредитополучател</th>
+                <th className="text-right py-2">Остатък</th>
+                <th className="text-right py-2">Вноска</th>
+                <th className="text-right py-2">Платено</th>
+                <th className="text-right py-2">#</th>
+                <th className="text-left py-2 pl-3">Последна</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loansSummary.loans.map(l => {
+                const доля = l.остатък > 0 ? (l.платено / (l.платено + l.остатък)) * 100 : 0
+                return (
+                  <tr key={l.id} className="border-b border-gray-50 hover:bg-gray-50">
+                    <td className="py-1.5">
+                      <div className="font-medium text-gray-800">{l.банка}</div>
+                      <div className="text-xs text-gray-500">{l.договор}</div>
+                    </td>
+                    <td className="py-1.5 text-gray-700">{l.кредитополучател}</td>
+                    <td className="py-1.5 text-right font-medium text-rose-700">{fmt(l.остатък)}</td>
+                    <td className="py-1.5 text-right text-gray-700">{fmt(l.вноска)}</td>
+                    <td className="py-1.5 text-right font-medium text-emerald-700">{fmt(l.платено)}</td>
+                    <td className="py-1.5 text-right text-xs text-gray-500">{l.брой_вноски}</td>
+                    <td className="py-1.5 pl-3 text-xs text-gray-500">
+                      {l.последна_вноска || '—'}
+                      {l.последна_сума && <span className="ml-1">({fmt(l.последна_сума)})</span>}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+          <p className="text-xs text-gray-400 mt-3">
+            💡 Системата търси tx-те по номера на договора (напр. <code>902-1212686</code>) в основанието.
+            Ако вноска не се мапва, провери че loans.договор е попълнен в "Кредити" tab.
+          </p>
+        </div>
+      )}
 
       {/* Капитал / Кредити / Инвестиции */}
       {(s.капитал_по_категория || []).length > 0 && (
