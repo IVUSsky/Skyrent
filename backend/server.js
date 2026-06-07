@@ -87,6 +87,37 @@ async function main() {
   try { db.exec("ALTER TABLE properties ADD COLUMN абонат_тец TEXT");  console.log('Migration: added абонат_тец');  } catch(_) {}
   try { db.exec("ALTER TABLE properties ADD COLUMN абонат_вход TEXT"); console.log('Migration: added абонат_вход'); } catch(_) {}
 
+  // Lifecycle stage + pre-construction tracking (2026-06-07)
+  // lifecycle_stage values: active | listing | furnishing | renovating |
+  //                        pre_construction | reserved | for_sale | inactive
+  try { db.exec("ALTER TABLE properties ADD COLUMN lifecycle_stage TEXT"); console.log('Migration: added lifecycle_stage'); } catch(_) {}
+  try { db.exec("ALTER TABLE properties ADD COLUMN lifecycle_eta_date DATE"); console.log('Migration: added lifecycle_eta_date'); } catch(_) {}
+  try { db.exec("ALTER TABLE properties ADD COLUMN purchase_paid_amount REAL"); console.log('Migration: added purchase_paid_amount'); } catch(_) {}
+  try { db.exec("ALTER TABLE properties ADD COLUMN purchase_balance_due REAL"); console.log('Migration: added purchase_balance_due'); } catch(_) {}
+  try { db.exec("ALTER TABLE properties ADD COLUMN purchase_balance_due_date DATE"); console.log('Migration: added purchase_balance_due_date'); } catch(_) {}
+
+  // Default lifecycle_stage from emoji status (idempotent — only if NULL).
+  // User-ът после може да override-не через UI.
+  db.exec("UPDATE properties SET lifecycle_stage = 'active'    WHERE lifecycle_stage IS NULL AND статус = '✅'");
+  db.exec("UPDATE properties SET lifecycle_stage = 'furnishing' WHERE lifecycle_stage IS NULL AND статус = '🔶'");
+  db.exec("UPDATE properties SET lifecycle_stage = 'inactive'  WHERE lifecycle_stage IS NULL AND статус = '❌'");
+  db.exec("UPDATE properties SET lifecycle_stage = 'inactive'  WHERE lifecycle_stage IS NULL");
+
+  // Семя-ваме Симеоново 12 като pre_construction (memory:
+  // project_skyrent_simeonovo_preconstruction.md — 20% deposit, 80% дължимо ~2027).
+  // Idempotent: не пипа ако user-ът вече е попълнил purchase_paid_amount.
+  db.exec(`
+    UPDATE properties
+    SET lifecycle_stage = 'pre_construction',
+        lifecycle_eta_date = COALESCE(lifecycle_eta_date, '2027-12-31'),
+        purchase_paid_amount = COALESCE(purchase_paid_amount,
+          ROUND(0.20 * COALESCE(market_val, покупна + ремонт, 0), 2)),
+        purchase_balance_due = COALESCE(purchase_balance_due,
+          ROUND(0.80 * COALESCE(market_val, покупна + ремонт, 0), 2)),
+        purchase_balance_due_date = COALESCE(purchase_balance_due_date, '2027-12-31')
+    WHERE id IN (34, 35, 36, 37) AND purchase_paid_amount IS NULL
+  `);
+
   try { db.exec("ALTER TABLE loans ADD COLUMN balance_date DATE"); console.log('Migration: added balance_date'); } catch(_) {}
   try { db.exec("ALTER TABLE loans ADD COLUMN paid_external INTEGER DEFAULT 0"); console.log('Migration: added loans.paid_external'); } catch(_) {}
   try { db.exec("ALTER TABLE loans ADD COLUMN paid_external_note TEXT"); console.log('Migration: added loans.paid_external_note'); } catch(_) {}
