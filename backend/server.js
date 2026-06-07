@@ -835,6 +835,7 @@ async function main() {
   app.use('/api/properties', require('./routes/properties')(db));
   app.use('/api/loans',      require('./routes/loans')(db));
   app.use('/api/metrics',    require('./routes/metrics')(db));
+  app.use('/api/metrics/portfolio', require('./routes/metricsPortfolio')(db));
   app.use('/api/import',     require('./routes/import')(db));
   app.use('/api/settings',   require('./routes/settings')(db));
   app.use('/api/email',      require('./routes/email')(db));
