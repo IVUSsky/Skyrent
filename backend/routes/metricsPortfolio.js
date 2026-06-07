@@ -185,6 +185,8 @@ module.exports = function(db) {
       const debtServiceByProp = new Map();
       const propIdSet = new Set(properties.map(p => p.id));
 
+      const propAssetById = new Map(propRows.map(p => [p.id, p.asset_val]));
+
       for (const l of loans) {
         const остатъкCalc = calcCurrentBalance(l['остатък'], l['вноска'], l['лихва'], l['balance_date']);
         const monthlyService = l['вноска'] || 0;
@@ -197,12 +199,18 @@ module.exports = function(db) {
           unallocatedDebtService += serviceEur;
           continue;
         }
-        const perProp = debtEur / ids.length;
-        const perPropService = serviceEur / ids.length;
-        for (const id of ids) {
-          debtByProp.set(id, (debtByProp.get(id) || 0) + perProp);
-          debtServiceByProp.set(id, (debtServiceByProp.get(id) || 0) + perPropService);
-        }
+
+        // Asset-weighted split: големите imota поемат по-голям дял от collateral debt.
+        // Ако всички asset_val са 0 → fallback equal split.
+        const weights = ids.map(id => propAssetById.get(id) || 0);
+        const wTotal = weights.reduce((s, w) => s + w, 0);
+        const useWeighted = wTotal > 0;
+
+        ids.forEach((id, i) => {
+          const share = useWeighted ? weights[i] / wTotal : 1 / ids.length;
+          debtByProp.set(id, (debtByProp.get(id) || 0) + debtEur * share);
+          debtServiceByProp.set(id, (debtServiceByProp.get(id) || 0) + serviceEur * share);
+        });
       }
 
       for (const p of propRows) {
