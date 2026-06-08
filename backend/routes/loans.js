@@ -108,10 +108,19 @@ module.exports = function(db) {
 
   router.put('/:id', (req, res) => {
     try {
-      const { остатък, вноска, лихва, краен, balance_date, currency } = req.body;
+      const { остатък, вноска, лихва, краен, balance_date, currency, имоти } = req.body;
       const id = req.params.id;
       const loan = db.prepare('SELECT * FROM loans WHERE id = ?').get(id);
       if (!loan) return res.status(404).json({ error: 'Not found' });
+
+      // Валидация на имоти полето: ако се подава, трябва да е JSON array от ints
+      let imotiStr = loan['имоти'];
+      if (имоти !== undefined) {
+        const arr = Array.isArray(имоти) ? имоти : (typeof имоти === 'string' ? JSON.parse(имоти) : null);
+        if (!Array.isArray(arr)) return res.status(400).json({ error: 'имоти must be array' });
+        const cleaned = arr.map(Number).filter(n => Number.isInteger(n) && n > 0);
+        imotiStr = JSON.stringify(cleaned);
+      }
 
       db.prepare(`
         UPDATE loans SET
@@ -120,7 +129,8 @@ module.exports = function(db) {
           лихва   = ?,
           краен   = ?,
           balance_date = ?,
-          currency = ?
+          currency = ?,
+          имоти   = ?
         WHERE id = ?
       `).run(
         остатък  !== undefined ? Number(остатък)  : loan['остатък'],
@@ -129,6 +139,7 @@ module.exports = function(db) {
         краен    !== undefined ? Number(краен)    : loan['краен'],
         balance_date || loan['balance_date'] || new Date().toISOString().slice(0, 10),
         (currency || loan.currency || 'EUR').toUpperCase(),
+        imotiStr,
         id
       );
 
