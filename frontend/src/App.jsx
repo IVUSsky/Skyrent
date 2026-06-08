@@ -7,6 +7,7 @@ import { apiFetch } from './api'
 const Portfolio      = lazy(() => import('./components/Portfolio'))
 const List           = lazy(() => import('./components/List'))
 const Dashboard      = lazy(() => import('./components/Dashboard'))
+const InvestorView   = lazy(() => import('./components/InvestorView'))
 const Loans          = lazy(() => import('./components/Loans'))
 const Analysis       = lazy(() => import('./components/Analysis'))
 const History        = lazy(() => import('./components/History'))
@@ -39,6 +40,7 @@ const API = import.meta.env.VITE_API_URL || ''
 
 const ALL_TABS = [
   { id: 'dashboard', label: 'Dashboard',      roles: ['admin'] },
+  { id: 'investor',  label: '📊 Инвеститор',  roles: ['admin'] },
   { id: 'portfolio', label: 'Портфолио',      roles: ['admin'] },
   { id: 'list',      label: 'Списък',         roles: ['admin'] },
   { id: 'history',   label: '📈 История',     roles: ['admin'] },
@@ -205,6 +207,7 @@ export default function App() {
       <main className="max-w-7xl mx-auto px-4 py-6">
         <Suspense fallback={<TabFallback/>}>
           {validTab === 'dashboard' && <Dashboard API={API} />}
+          {validTab === 'investor'  && <InvestorView API={API} />}
           {validTab === 'portfolio' && <Portfolio API={API} />}
           {validTab === 'list'      && <List API={API} />}
           {validTab === 'tenants'   && <Tenants API={API} />}
