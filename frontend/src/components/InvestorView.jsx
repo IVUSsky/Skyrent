@@ -1,0 +1,393 @@
+import React, { useState, useEffect, useMemo } from 'react'
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell,
+  PieChart, Pie, Legend
+} from 'recharts'
+import { apiFetch } from '../api'
+
+const fmt = (n, d = 0) => {
+  if (n == null || isNaN(n)) return '—'
+  return Number(n).toLocaleString('bg-BG', { minimumFractionDigits: d, maximumFractionDigits: d })
+}
+const fmtEur = (n) => n == null || isNaN(n) ? '—' : `€${fmt(n)}`
+const fmtPct = (n, d = 1) => n == null || isNaN(n) ? '—' : `${(n * 100).toFixed(d)}%`
+
+const STAGE_LABELS = {
+  active: 'Активен',
+  listing: 'Обявен',
+  furnishing: 'Обзавежда се',
+  renovating: 'В ремонт',
+  pre_construction: 'Pre-construction',
+  reserved: 'Запазен',
+  for_sale: 'За продажба',
+  inactive: 'Неактивен',
+}
+
+const STAGE_COLORS = {
+  active: '#22c55e',
+  listing: '#3b82f6',
+  furnishing: '#f59e0b',
+  renovating: '#a855f7',
+  pre_construction: '#06b6d4',
+  reserved: '#94a3b8',
+  for_sale: '#ec4899',
+  inactive: '#94a3b8',
+}
+
+const BANK_COLORS = { 'Пощенска': '#22c55e', 'УниКредит': '#f59e0b', 'Прокредит': '#ef4444' }
+
+function KpiCard({ label, value, sub, color = 'gray', icon }) {
+  const map = {
+    blue:   { border: 'border-[#b2dce8]', bg: 'bg-[#e3f4f9]', text: 'text-[#0e3d52]' },
+    green:  { border: 'border-green-200',  bg: 'bg-green-50',  text: 'text-green-700' },
+    red:    { border: 'border-red-200',    bg: 'bg-red-50',    text: 'text-red-700' },
+    yellow: { border: 'border-amber-200',  bg: 'bg-amber-50',  text: 'text-amber-700' },
+    purple: { border: 'border-purple-200', bg: 'bg-purple-50', text: 'text-purple-700' },
+    gray:   { border: 'border-gray-200',   bg: 'bg-gray-50',   text: 'text-gray-700' },
+    orange: { border: 'border-orange-200', bg: 'bg-orange-50', text: 'text-orange-700' },
+  }
+  const c = map[color] || map.gray
+  return (
+    <div className={`border rounded-xl p-4 ${c.border} ${c.bg}`}>
+      <div className="flex items-start justify-between">
+        <div>
+          <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider">{label}</div>
+          <div className={`text-2xl font-bold mt-1 ${c.text}`}>{value}</div>
+          {sub && <div className="text-xs text-gray-500 mt-1">{sub}</div>}
+        </div>
+        {icon && <span className="text-2xl opacity-70">{icon}</span>}
+      </div>
+    </div>
+  )
+}
+
+function SortHeader({ field, label, sortField, sortDir, onSort, align = 'left' }) {
+  const active = sortField === field
+  const arrow = active ? (sortDir === 'desc' ? '↓' : '↑') : ''
+  return (
+    <th
+      onClick={() => onSort(field)}
+      className={`px-3 py-2 text-${align} cursor-pointer hover:bg-gray-100 select-none text-xs font-semibold uppercase tracking-wider text-gray-600`}
+    >
+      {label} {arrow}
+    </th>
+  )
+}
+
+export default function InvestorView({ API }) {
+  const [data, setData] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+  const [sortField, setSortField] = useState('cap_rate')
+  const [sortDir, setSortDir] = useState('desc')
+  const [stageFilter, setStageFilter] = useState('all')
+
+  useEffect(() => {
+    setLoading(true)
+    apiFetch(`${API}/api/metrics/portfolio`)
+      .then(r => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`)
+        return r.json()
+      })
+      .then(d => { setData(d); setLoading(false) })
+      .catch(e => { setError(e.message); setLoading(false) })
+  }, [API])
+
+  const handleSort = (field) => {
+    if (sortField === field) {
+      setSortDir(d => d === 'desc' ? 'asc' : 'desc')
+    } else {
+      setSortField(field)
+      setSortDir('desc')
+    }
+  }
+
+  const sortedProps = useMemo(() => {
+    if (!data) return []
+    const arr = [...data.by_property]
+    if (stageFilter !== 'all') {
+      return arr.filter(p => p.lifecycle_stage === stageFilter)
+        .sort((a, b) => {
+          const av = a[sortField] ?? -Infinity
+          const bv = b[sortField] ?? -Infinity
+          return sortDir === 'desc' ? bv - av : av - bv
+        })
+    }
+    return arr.sort((a, b) => {
+      const av = a[sortField] ?? -Infinity
+      const bv = b[sortField] ?? -Infinity
+      return sortDir === 'desc' ? bv - av : av - bv
+    })
+  }, [data, sortField, sortDir, stageFilter])
+
+  if (loading) return <div className="flex justify-center py-16 text-gray-500 text-lg">Зарежда инвеститорско view...</div>
+  if (error) return <div className="bg-red-50 text-red-700 p-4 rounded-lg">Грешка: {error}</div>
+  if (!data) return null
+
+  const p = data.portfolio
+  const realLtvColor = p.real_ltv == null ? 'gray' : p.real_ltv < 0.5 ? 'green' : p.real_ltv < 0.65 ? 'yellow' : 'red'
+  const dscrColor = p.dscr == null ? 'gray' : p.dscr >= 1.25 ? 'green' : p.dscr >= 1.0 ? 'yellow' : 'red'
+  const capRateColor = p.cap_rate == null ? 'gray' : p.cap_rate >= 0.05 ? 'green' : p.cap_rate >= 0.03 ? 'yellow' : 'red'
+
+  const top5 = [...data.by_property]
+    .filter(x => x.cap_rate != null && x.active)
+    .sort((a, b) => b.cap_rate - a.cap_rate)
+    .slice(0, 5)
+
+  const bottom5 = [...data.by_property]
+    .filter(x => x.cap_rate != null && x.active && x.rent_annual > 0)
+    .sort((a, b) => a.cap_rate - b.cap_rate)
+    .slice(0, 5)
+
+  const stageBreakdown = Object.entries(p.properties_by_stage || {})
+    .map(([stage, count]) => ({ stage, count, label: STAGE_LABELS[stage] || stage }))
+    .sort((a, b) => b.count - a.count)
+
+  const bankBreakdown = {}
+  for (const s of (data.loan_schedules || [])) {
+    if (!bankBreakdown[s.банка]) bankBreakdown[s.банка] = { банка: s.банка, balance: 0, principal: 0, interest: 0 }
+    bankBreakdown[s.банка].balance += s.balance_now_eur
+    bankBreakdown[s.банка].principal += s.principal_12m_eur
+    bankBreakdown[s.банка].interest += s.interest_12m_eur
+  }
+  const bankData = Object.values(bankBreakdown)
+
+  const hasOffPlan = p.off_plan_obligations > 0
+  const hasNoOpex = !p.opex_annual || p.opex_annual === 0
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <h2 className="text-2xl font-bold" style={{ color: '#1a1a2e' }}>📊 Инвеститорско view</h2>
+          <div className="text-sm text-gray-500 mt-1">
+            Asof: {data.asof} · Opex period: {data.opex_period_from} → now · Currency: {data.currency}
+          </div>
+        </div>
+      </div>
+
+      {/* Warning banners */}
+      {hasNoOpex && (
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-800">
+          ⚠️ <b>Opex = 0</b> — бизнес банковата сметка не е импортирана още. NOI и Cap Rate са overstated. Реалните числа ще се появят след ProBanking импорт на business сметка.
+        </div>
+      )}
+
+      {hasOffPlan && (
+        <div className="bg-cyan-50 border border-cyan-200 rounded-lg p-3 text-sm text-cyan-900">
+          💡 <b>Pre-construction обвързаност:</b> {fmtEur(p.off_plan_obligations)} дължимо при доставка на Симеоново 12. Real LTV {fmtPct(p.real_ltv)} (vs debt-only LTV {fmtPct(p.ltv)}).
+        </div>
+      )}
+
+      {/* Lifecycle breakdown */}
+      <section>
+        <h3 className="text-sm font-semibold text-gray-700 mb-3">Lifecycle разпределение</h3>
+        <div className="flex flex-wrap gap-2">
+          {stageBreakdown.map(s => (
+            <button
+              key={s.stage}
+              onClick={() => setStageFilter(stageFilter === s.stage ? 'all' : s.stage)}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
+                stageFilter === s.stage
+                  ? 'bg-[#4AABCC] text-white border-[#4AABCC]'
+                  : 'bg-white text-gray-700 border-gray-200 hover:border-[#4AABCC]'
+              }`}
+              style={stageFilter !== s.stage ? { borderLeftColor: STAGE_COLORS[s.stage], borderLeftWidth: '4px' } : {}}
+            >
+              {s.label}: <b>{s.count}</b>
+            </button>
+          ))}
+          {stageFilter !== 'all' && (
+            <button onClick={() => setStageFilter('all')} className="px-3 py-1.5 text-sm text-gray-500 hover:text-gray-700">
+              ✕ изчисти филтър
+            </button>
+          )}
+        </div>
+      </section>
+
+      {/* Main KPI cards */}
+      <section>
+        <h3 className="text-sm font-semibold text-gray-700 mb-3">Портфолио KPI</h3>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <KpiCard label="Asset base" value={fmtEur(p.asset_base)} icon="🏠" color="blue" />
+          <KpiCard label="Total debt" value={fmtEur(p.total_debt)} sub={`+ off-plan: ${fmtEur(p.off_plan_obligations || 0)}`} icon="🏦" color="orange" />
+          <KpiCard label="Real equity" value={fmtEur(p.real_equity)} sub={`book: ${fmtEur(p.equity)}`} icon="💰" color="green" />
+          <KpiCard label="Real LTV" value={fmtPct(p.real_ltv)} sub={`debt-only: ${fmtPct(p.ltv)}`} icon="⚖️" color={realLtvColor} />
+          <KpiCard label="Rent годишен" value={fmtEur(p.rent_annual)} sub={`${fmtEur(p.rent_monthly)}/мес`} icon="🔑" color="blue" />
+          <KpiCard label="NOI годишен" value={fmtEur(p.noi_annual)} sub={hasNoOpex ? '(opex=0)' : ''} icon="📈" color="green" />
+          <KpiCard label="Cap Rate" value={fmtPct(p.cap_rate)} icon="🎯" color={capRateColor} />
+          <KpiCard label="DSCR" value={p.dscr ? p.dscr.toFixed(2) : '—'} icon="🛡️" color={dscrColor} />
+          <KpiCard label="Net CF годишен" value={fmtEur(p.net_cash_flow_annual)} sub="NOI - debt service" icon="💸" color="purple" />
+          <KpiCard label="Cash-on-Cash" value={fmtPct(p.cash_on_cash)} icon="🎲" color="purple" />
+          <KpiCard label="Top 5 share" value={fmtPct(p.concentration.top5_rent_share)} sub={`Herfindahl: ${p.concentration.herfindahl?.toFixed(3)}`} icon="🎯" color="gray" />
+          <KpiCard label="Имоти" value={`${p.properties_active}/${p.properties_total}`} sub="активни/общо" icon="🏘️" color="gray" />
+        </div>
+      </section>
+
+      {/* 12m amortization */}
+      <section>
+        <h3 className="text-sm font-semibold text-gray-700 mb-3">Дълг — 12 месеца напред</h3>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+          <KpiCard label="Principal погасен" value={fmtEur(p.principal_paydown_12m)} sub="дълг намалява с" color="green" />
+          <KpiCard label="Lihva 12m" value={fmtEur(p.interest_12m)} sub="плащате lihva" color="orange" />
+          <KpiCard label="Дълг след 12м" value={fmtEur(p.debt_after_12m)} sub={`от ${fmtEur(p.total_debt)} сега`} color="blue" />
+          <KpiCard label="% Principal" value={fmtPct(p.principal_share_12m)} sub="от месечната вноска" color="purple" />
+        </div>
+
+        {bankData.length > 0 && (
+          <div className="bg-white border rounded-xl p-4">
+            <div className="text-sm font-semibold text-gray-700 mb-3">По банка</div>
+            <ResponsiveContainer width="100%" height={200}>
+              <BarChart data={bankData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
+                <XAxis dataKey="банка" />
+                <YAxis />
+                <Tooltip formatter={(v) => fmtEur(v)} />
+                <Legend />
+                <Bar dataKey="principal" name="Principal 12m" fill="#22c55e" />
+                <Bar dataKey="interest" name="Lihva 12m" fill="#ef4444" />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+      </section>
+
+      {/* Loan schedules table */}
+      {data.loan_schedules?.length > 0 && (
+        <section>
+          <h3 className="text-sm font-semibold text-gray-700 mb-3">Кредити (12m amortization)</h3>
+          <div className="bg-white border rounded-xl overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">Банка</th>
+                  <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">Договор</th>
+                  <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wider text-gray-600">Balance</th>
+                  <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wider text-gray-600">Principal 12m</th>
+                  <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wider text-gray-600">Lihva 12m</th>
+                  <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wider text-gray-600">% Lihva</th>
+                  <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wider text-gray-600">След 12m</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {data.loan_schedules.map(s => {
+                  const total = s.principal_12m_eur + s.interest_12m_eur
+                  const intPct = total > 0 ? s.interest_12m_eur / total : 0
+                  const intColor = intPct > 0.6 ? 'text-red-700 font-semibold' : intPct > 0.5 ? 'text-amber-700' : 'text-gray-700'
+                  return (
+                    <tr key={s.id} className="hover:bg-gray-50">
+                      <td className="px-3 py-2"><span style={{ color: BANK_COLORS[s.банка] || '#666' }} className="font-medium">{s.банка}</span></td>
+                      <td className="px-3 py-2 text-gray-600 text-xs">{s.договор}</td>
+                      <td className="px-3 py-2 text-right">{fmtEur(s.balance_now_eur)}</td>
+                      <td className="px-3 py-2 text-right text-green-700">{fmtEur(s.principal_12m_eur)}</td>
+                      <td className="px-3 py-2 text-right text-orange-700">{fmtEur(s.interest_12m_eur)}</td>
+                      <td className={`px-3 py-2 text-right ${intColor}`}>{fmtPct(intPct)}</td>
+                      <td className="px-3 py-2 text-right text-gray-500">{fmtEur(s.balance_after_12m_eur)}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
+      {/* Top / Bottom performers */}
+      <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="bg-white border rounded-xl overflow-hidden">
+          <div className="bg-green-50 px-4 py-2 text-sm font-semibold text-green-800 border-b border-green-200">🏆 Top 5 by Cap Rate</div>
+          <table className="w-full text-sm">
+            <tbody className="divide-y divide-gray-100">
+              {top5.map(x => (
+                <tr key={x.id} className="hover:bg-gray-50">
+                  <td className="px-3 py-2">
+                    <div className="text-gray-900 font-medium">{x.адрес}</div>
+                    <div className="text-xs text-gray-500">{x.тип}</div>
+                  </td>
+                  <td className="px-3 py-2 text-right text-gray-700">{fmtEur(x.rent_annual)}/год</td>
+                  <td className="px-3 py-2 text-right font-bold text-green-700">{fmtPct(x.cap_rate, 2)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="bg-white border rounded-xl overflow-hidden">
+          <div className="bg-red-50 px-4 py-2 text-sm font-semibold text-red-800 border-b border-red-200">📉 Bottom 5 by Cap Rate (active с наем)</div>
+          <table className="w-full text-sm">
+            <tbody className="divide-y divide-gray-100">
+              {bottom5.map(x => (
+                <tr key={x.id} className="hover:bg-gray-50">
+                  <td className="px-3 py-2">
+                    <div className="text-gray-900 font-medium">{x.адрес}</div>
+                    <div className="text-xs text-gray-500">{x.тип}</div>
+                  </td>
+                  <td className="px-3 py-2 text-right text-gray-700">{fmtEur(x.rent_annual)}/год</td>
+                  <td className="px-3 py-2 text-right font-bold text-red-700">{fmtPct(x.cap_rate, 2)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      {/* Per-property full table */}
+      <section>
+        <h3 className="text-sm font-semibold text-gray-700 mb-3">
+          Per-property {stageFilter !== 'all' && <span className="text-[#4AABCC]">(филтър: {STAGE_LABELS[stageFilter]})</span>}
+          <span className="text-gray-400 font-normal"> — {sortedProps.length} имота</span>
+        </h3>
+        <div className="bg-white border rounded-xl overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50">
+              <tr>
+                <SortHeader field="id" label="ID" {...{sortField,sortDir,onSort:handleSort}} />
+                <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">Адрес</th>
+                <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">Стадий</th>
+                <SortHeader field="rent_annual" label="Наем/год" align="right" {...{sortField,sortDir,onSort:handleSort}} />
+                <SortHeader field="asset_val" label="Stoyност" align="right" {...{sortField,sortDir,onSort:handleSort}} />
+                <SortHeader field="allocated_debt" label="Дълг" align="right" {...{sortField,sortDir,onSort:handleSort}} />
+                <SortHeader field="ltv" label="LTV" align="right" {...{sortField,sortDir,onSort:handleSort}} />
+                <SortHeader field="cap_rate" label="Cap" align="right" {...{sortField,sortDir,onSort:handleSort}} />
+                <SortHeader field="net_cash_flow" label="Net CF" align="right" {...{sortField,sortDir,onSort:handleSort}} />
+                <SortHeader field="principal_paydown_12m" label="Princ 12m" align="right" {...{sortField,sortDir,onSort:handleSort}} />
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {sortedProps.map(x => {
+                const ltvColor = x.ltv == null ? '' : x.ltv > 0.65 ? 'text-red-700 font-semibold' : x.ltv > 0.5 ? 'text-amber-700' : 'text-gray-700'
+                const cfColor = x.net_cash_flow > 0 ? 'text-green-700' : x.net_cash_flow < 0 ? 'text-red-700' : 'text-gray-500'
+                return (
+                  <tr key={x.id} className="hover:bg-gray-50">
+                    <td className="px-3 py-2 text-gray-500 text-xs">{x.id}</td>
+                    <td className="px-3 py-2">
+                      <div className="text-gray-900">{x.адрес}</div>
+                      <div className="text-xs text-gray-400">{x.тип}{x.наемател ? ` · ${x.наемател}` : ''}</div>
+                    </td>
+                    <td className="px-3 py-2">
+                      <span
+                        className="inline-block px-2 py-0.5 rounded text-xs font-medium"
+                        style={{
+                          background: (STAGE_COLORS[x.lifecycle_stage] || '#94a3b8') + '20',
+                          color: STAGE_COLORS[x.lifecycle_stage] || '#475569',
+                        }}
+                      >
+                        {STAGE_LABELS[x.lifecycle_stage] || x.lifecycle_stage}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 text-right">{fmtEur(x.rent_annual)}</td>
+                    <td className="px-3 py-2 text-right">{fmtEur(x.asset_val)}</td>
+                    <td className="px-3 py-2 text-right text-gray-700">{fmtEur(x.allocated_debt)}</td>
+                    <td className={`px-3 py-2 text-right ${ltvColor}`}>{fmtPct(x.ltv)}</td>
+                    <td className="px-3 py-2 text-right">{fmtPct(x.cap_rate, 2)}</td>
+                    <td className={`px-3 py-2 text-right ${cfColor}`}>{fmtEur(x.net_cash_flow)}</td>
+                    <td className="px-3 py-2 text-right text-green-700">{fmtEur(x.principal_paydown_12m)}</td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  )
+}
