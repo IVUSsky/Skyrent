@@ -6,15 +6,27 @@ const toEur = (amount, currency) => {
   return (currency || 'EUR').toUpperCase() === 'BGN' ? amount / BGN_RATE : amount;
 };
 
-// Канонична оперативна група (виж project_skyrent_dev.md → "Оперативни").
-// ВСИЧКИ останали категории (инвестиция, благородни метали, ремонт, ремонт д,
-// депозити, ипотека, *) се изключват от NOI.
-const OPERATING_CATEGORIES = new Set([
-  'ток', 'вода', 'застраховка', 'такса', 'счетоводство', 'ддс', 'друго',
+// Skyrent canonical P&L convention (виж backend/routes/expenses.js summary endpoint):
+// Opex = ВСИЧКО освен NON_OPEX. NULL category също се брои като opex.
+// Това е consistent с /api/expenses/summary endpoint-а.
+const NON_OPEX_CATEGORIES = new Set([
+  'инвестиция', 'благородни метали', 'ремонт', 'ремонт д',
+  // Финансови движения които НЕ са operating expense:
+  'вноска', 'депозит_получен', 'депозит_върнат', 'депозит_задържан',
+  'equity_inject', 'equity_withdraw', 'заем_sky', 'заем_антон',
+  'нап_ддс',  // данък — отделна група, не recurring opex
 ]);
 
 const RENT_INCOME_CATEGORIES = new Set([
   'наем', 'наем_фактуриран', 'rent',
+]);
+
+// Personal scope категории — никога не са business opex.
+// (defensive — Skyrent има scope='personal' и 'business', но някои стари записи нямат)
+const PERSONAL_ONLY_CATEGORIES = new Set([
+  'заплата', 'храна', 'почивка', 'обучение_деца', 'друго_лично', 'здраве',
+  'масло_мотор', 'теглене_кеш_за_гърците', 'данък_по_чл.50', 'лихва_болгар',
+  'приход_друг', 'разход_друг',
 ]);
 
 // transactions.дата е DATE формата 'YYYY-MM-DD'; for BGN→EUR преди 2026-01-01,
@@ -132,19 +144,20 @@ module.exports = function(db) {
       const properties = db.prepare('SELECT * FROM properties').all();
       const loans = db.prepare('SELECT * FROM loans').all();
 
-      // OPEX source #1: expense_invoices (manually uploaded PDF/eFaktura)
+      // OPEX source #1: expense_invoices — само BUSINESS scope (или NULL legacy)
       const expensesRows = db.prepare(`
-        SELECT property_id, amount, currency, expense_category, месец
+        SELECT property_id, amount, currency, expense_category, месец, scope
         FROM expense_invoices
         WHERE COALESCE(месец, '') >= ?
+          AND COALESCE(scope, 'business') = 'business'
       `).all(opexFromPeriod);
 
-      // OPEX source #2: transactions (bank import — категория e Кирилица)
-      // Извличаме и нормализираме в JS (CLAUDE.md: избягвай WHERE column = 'кирилица').
+      // OPEX source #2: transactions — само BUSINESS scope
       const txRows = db.prepare(`
-        SELECT property_id, сума, operation, категория, дата, месец
+        SELECT property_id, сума, operation, категория, дата, месец, scope
         FROM transactions
         WHERE operation = 'Дт' AND COALESCE(месец, '') >= ?
+          AND COALESCE(scope, 'business') = 'business'
       `).all(opexFromPeriod);
 
       const opexDirect = new Map();
@@ -158,24 +171,31 @@ module.exports = function(db) {
         }
       };
 
+      const isOpexCategory = (cat) => {
+        if (!cat) return true;  // NULL category = treated as opex (per Skyrent /summary endpoint)
+        const k = cat.trim().toLowerCase();
+        if (NON_OPEX_CATEGORIES.has(k)) return false;
+        if (PERSONAL_ONLY_CATEGORIES.has(k)) return false;
+        return true;
+      };
+
       for (const e of expensesRows) {
-        const cat = (e.expense_category || '').trim().toLowerCase();
-        if (!OPERATING_CATEGORIES.has(cat)) continue;
+        if (!isOpexCategory(e.expense_category)) continue;
         addOpex(e.property_id, toEur(e.amount, e.currency));
       }
 
       for (const t of txRows) {
-        const cat = (t['категория'] || '').trim().toLowerCase();
-        if (!OPERATING_CATEGORIES.has(cat)) continue;
+        if (!isOpexCategory(t['категория'])) continue;
         addOpex(t.property_id, toEur(Math.abs(t['сума']), txCurrency(t['дата'])));
       }
 
       // INCOME реално получен — от bank Кт + категория = наем*
-      // Използваме го като SECONDARY signal; primary е properties.наем (контрактен)
+      // Само business scope (личен наем не се брои в бизнес portfolio metrics).
       const incomeRows = db.prepare(`
-        SELECT property_id, сума, категория, дата, месец
+        SELECT property_id, сума, категория, дата, месец, scope
         FROM transactions
         WHERE operation = 'Кт' AND COALESCE(месец, '') >= ?
+          AND COALESCE(scope, 'business') = 'business'
       `).all(opexFromPeriod);
 
       const rentReceivedByProp = new Map();
