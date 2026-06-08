@@ -36,6 +36,66 @@ const STAGE_COLORS = {
 
 const BANK_COLORS = { 'Пощенска': '#22c55e', 'УниКредит': '#f59e0b', 'Прокредит': '#ef4444' }
 
+// Речник на метриките — hover за дефиниция
+const METRIC_HINTS = {
+  'Asset base':         'Сума на market_val на всички имоти. Текущата пазарна стойност на портфолиото.',
+  'Asset':              'Market value на имота (или покупна+ремонт ако market_val липсва).',
+  'Total debt':         'Сума на актуалните остатъци по всички ипотеки в EUR.',
+  'Real equity':        'Equity − Off-plan obligations. Реален капитал след бъдещи плащания.',
+  'Equity':             'Asset base − Total debt. Какво "ти остава" ако веднага продадеш всичко и платиш дълга.',
+  'Real LTV':           'Real Loan-to-Value = (debt + off-plan obligations) / asset_base. Включва бъдещи задължения.',
+  'LTV':                'Loan-to-Value = дълг / стойност на актива. Под 50% = нисък риск, 50-65% умерен, над 65% висок.',
+  'Rent годишен':       'Сума на договорените месечни наеми × 12. Теоретичен годишен приход (без opex и vacancy).',
+  'Rent contracted':    'Договорен годишен наем.',
+  'NOI':                'Net Operating Income = годишен наем − оперативни разходи. НЕ включва ипотечни вноски. Standard real-estate метрика.',
+  'NOI годишен':        'Net Operating Income = годишен наем − оперативни разходи. НЕ включва ипотечни вноски.',
+  'Cap Rate':           'Capitalization Rate = NOI / market_value × 100%. Колко % годишен доход носи имотът спрямо текущата му пазарна стойност. Стандарт за сравнение между имоти.',
+  'Cap':                'Cap Rate на market value = NOI / текуща стойност. За сравнение с други имоти на пазара.',
+  'Cap cost':           'Cap Rate на покупна цена = NOI / (покупна + ремонт). Реалната възвращаемост на парите които си вложил.',
+  'DSCR':               'Debt Service Coverage Ratio = NOI / годишни вноски. Над 1.25 = устойчиво, под 1.0 = опасност от просрочие. Банките искат >1.25 за нов кредит.',
+  'Net CF':             'Net Cash Flow = NOI − дълг service. Реалните пари в джоба след всички плащания.',
+  'Net CF годишен':     'Net Cash Flow годишен = NOI − годишни вноски по ипотека. Какво остава реално в портфейла.',
+  'Net Cash Flow':      'Net Cash Flow = NOI − ипотечни вноски. Реалните пари след всички разходи.',
+  'Cash-on-Cash':       'CoC = Net Cash Flow / equity. Възвращаемост спрямо личния капитал. Сравни с алтернативи (ETF, депозити).',
+  'CoC':                'Cash-on-Cash = Net CF / equity. Възвращаемост на твоя капитал. Под 2% = слабо, над 5% = много добро.',
+  'Top 5 share':        'Концентрация: процент от общия наем идващ от top 5 имотите. Под 40% = добре диверсифицирано.',
+  'Имоти':              'Брой имоти в портфолиото — активни / общо.',
+  'Off-plan':           'Off-plan obligations = бъдещи плащания към developers при доставка на pre-construction имоти.',
+  'Off-plan obligations': 'Бъдещи плащания към developers при доставка на pre-construction имоти (напр. Симеоново 12 — 448K EUR до 2027).',
+  'Opex':               'Operating Expenses = ток, вода, такси, поддръжка, счетоводство, ддс. БЕЗ ипотека, инвестиции, ремонт.',
+  'Opex годишен':       'Операт. разходи годишно. БЕЗ ипотечни вноски, инвестиции, мащабни ремонти.',
+  'Opex ratio':         'Opex / Rent. Типично BG residential 10-25%. Под 10% може да означава скрити разходи или tenant-pays-utilities модел.',
+  'Principal':          'Principal = частта от вноската която намалява главницата на дълга.',
+  'Principal погасен':  'Сума на главниците погасени за следващите 12 месеца. Това е "savings" не разход.',
+  'Lihva':              'Lihva = частта от вноската която е чист разход (interest expense). Не намалява дълга.',
+  'Lihva 12m':          'Сума на lihva-та платена за 12 месеца напред.',
+  'Дълг след 12м':      'Прогнозен остатък по всички ипотеки след 12 месеца плащания.',
+  '% Principal':        'Дял на principal от месечната вноска. 50%+ = здраво. Под 40% = lihva-heavy (refi candidate).',
+  'Service/год':        'Годишна вноска по кредита (principal + lihva).',
+  'Стадий':             'Lifecycle stage: active (носи наем), listing (обявен), furnishing (обзавежда се), renovating (ремонт), pre_construction (поетапно плащане), inactive.',
+  'Princ 12m':          'Principal погасен за 12 месеца. Това е "savings" — не е разход.',
+  'rent_received_12m':  'Реално получени наеми по банковата сметка за последните 12 месеца. Разлика спрямо contracted показва наеми получени в кеш или Stripe.',
+}
+
+function InfoTooltip({ text, children }) {
+  if (!text) return children
+  return (
+    <span className="inline-flex items-center gap-1 group relative">
+      {children}
+      <span className="cursor-help text-gray-400 hover:text-gray-600 text-[10px] leading-none border border-current rounded-full w-3.5 h-3.5 inline-flex items-center justify-center">?</span>
+      <span className="invisible opacity-0 group-hover:visible group-hover:opacity-100 absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-2 bg-gray-900 text-white text-xs font-normal normal-case tracking-normal rounded-lg shadow-xl w-72 z-50 pointer-events-none transition-opacity duration-150">
+        {text}
+        <span className="absolute top-full left-1/2 -translate-x-1/2 -mt-px border-4 border-transparent border-t-gray-900"></span>
+      </span>
+    </span>
+  )
+}
+
+function HintLabel({ children }) {
+  const text = typeof children === 'string' ? METRIC_HINTS[children] : null
+  return <InfoTooltip text={text}>{children}</InfoTooltip>
+}
+
 function KpiCard({ label, value, sub, color = 'gray', icon }) {
   const map = {
     blue:   { border: 'border-[#b2dce8]', bg: 'bg-[#e3f4f9]', text: 'text-[#0e3d52]' },
@@ -48,10 +108,12 @@ function KpiCard({ label, value, sub, color = 'gray', icon }) {
   }
   const c = map[color] || map.gray
   return (
-    <div className={`border rounded-xl p-4 ${c.border} ${c.bg}`}>
+    <div className={`border rounded-xl p-4 ${c.border} ${c.bg} overflow-visible`}>
       <div className="flex items-start justify-between">
-        <div>
-          <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider">{label}</div>
+        <div className="min-w-0">
+          <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
+            <HintLabel>{label}</HintLabel>
+          </div>
           <div className={`text-2xl font-bold mt-1 ${c.text}`}>{value}</div>
           {sub && <div className="text-xs text-gray-500 mt-1">{sub}</div>}
         </div>
@@ -69,7 +131,7 @@ function SortHeader({ field, label, sortField, sortDir, onSort, align = 'left' }
       onClick={() => onSort(field)}
       className={`px-3 py-2 text-${align} cursor-pointer hover:bg-gray-100 select-none text-xs font-semibold uppercase tracking-wider text-gray-600`}
     >
-      {label} {arrow}
+      <HintLabel>{label}</HintLabel> {arrow}
     </th>
   )
 }
@@ -535,6 +597,12 @@ export default function InvestorView({ API }) {
         <div className="bg-white border rounded-xl overflow-hidden">
           <div className="bg-green-50 px-4 py-2 text-sm font-semibold text-green-800 border-b border-green-200">🏆 Top 5 by Cap Rate</div>
           <table className="w-full text-sm">
+            <thead><tr className="bg-gray-50 text-xs text-gray-500">
+              <th className="px-3 py-1 text-left">Имот</th>
+              <th className="px-3 py-1 text-right">Наем</th>
+              <th className="px-3 py-1 text-right"><HintLabel>Cap</HintLabel></th>
+              <th className="px-3 py-1 text-right"><HintLabel>Cap cost</HintLabel></th>
+            </tr></thead>
             <tbody className="divide-y divide-gray-100">
               {top5.map(x => (
                 <tr key={x.id} className="hover:bg-gray-50">
@@ -544,6 +612,7 @@ export default function InvestorView({ API }) {
                   </td>
                   <td className="px-3 py-2 text-right text-gray-700">{fmtEur(x.rent_annual)}/год</td>
                   <td className="px-3 py-2 text-right font-bold text-green-700">{fmtPct(x.cap_rate, 2)}</td>
+                  <td className="px-3 py-2 text-right font-bold text-emerald-700">{fmtPct(x.cap_rate_cost, 2)}</td>
                 </tr>
               ))}
             </tbody>
@@ -552,6 +621,12 @@ export default function InvestorView({ API }) {
         <div className="bg-white border rounded-xl overflow-hidden">
           <div className="bg-red-50 px-4 py-2 text-sm font-semibold text-red-800 border-b border-red-200">📉 Bottom 5 by Cap Rate (active с наем)</div>
           <table className="w-full text-sm">
+            <thead><tr className="bg-gray-50 text-xs text-gray-500">
+              <th className="px-3 py-1 text-left">Имот</th>
+              <th className="px-3 py-1 text-right">Наем</th>
+              <th className="px-3 py-1 text-right"><HintLabel>Cap</HintLabel></th>
+              <th className="px-3 py-1 text-right"><HintLabel>Cap cost</HintLabel></th>
+            </tr></thead>
             <tbody className="divide-y divide-gray-100">
               {bottom5.map(x => (
                 <tr key={x.id} className="hover:bg-gray-50">
@@ -561,6 +636,7 @@ export default function InvestorView({ API }) {
                   </td>
                   <td className="px-3 py-2 text-right text-gray-700">{fmtEur(x.rent_annual)}/год</td>
                   <td className="px-3 py-2 text-right font-bold text-red-700">{fmtPct(x.cap_rate, 2)}</td>
+                  <td className="px-3 py-2 text-right font-bold text-emerald-700">{fmtPct(x.cap_rate_cost, 2)}</td>
                 </tr>
               ))}
             </tbody>
@@ -586,6 +662,7 @@ export default function InvestorView({ API }) {
                 <SortHeader field="allocated_debt" label="Дълг" align="right" {...{sortField,sortDir,onSort:handleSort}} />
                 <SortHeader field="ltv" label="LTV" align="right" {...{sortField,sortDir,onSort:handleSort}} />
                 <SortHeader field="cap_rate" label="Cap" align="right" {...{sortField,sortDir,onSort:handleSort}} />
+                <SortHeader field="cap_rate_cost" label="Cap cost" align="right" {...{sortField,sortDir,onSort:handleSort}} />
                 <SortHeader field="net_cash_flow" label="Net CF" align="right" {...{sortField,sortDir,onSort:handleSort}} />
                 <SortHeader field="principal_paydown_12m" label="Princ 12m" align="right" {...{sortField,sortDir,onSort:handleSort}} />
               </tr>
@@ -617,6 +694,7 @@ export default function InvestorView({ API }) {
                     <td className="px-3 py-2 text-right text-gray-700">{fmtEur(x.allocated_debt)}</td>
                     <td className={`px-3 py-2 text-right ${ltvColor}`}>{fmtPct(x.ltv)}</td>
                     <td className="px-3 py-2 text-right">{fmtPct(x.cap_rate, 2)}</td>
+                    <td className="px-3 py-2 text-right text-emerald-700 font-medium">{fmtPct(x.cap_rate_cost, 2)}</td>
                     <td className={`px-3 py-2 text-right ${cfColor}`}>{fmtEur(x.net_cash_flow)}</td>
                     <td className="px-3 py-2 text-right text-green-700">{fmtEur(x.principal_paydown_12m)}</td>
                   </tr>
