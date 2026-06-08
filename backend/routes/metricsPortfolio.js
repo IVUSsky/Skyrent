@@ -216,6 +216,7 @@ module.exports = function(db) {
         const assetVal = (p.market_val != null && p.market_val > 0)
           ? p.market_val
           : (p['покупна'] || 0) + (p['ремонт'] || 0);
+        const costBasis = (p['покупна'] || 0) + (p['ремонт'] || 0);
         const stage = p.lifecycle_stage || (p['статус'] === '✅' ? 'active' : 'inactive');
         return {
           id: p.id,
@@ -230,6 +231,7 @@ module.exports = function(db) {
           rent_annual: rentAnnual,
           rent_received_12m: Math.round((rentReceivedByProp.get(p.id) || 0) * 100) / 100,
           asset_val: assetVal,
+          cost_basis: costBasis,  // покупна + ремонт (cost basis за Cap Rate анализ)
           purchase_paid_amount: p.purchase_paid_amount != null
             ? Math.round(p.purchase_paid_amount * 100) / 100
             : null,
@@ -328,6 +330,7 @@ module.exports = function(db) {
         p.interest_12m = Math.round((interestByProp.get(p.id) || 0) * 100) / 100;
         p.ltv = p.asset_val > 0 ? Math.round((p.allocated_debt / p.asset_val) * 10000) / 10000 : null;
         p.cap_rate = p.asset_val > 0 ? Math.round((p.noi_annual / p.asset_val) * 10000) / 10000 : null;
+        p.cap_rate_cost = p.cost_basis > 0 ? Math.round((p.noi_annual / p.cost_basis) * 10000) / 10000 : null;
         p.expense_ratio = p.opex_ratio;
         p.net_cash_flow = Math.round((p.noi_annual - p.allocated_debt_service) * 100) / 100;
         const equityInvested = p.asset_val - p.allocated_debt;
