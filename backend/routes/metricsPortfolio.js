@@ -39,6 +39,49 @@ function calcCurrentBalance(остатък, вноска, лихва, balance_da
   return Math.max(0, Math.round((остатък * factor - вноска * (factor - 1) / r) * 100) / 100);
 }
 
+/**
+ * Forward amortization schedule.
+ * Връща { months: [{m, principal, interest, balance_end}], totals: { principal, interest } }.
+ *
+ * principal = monthly_payment - interest_on_balance
+ * interest = balance_at_start × monthly_rate
+ *
+ * Ако balance падне под нула в рамките на M месеца → последното плащане се коригира
+ * (не симулираме предвременно прекратяване — само спираме amortization-а).
+ */
+function amortizationSchedule(balance, monthlyPayment, annualRatePct, months) {
+  const out = { months: [], totals: { principal: 0, interest: 0 } };
+  if (!balance || balance <= 0 || !monthlyPayment || monthlyPayment <= 0 || months <= 0) {
+    return out;
+  }
+  const r = (annualRatePct || 0) / 100 / 12;
+  let b = balance;
+  for (let m = 1; m <= months; m++) {
+    if (b <= 0) break;
+    const interest = b * r;
+    let principal = monthlyPayment - interest;
+    if (principal <= 0) {
+      // Текущата вноска не покрива и lihvата — теоретично невъзможно при стандартен заем,
+      // но при rate spike може; третираме като нулев principal.
+      principal = 0;
+    }
+    if (principal > b) principal = b;
+    const balanceEnd = Math.max(0, b - principal);
+    out.months.push({
+      m,
+      principal: Math.round(principal * 100) / 100,
+      interest: Math.round(interest * 100) / 100,
+      balance_end: Math.round(balanceEnd * 100) / 100,
+    });
+    out.totals.principal += principal;
+    out.totals.interest += interest;
+    b = balanceEnd;
+  }
+  out.totals.principal = Math.round(out.totals.principal * 100) / 100;
+  out.totals.interest = Math.round(out.totals.interest * 100) / 100;
+  return out;
+}
+
 function parsePropertyIds(text) {
   if (!text) return [];
   const s = String(text).trim();
@@ -153,6 +196,7 @@ module.exports = function(db) {
         const assetVal = (p.market_val != null && p.market_val > 0)
           ? p.market_val
           : (p['покупна'] || 0) + (p['ремонт'] || 0);
+        const stage = p.lifecycle_stage || (p['статус'] === '✅' ? 'active' : 'inactive');
         return {
           id: p.id,
           адрес: p['адрес'],
@@ -160,10 +204,19 @@ module.exports = function(db) {
           тип: p['тип'],
           наемател: p['наемател'],
           active: p['статус'] === '✅',
+          lifecycle_stage: stage,
+          lifecycle_eta_date: p.lifecycle_eta_date || null,
           rent_monthly: rentMonthly,
           rent_annual: rentAnnual,
           rent_received_12m: Math.round((rentReceivedByProp.get(p.id) || 0) * 100) / 100,
           asset_val: assetVal,
+          purchase_paid_amount: p.purchase_paid_amount != null
+            ? Math.round(p.purchase_paid_amount * 100) / 100
+            : null,
+          purchase_balance_due: p.purchase_balance_due != null
+            ? Math.round(p.purchase_balance_due * 100) / 100
+            : null,
+          purchase_balance_due_date: p.purchase_balance_due_date || null,
           opex_annual_direct: Math.round((opexDirect.get(p.id) || 0) * 100) / 100,
         };
       });
@@ -185,6 +238,15 @@ module.exports = function(db) {
       const debtServiceByProp = new Map();
       const propIdSet = new Set(properties.map(p => p.id));
 
+      const propAssetById = new Map(propRows.map(p => [p.id, p.asset_val]));
+
+      // Per-loan amortization (12m) + aggregate.
+      const loanSchedules = [];
+      let portfolioPrincipal12m = 0;
+      let portfolioInterest12m = 0;
+      const principalByProp = new Map();
+      const interestByProp = new Map();
+
       for (const l of loans) {
         const остатъкCalc = calcCurrentBalance(l['остатък'], l['вноска'], l['лихва'], l['balance_date']);
         const monthlyService = l['вноска'] || 0;
@@ -192,22 +254,57 @@ module.exports = function(db) {
         const serviceEur = toEur(monthlyService, l.currency) * 12;
 
         const ids = parsePropertyIds(l['имоти']).filter(id => propIdSet.has(id));
+
+        // 12m amortization за този loan в native currency, после конвертирано в EUR
+        const sched = amortizationSchedule(остатъкCalc, monthlyService, l['лихва'], 12);
+        const principalNative = sched.totals.principal;
+        const interestNative = sched.totals.interest;
+        const principalEur = toEur(principalNative, l.currency);
+        const interestEur = toEur(interestNative, l.currency);
+        portfolioPrincipal12m += principalEur;
+        portfolioInterest12m += interestEur;
+
+        loanSchedules.push({
+          id: l.id,
+          банка: l['банка'],
+          договор: l['договор'],
+          currency: l.currency || 'EUR',
+          balance_now: Math.round(остатъкCalc * 100) / 100,
+          balance_now_eur: Math.round(debtEur * 100) / 100,
+          monthly_payment: monthlyService,
+          principal_12m: principalNative,
+          interest_12m: interestNative,
+          principal_12m_eur: Math.round(principalEur * 100) / 100,
+          interest_12m_eur: Math.round(interestEur * 100) / 100,
+          balance_after_12m_eur: Math.round((debtEur - principalEur) * 100) / 100,
+        });
+
         if (ids.length === 0) {
           unallocatedDebt += debtEur;
           unallocatedDebtService += serviceEur;
           continue;
         }
-        const perProp = debtEur / ids.length;
-        const perPropService = serviceEur / ids.length;
-        for (const id of ids) {
-          debtByProp.set(id, (debtByProp.get(id) || 0) + perProp);
-          debtServiceByProp.set(id, (debtServiceByProp.get(id) || 0) + perPropService);
-        }
+
+        // Asset-weighted split: големите imota поемат по-голям дял от collateral debt.
+        // Ако всички asset_val са 0 → fallback equal split.
+        const weights = ids.map(id => propAssetById.get(id) || 0);
+        const wTotal = weights.reduce((s, w) => s + w, 0);
+        const useWeighted = wTotal > 0;
+
+        ids.forEach((id, i) => {
+          const share = useWeighted ? weights[i] / wTotal : 1 / ids.length;
+          debtByProp.set(id, (debtByProp.get(id) || 0) + debtEur * share);
+          debtServiceByProp.set(id, (debtServiceByProp.get(id) || 0) + serviceEur * share);
+          principalByProp.set(id, (principalByProp.get(id) || 0) + principalEur * share);
+          interestByProp.set(id, (interestByProp.get(id) || 0) + interestEur * share);
+        });
       }
 
       for (const p of propRows) {
         p.allocated_debt = Math.round((debtByProp.get(p.id) || 0) * 100) / 100;
         p.allocated_debt_service = Math.round((debtServiceByProp.get(p.id) || 0) * 100) / 100;
+        p.principal_paydown_12m = Math.round((principalByProp.get(p.id) || 0) * 100) / 100;
+        p.interest_12m = Math.round((interestByProp.get(p.id) || 0) * 100) / 100;
         p.ltv = p.asset_val > 0 ? Math.round((p.allocated_debt / p.asset_val) * 10000) / 10000 : null;
         p.cap_rate = p.asset_val > 0 ? Math.round((p.noi_annual / p.asset_val) * 10000) / 10000 : null;
         p.expense_ratio = p.opex_ratio;
@@ -249,6 +346,30 @@ module.exports = function(db) {
       const portfolioNoi = portfolioRentAnnual - portfolioOpexAnnual;
       const portfolioEquity = portfolioAssetBase - portfolioTotalDebt;
 
+      // Lifecycle groupings + pre-construction финансово отражение
+      const propsByStage = {};
+      for (const p of propRows) {
+        const k = p.lifecycle_stage || 'inactive';
+        propsByStage[k] = (propsByStage[k] || 0) + 1;
+      }
+
+      const offPlanObligations = propRows.reduce(
+        (s, p) => s + (p.purchase_balance_due || 0), 0
+      );
+      const realEquity = portfolioEquity - offPlanObligations;
+      const realLtv = portfolioAssetBase > 0
+        ? (portfolioTotalDebt + offPlanObligations) / portfolioAssetBase
+        : null;
+
+      // Projected rent ако всичко с rent_monthly>0 в non-inactive stage стане active.
+      // Не екстраполираме за имоти БЕЗ договорен наем (pre_construction Симеоново имат rent=0)
+      // — те ще се добавят при активиране през UI.
+      const projectableStages = new Set(['active', 'listing', 'furnishing', 'renovating']);
+      const projectedRentMonthly = propRows
+        .filter(p => projectableStages.has(p.lifecycle_stage) && p.rent_monthly > 0)
+        .reduce((s, p) => s + p.rent_monthly, 0);
+      const projectedRentAnnual = projectedRentMonthly * 12;
+
       const totalRentForShares = activeProps.reduce((s, p) => s + p.rent_annual, 0);
       const shares = activeProps
         .map(p => totalRentForShares > 0 ? p.rent_annual / totalRentForShares : 0)
@@ -289,6 +410,22 @@ module.exports = function(db) {
         cash_on_cash: portfolioEquity > 0
           ? Math.round(((portfolioNoi - portfolioDebtServiceTotal) / portfolioEquity) * 10000) / 10000
           : null,
+        // Pre-construction финансово отражение — отделя бъдещи обвързаности от текущ equity
+        off_plan_obligations: Math.round(offPlanObligations * 100) / 100,
+        real_equity: Math.round(realEquity * 100) / 100,
+        real_ltv: realLtv != null ? Math.round(realLtv * 10000) / 10000 : null,
+        // Forward-looking: rent при пълна заетост на не-inactive имоти
+        projected_rent_monthly: Math.round(projectedRentMonthly * 100) / 100,
+        projected_rent_annual: Math.round(projectedRentAnnual * 100) / 100,
+        // Lifecycle breakdown
+        properties_by_stage: propsByStage,
+        // Amortization (12m forward)
+        principal_paydown_12m: Math.round(portfolioPrincipal12m * 100) / 100,
+        interest_12m: Math.round(portfolioInterest12m * 100) / 100,
+        debt_after_12m: Math.round((portfolioTotalDebt - portfolioPrincipal12m) * 100) / 100,
+        principal_share_12m: portfolioDebtServiceTotal > 0
+          ? Math.round((portfolioPrincipal12m / portfolioDebtServiceTotal) * 10000) / 10000
+          : null,
         concentration: {
           top5_rent_share: Math.round(top5Share * 10000) / 10000,
           top1_rent_share: Math.round(top1Share * 10000) / 10000,
@@ -316,6 +453,7 @@ module.exports = function(db) {
         portfolio,
         by_property: propRows,
         distributions,
+        loan_schedules: loanSchedules,
       });
     } catch (err) {
       console.error('[metrics/portfolio] error', err);
