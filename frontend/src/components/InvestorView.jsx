@@ -74,6 +74,241 @@ function SortHeader({ field, label, sortField, sortDir, onSort, align = 'left' }
   )
 }
 
+function LeverageAnalysis({ byProperty, loanSchedules }) {
+  // Без дълг
+  const unleveraged = byProperty.filter(p => p.allocated_debt === 0)
+  const unlevAsset = unleveraged.reduce((s, p) => s + (p.asset_val || 0), 0)
+  const unlevRent = unleveraged.reduce((s, p) => s + (p.rent_annual || 0), 0)
+  const unlevOpex = unleveraged.reduce((s, p) => s + (p.opex_annual_total || 0), 0)
+  const unlevNoi = unleveraged.reduce((s, p) => s + (p.noi_annual || 0), 0)
+  const unlevNetCf = unleveraged.reduce((s, p) => s + (p.net_cash_flow || 0), 0)
+  const unlevActive = unleveraged.filter(p => p.active).length
+
+  // С дълг
+  const leveraged = byProperty.filter(p => p.allocated_debt > 0)
+  const levAsset = leveraged.reduce((s, p) => s + (p.asset_val || 0), 0)
+  const levDebt = leveraged.reduce((s, p) => s + (p.allocated_debt || 0), 0)
+  const levDebtSvc = leveraged.reduce((s, p) => s + (p.allocated_debt_service || 0), 0)
+  const levRent = leveraged.reduce((s, p) => s + (p.rent_annual || 0), 0)
+  const levOpex = leveraged.reduce((s, p) => s + (p.opex_annual_total || 0), 0)
+  const levNoi = leveraged.reduce((s, p) => s + (p.noi_annual || 0), 0)
+  const levNetCf = leveraged.reduce((s, p) => s + (p.net_cash_flow || 0), 0)
+
+  const totalNetCf = unlevNetCf + levNetCf
+
+  // Per-loan group breakdown
+  const loanGroups = loanSchedules.map(s => {
+    const ids = s.property_ids || []
+    const props = byProperty.filter(p => ids.includes(p.id))
+    const asset = props.reduce((a, p) => a + (p.asset_val || 0), 0)
+    const rent = props.reduce((a, p) => a + (p.rent_annual || 0), 0)
+    const opex = props.reduce((a, p) => a + (p.opex_annual_total || 0), 0)
+    const noi = rent - opex
+    const debtSvc = s.principal_12m_eur + s.interest_12m_eur
+    const netCf = noi - debtSvc
+    return {
+      name: `${s.банка} ${s.договор}`,
+      shortName: (s.договор || '').slice(0, 18),
+      bank: s.банка,
+      properties: props.length,
+      asset,
+      debt: s.balance_now_eur,
+      debt_svc: Math.round(debtSvc),
+      rent,
+      noi: Math.round(noi),
+      net_cf: Math.round(netCf),
+    }
+  }).sort((a, b) => b.net_cf - a.net_cf)
+
+  // Cash flow attribution pie data
+  const cfPieData = [
+    { name: 'Без дълг', value: Math.max(0, Math.round(unlevNetCf)), color: '#22c55e' },
+    { name: 'С дълг (positive)', value: Math.max(0, Math.round(levNetCf)), color: '#f59e0b' },
+  ].filter(d => d.value > 0)
+
+  // Bar chart per loan group
+  const barData = [
+    { name: 'Без дълг', net_cf: Math.round(unlevNetCf), color: '#22c55e' },
+    ...loanGroups.map(g => ({
+      name: g.shortName,
+      net_cf: g.net_cf,
+      color: g.net_cf >= 0 ? (g.bank === 'Пощенска' ? '#0e7490' : g.bank === 'УниКредит' ? '#7c3aed' : '#f97316') : '#dc2626'
+    }))
+  ]
+
+  // Debt vs CF metrics
+  const yearsToRepay = totalNetCf > 0 ? levDebt / totalNetCf : Infinity
+  const debtSvcVsCf = totalNetCf > 0 ? levDebtSvc / totalNetCf : Infinity
+
+  return (
+    <section>
+      <h3 className="text-sm font-semibold text-gray-700 mb-3">⚖️ Левередж анализ — кеш флоу по групи</h3>
+
+      {/* Group summary cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+        <div className="border-2 border-green-300 bg-green-50 rounded-xl p-5">
+          <div className="flex items-center justify-between mb-3">
+            <h4 className="text-base font-bold text-green-800">🆓 БЕЗ ДЪЛГ</h4>
+            <span className="text-2xl font-bold text-green-700">{unleveraged.length}</span>
+          </div>
+          <div className="grid grid-cols-2 gap-2 text-sm">
+            <div className="text-gray-600">Активни:</div><div className="text-right font-semibold">{unlevActive}</div>
+            <div className="text-gray-600">Asset:</div><div className="text-right font-semibold">{fmtEur(unlevAsset)}</div>
+            <div className="text-gray-600">Наем годишен:</div><div className="text-right">{fmtEur(unlevRent)}</div>
+            <div className="text-gray-600">Opex годишен:</div><div className="text-right text-orange-700">−{fmtEur(unlevOpex)}</div>
+            <div className="text-gray-600 font-medium">NOI годишен:</div><div className="text-right font-medium">{fmtEur(unlevNoi)}</div>
+            <div className="text-gray-700 font-bold border-t pt-2">Net CF годишен:</div>
+            <div className="text-right text-green-700 font-bold text-lg border-t pt-2">{fmtEur(unlevNetCf)}</div>
+            <div className="text-gray-600">Net CF месечен:</div><div className="text-right text-green-700 font-semibold">{fmtEur(unlevNetCf / 12)}</div>
+            <div className="text-gray-600">CF / Asset:</div><div className="text-right">{fmtPct(unlevNetCf / unlevAsset, 2)}</div>
+          </div>
+        </div>
+
+        <div className="border-2 border-amber-300 bg-amber-50 rounded-xl p-5">
+          <div className="flex items-center justify-between mb-3">
+            <h4 className="text-base font-bold text-amber-800">🏦 С ДЪЛГ</h4>
+            <span className="text-2xl font-bold text-amber-700">{leveraged.length}</span>
+          </div>
+          <div className="grid grid-cols-2 gap-2 text-sm">
+            <div className="text-gray-600">Asset:</div><div className="text-right font-semibold">{fmtEur(levAsset)}</div>
+            <div className="text-gray-600">Общ дълг:</div><div className="text-right text-red-700 font-semibold">{fmtEur(levDebt)}</div>
+            <div className="text-gray-600">LTV:</div><div className="text-right">{fmtPct(levDebt / levAsset)}</div>
+            <div className="text-gray-600">Наем годишен:</div><div className="text-right">{fmtEur(levRent)}</div>
+            <div className="text-gray-600">Opex годишен:</div><div className="text-right text-orange-700">−{fmtEur(levOpex)}</div>
+            <div className="text-gray-600">Вноски годишно:</div><div className="text-right text-red-700">−{fmtEur(levDebtSvc)}</div>
+            <div className="text-gray-600 font-medium">NOI годишен:</div><div className="text-right font-medium">{fmtEur(levNoi)}</div>
+            <div className="text-gray-700 font-bold border-t pt-2">Net CF годишен:</div>
+            <div className={`text-right font-bold text-lg border-t pt-2 ${levNetCf >= 0 ? 'text-amber-700' : 'text-red-700'}`}>{fmtEur(levNetCf)}</div>
+            <div className="text-gray-600">Net CF месечен:</div><div className={`text-right font-semibold ${levNetCf >= 0 ? 'text-amber-700' : 'text-red-700'}`}>{fmtEur(levNetCf / 12)}</div>
+            <div className="text-gray-600">CF / Asset:</div><div className="text-right">{fmtPct(levNetCf / levAsset, 2)}</div>
+          </div>
+        </div>
+      </div>
+
+      {/* Combined totals + ratios */}
+      <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 mb-4">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+          <div>
+            <div className="text-xs text-gray-500 uppercase">Общ Net CF годишен</div>
+            <div className="text-xl font-bold text-slate-800">{fmtEur(totalNetCf)}</div>
+            <div className="text-xs text-gray-500">{fmtEur(totalNetCf / 12)}/мес</div>
+          </div>
+          <div>
+            <div className="text-xs text-gray-500 uppercase">Дълг ÷ годишен CF</div>
+            <div className="text-xl font-bold text-slate-800">{isFinite(yearsToRepay) ? `${yearsToRepay.toFixed(1)}x` : '∞'}</div>
+            <div className="text-xs text-gray-500">години за пълно погасяване от CF</div>
+          </div>
+          <div>
+            <div className="text-xs text-gray-500 uppercase">Service ÷ CF</div>
+            <div className="text-xl font-bold text-slate-800">{isFinite(debtSvcVsCf) ? `${(debtSvcVsCf * 100).toFixed(0)}%` : '∞'}</div>
+            <div className="text-xs text-gray-500">от приходите отива в банка</div>
+          </div>
+          <div>
+            <div className="text-xs text-gray-500 uppercase">Unleveraged CF share</div>
+            <div className="text-xl font-bold text-green-700">{fmtPct(unlevNetCf / totalNetCf)}</div>
+            <div className="text-xs text-gray-500">от cash flow-а идва без leverage</div>
+          </div>
+        </div>
+      </div>
+
+      {/* Charts */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+        {/* Pie chart: cash flow attribution */}
+        <div className="bg-white border rounded-xl p-4">
+          <div className="text-sm font-semibold text-gray-700 mb-2">💰 Cash flow attribution (positive groups)</div>
+          {cfPieData.length > 0 ? (
+            <ResponsiveContainer width="100%" height={240}>
+              <PieChart>
+                <Pie data={cfPieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}>
+                  {cfPieData.map((entry, i) => <Cell key={i} fill={entry.color} />)}
+                </Pie>
+                <Tooltip formatter={(v) => fmtEur(v)} />
+              </PieChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="text-center text-gray-400 py-12">Няма positive CF</div>
+          )}
+        </div>
+
+        {/* Bar chart: per loan group */}
+        <div className="bg-white border rounded-xl p-4">
+          <div className="text-sm font-semibold text-gray-700 mb-2">📊 Net CF по групи (по кредит)</div>
+          <ResponsiveContainer width="100%" height={240}>
+            <BarChart data={barData} margin={{ top: 10, right: 10, left: 0, bottom: 50 }}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
+              <XAxis dataKey="name" angle={-35} textAnchor="end" interval={0} fontSize={11} />
+              <YAxis />
+              <Tooltip formatter={(v) => fmtEur(v)} />
+              <Bar dataKey="net_cf" name="Net CF годишен">
+                {barData.map((entry, i) => <Cell key={i} fill={entry.color} />)}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+
+      {/* Per-loan-group detail table */}
+      <div className="bg-white border rounded-xl overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="bg-gray-50">
+            <tr>
+              <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wider text-gray-600">Кредит / група</th>
+              <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wider text-gray-600">Имоти</th>
+              <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wider text-gray-600">Asset</th>
+              <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wider text-gray-600">Дълг</th>
+              <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wider text-gray-600">Service/год</th>
+              <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wider text-gray-600">Наем/год</th>
+              <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wider text-gray-600">NOI/год</th>
+              <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wider text-gray-600">Net CF/год</th>
+              <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wider text-gray-600">Net CF/мес</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            <tr className="bg-green-50 hover:bg-green-100">
+              <td className="px-3 py-2 font-semibold text-green-800">🆓 Без дълг</td>
+              <td className="px-3 py-2 text-right">{unleveraged.length}</td>
+              <td className="px-3 py-2 text-right">{fmtEur(unlevAsset)}</td>
+              <td className="px-3 py-2 text-right text-gray-400">—</td>
+              <td className="px-3 py-2 text-right text-gray-400">—</td>
+              <td className="px-3 py-2 text-right">{fmtEur(unlevRent)}</td>
+              <td className="px-3 py-2 text-right">{fmtEur(unlevNoi)}</td>
+              <td className="px-3 py-2 text-right text-green-700 font-bold">{fmtEur(unlevNetCf)}</td>
+              <td className="px-3 py-2 text-right text-green-700 font-semibold">{fmtEur(unlevNetCf / 12)}</td>
+            </tr>
+            {loanGroups.map(g => (
+              <tr key={g.name} className="hover:bg-gray-50">
+                <td className="px-3 py-2">
+                  <div className="font-medium text-gray-900">{g.bank}</div>
+                  <div className="text-xs text-gray-500">{g.shortName}</div>
+                </td>
+                <td className="px-3 py-2 text-right">{g.properties}</td>
+                <td className="px-3 py-2 text-right">{fmtEur(g.asset)}</td>
+                <td className="px-3 py-2 text-right text-red-700">{fmtEur(g.debt)}</td>
+                <td className="px-3 py-2 text-right text-orange-700">{fmtEur(g.debt_svc)}</td>
+                <td className="px-3 py-2 text-right">{fmtEur(g.rent)}</td>
+                <td className="px-3 py-2 text-right">{fmtEur(g.noi)}</td>
+                <td className={`px-3 py-2 text-right font-bold ${g.net_cf >= 0 ? 'text-amber-700' : 'text-red-700'}`}>{fmtEur(g.net_cf)}</td>
+                <td className={`px-3 py-2 text-right font-semibold ${g.net_cf >= 0 ? 'text-amber-700' : 'text-red-700'}`}>{fmtEur(g.net_cf / 12)}</td>
+              </tr>
+            ))}
+            <tr className="bg-slate-100 font-bold">
+              <td className="px-3 py-2 text-slate-900">📊 ОБЩО</td>
+              <td className="px-3 py-2 text-right">{byProperty.length}</td>
+              <td className="px-3 py-2 text-right">{fmtEur(unlevAsset + levAsset)}</td>
+              <td className="px-3 py-2 text-right text-red-700">{fmtEur(levDebt)}</td>
+              <td className="px-3 py-2 text-right text-orange-700">{fmtEur(levDebtSvc)}</td>
+              <td className="px-3 py-2 text-right">{fmtEur(unlevRent + levRent)}</td>
+              <td className="px-3 py-2 text-right">{fmtEur(unlevNoi + levNoi)}</td>
+              <td className={`px-3 py-2 text-right ${totalNetCf >= 0 ? 'text-green-700' : 'text-red-700'}`}>{fmtEur(totalNetCf)}</td>
+              <td className={`px-3 py-2 text-right ${totalNetCf >= 0 ? 'text-green-700' : 'text-red-700'}`}>{fmtEur(totalNetCf / 12)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  )
+}
+
 export default function InvestorView({ API }) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -223,6 +458,9 @@ export default function InvestorView({ API }) {
           <KpiCard label="Имоти" value={`${p.properties_active}/${p.properties_total}`} sub="активни/общо" icon="🏘️" color="gray" />
         </div>
       </section>
+
+      {/* Leverage analysis */}
+      <LeverageAnalysis byProperty={data.by_property} loanSchedules={data.loan_schedules || []} />
 
       {/* 12m amortization */}
       <section>
