@@ -297,6 +297,7 @@ module.exports = function(db) {
           principal_12m_eur: Math.round(principalEur * 100) / 100,
           interest_12m_eur: Math.round(interestEur * 100) / 100,
           balance_after_12m_eur: Math.round((debtEur - principalEur) * 100) / 100,
+          property_ids: ids,  // имотите които покрива този кредит
         });
 
         if (ids.length === 0) {
