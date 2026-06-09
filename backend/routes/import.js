@@ -1075,5 +1075,32 @@ module.exports = function(db) {
     }
   });
 
+  // DELETE /transactions/:id — изтрий конкретна транзакция с cascade на свързани records
+  router.delete('/transactions/:id', (req, res) => {
+    try {
+      const id = req.params.id;
+      const tx = db.prepare('SELECT id FROM transactions WHERE id=?').get(id);
+      if (!tx) return res.status(404).json({ error: 'Not found' });
+
+      const doIt = db.transaction(() => {
+        // Cascade: махни референции в personal_income
+        const piRes = db.prepare('DELETE FROM personal_income WHERE bank_tx_id=?').run(id);
+        // Cascade: махни auto-created expense_invoices
+        const eiRes = db.prepare('DELETE FROM expense_invoices WHERE bank_tx_id=?').run(id);
+        // Изтрий самата транзакция
+        const txRes = db.prepare('DELETE FROM transactions WHERE id=?').run(id);
+        return {
+          tx_deleted: txRes.changes,
+          personal_income_deleted: piRes.changes,
+          expense_invoices_deleted: eiRes.changes,
+        };
+      });
+      const result = doIt();
+      res.json({ ok: true, ...result });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   return router;
 };
