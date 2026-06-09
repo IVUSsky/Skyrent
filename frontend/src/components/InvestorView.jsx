@@ -84,7 +84,7 @@ const METRIC_HINTS = {
  * Auto-flip: ako няма място отдолу → показва се отгоре.
  */
 function InfoTooltip({ text, children }) {
-  if (!text) return children
+  // ВАЖНО: hooks ВИНАГИ преди условен return (React rules of hooks)
   const [open, setOpen] = useState(false)
   const [coords, setCoords] = useState({ top: 0, left: 0, placement: 'bottom' })
   const ref = useRef(null)
@@ -119,6 +119,9 @@ function InfoTooltip({ text, children }) {
       window.removeEventListener('resize', handler)
     }
   }, [open])
+
+  // Conditional return СЛЕД всички hooks — иначе React crash при render
+  if (!text) return children
 
   return (
     <>
