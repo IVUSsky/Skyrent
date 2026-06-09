@@ -58,6 +58,7 @@ const METRIC_HINTS = {
   'Net Cash Flow':      'Net Cash Flow = NOI − ипотечни вноски. Реалните пари след всички разходи.',
   'Cash-on-Cash':       'CoC = Net Cash Flow / cash invested (cost_basis − дълг). Възвращаемост на парите които си вложил реално. Стандартна real-estate метрика.',
   'CoC':                'Cash-on-Cash = Net CF / (покупна+ремонт − дълг). Реална възвращаемост на вложения капитал. Под 2% слабо, над 5% много добро.',
+  'Levered Yield':      'Operational възвращаемост = (NOI − lihva only) / cash invested. БЕЗ principal payment. Показва как имотът би се представил ако кредитът беше interest-only. По-висока от CoC защото principal не намалява NOI.',
   'Top 5 share':        'Концентрация: процент от общия наем идващ от top 5 имотите. Под 40% = добре диверсифицирано.',
   'Имоти':              'Брой имоти в портфолиото — активни / общо.',
   'Off-plan':           'Off-plan obligations = бъдещи плащания към developers при доставка на pre-construction имоти.',
@@ -244,8 +245,15 @@ function PropertyDetailRow({ x, loan, portfolio }) {
               <div>
                 <div className="flex justify-between"><span className="text-gray-600 font-semibold"><HintLabel>Cash-on-Cash</HintLabel>:</span><span className="font-bold text-purple-700 text-base">{fmtPct(x.cash_on_cash, 2)}</span></div>
                 <div className="text-xs text-gray-500 pl-2">= {fmtEur(netCfAnnual)} / {fmtEur(equityCost > 0 ? equityCost : 0)}</div>
-                <div className="text-xs text-purple-600 italic pl-2 mt-1">възвращаемост на парите които си вложил</div>
+                <div className="text-xs text-purple-600 italic pl-2 mt-1">възвращаемост в джоба (вкл. principal)</div>
               </div>
+              {x.levered_yield != null && (
+                <div>
+                  <div className="flex justify-between"><span className="text-gray-600"><HintLabel>Levered Yield</HintLabel>:</span><span className="font-bold text-purple-700">{fmtPct(x.levered_yield, 2)}</span></div>
+                  <div className="text-xs text-gray-500 pl-2">= ({fmtEur(noiAnnual)} − {fmtEur(x.interest_12m)} lihva) / {fmtEur(equityCost > 0 ? equityCost : 0)}</div>
+                  <div className="text-xs text-purple-600 italic pl-2">operational преди амортизация (без principal)</div>
+                </div>
+              )}
               <div className="border-t pt-2">
                 <div className="flex justify-between text-xs"><span className="text-gray-500"><HintLabel>Equity</HintLabel> (market):</span><span>{fmtEur(equity)}</span></div>
                 <div className="flex justify-between text-xs"><span className="text-gray-500">Equity yield (market):</span><span className="text-gray-600">{fmtPct(x.cash_on_cash_market, 2)}</span></div>
