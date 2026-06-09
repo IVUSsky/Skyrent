@@ -346,6 +346,12 @@ module.exports = function(db) {
         p.cash_on_cash_market = equityMarket > 0
           ? Math.round((p.net_cash_flow / equityMarket) * 10000) / 10000
           : null;
+        // Levered Yield = (NOI − lihva only) / cash invested.
+        // Не изважда principal — показва operational performance преди амортизация.
+        const leveredCf = p.noi_annual - (p.interest_12m || 0);
+        p.levered_yield = equityCost > 0
+          ? Math.round((leveredCf / equityCost) * 10000) / 10000
+          : null;
       }
 
       const rankBy = (arr, key, dir = 'desc') => {
