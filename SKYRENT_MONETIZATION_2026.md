@@ -1,234 +1,264 @@
-# Skyrent — Monetization & Optimization Memo (v3)
-**Asof:** 2026-06-08 · **Source:** `/api/metrics/portfolio` (production)
-**Промени спрямо v2:** реален opex от 3-year bank import + AI-categorized invoices; portfolio sneva от theoretical → factual
+# Skyrent — Monetization & Optimization Memo (v4)
+**Asof:** 2026-06-09 · **Source:** `/api/metrics/portfolio` (production)
+**Промени спрямо v3:** Cash-on-Cash формула коригирана (cost basis вместо market) + appreciation analysis + revised strategic verdict
 
 ---
 
 ## Изпълнително резюме
 
-След ProBanking 3-year import + AI-assisted categorization на 127 invoices (повечето investment-related), Skyrent portfolio показва **реална здрава финансова картина**: 39 имота, **103.8K EUR NOI годишно**, **2.77% cap rate**, **DSCR 1.93** (здраво), **net cash flow 50K EUR/год**. Opex ratio 12.78% е консервативна за BG market (типично 10-25%) — обяснено от факта че tenants плащат utilities директно и компанията няма задължителни застраховки. **Top 3 immediate lever-а:** (1) **завърши Фонтани 4А+5** (4K годишна lihva без приход); (2) **refi Прокредит ПК-3** (67% от service-а отива в lihva); (3) **планирай 448K cash за Симеоново 12 до края на 2027**.
+След корекция на CoC формулата (стандартна real-estate дефиниция: Net CF ÷ реално вложен капитал), Skyrent се оказва **значително по-добра инвестиция отколкото показваше v3**: portfolio CoC скача от 1.83% на **3.89%** — приличeн за низко-leveraged residential. По-важно — анализът разкрива **1.44M EUR скрит appreciation gain** (paper wealth), който в момента не генерира yield. Реалните Top performers носят 18-40% CoC върху вложения капитал (Иширков ап.66 → 40.4%). Top 3 lever-а остават същите (Фонтани 4А+5, refi ПК-3, активиране на гаражи), но добавя се **#4: appreciation realization strategy** — как да extract-неш paper wealth-а през refi/sale за по-високодоходна реинвестиция.
 
 ---
 
-## Реалните числа (v3 endpoint)
+## Реалните числа (v4 — корекция на CoC)
 
 ### Portfolio overview
 
 | Метрика | Стойност | Бележка |
 |---|---|---|
 | Properties total | 39 (33 active + 2 furnishing + 4 pre-construction) | |
-| **Asset base** | **3,752,998 EUR** | market_val |
-| **Total debt** | **1,026,847 EUR** | 9 кредита (Пощенска 1 + УниКредит 5 + Прокредит 3) |
-| **Off-plan obligations** | **448,000 EUR** | 80% от Симеоново 12 due 2027-12 |
-| **Real equity** | **2,278,151 EUR** | equity - off_plan |
-| **Real LTV** | **39.3%** | (debt + off_plan) / asset_base |
-| Rent contracted | 119,016 EUR/год | 9,918 EUR/мес |
-| Rent received (bank business) | **61,401 EUR** за 12м | разлика идва от cash + Stripe + personal account collections |
-| **Opex annual** | **15,212 EUR** | **12.78% ratio** — реалистично |
-| **NOI annual** | **103,804 EUR** | rent_annual - opex |
-| Debt service | 53,797 EUR/год | |
-| **DSCR** | **1.93** | здраво (>1.25 = comfortable) |
-| **Cap rate** | **2.77%** | typical BG residential |
-| **Net cash flow** | **50,007 EUR/год** | NOI - debt service |
-| **Cash-on-Cash** | **1.83%** | net_cf / real_equity |
-| Top 5 concentration | 33.8% | разпръснато |
-| Herfindahl | 0.0505 | разпръснато |
+| **Asset base (market)** | **3,752,998 EUR** | |
+| **Total cost basis (купуня+ремонт)** | **2,313,358 EUR** | |
+| **🆕 Hidden appreciation** | **+1,439,640 EUR** (62% gain over cost) | paper wealth — не носи yield |
+| **Total debt** | **1,026,847 EUR** | |
+| **Off-plan obligations** | **448,000 EUR** | Симеоново 12 до 2027 |
+| **Equity (market)** | 2,726,151 EUR | оптично |
+| **🆕 Cash invested** | **1,286,511 EUR** | реално сложени пари (cost − дълг) |
+| **Real equity** | 2,278,151 EUR | equity − off-plan |
+| LTV (debt-only) | 27.4% | |
+| Real LTV | 39.3% | |
+| Rent contracted | 119,016 EUR/год | |
+| Rent received (bank) | 67,361 EUR за 12м | разлика през cash/Stripe |
+| Opex annual | 15,212 EUR (12.78% ratio) | |
+| NOI annual | 103,805 EUR | |
+| Debt service | 53,798 EUR/год | |
+| DSCR | 1.93 | здраво |
+| Cap rate (market) | 2.77% | |
+| **🆕 Cap rate (cost basis)** | **4.49%** | NOI / 2,313K cost |
+| Net cash flow | 50,007 EUR/год | |
+| **🆕 Cash-on-Cash (TRUE)** | **3.89%** | net_cf / cash_invested |
+| Equity yield (market) | 1.83% | старата CoC — сега secondary metric |
 
-### Защо opex 12.78% е реален (не data gap)
+### Защо разликата CoC v3 → v4 е голяма
 
-Обикновено residential portfolio е 15-25% opex. Skyrent е 12.78% защото:
-- **Tenants плащат utilities** (ток/вода/топлофикация) директно — НЕ минават през SKY CAPITAL business account
-- **Няма застраховки** — choice по дизайн (gap анализ виж #6 по-долу)
-- **Поддръжка минимална** — bank import не разкрива hidden expenses; нивото е реално
+**v3 (грешна формула):** CoC = Net CF / (asset − debt) = 50,007 / 2,726,151 = **1.83%**
+**v4 (стандартна формула):** CoC = Net CF / (cost basis − debt) = 50,007 / 1,286,511 = **3.89%**
+
+Разликата (2.06 pp) се обяснява с **1.44M EUR appreciation** който v3 третираше като "вложен капитал". Реално това е paper wealth — не си го извадил от джоба си, не генерира yield. CoC спрямо реално вложения капитал е стандартът за real-estate анализ.
+
+---
+
+## 🆕 Hidden Appreciation Analysis
+
+**1.44M EUR paper gain** (62% appreciation върху cost basis) — недостъпен капитал докато не realize-неш.
+
+### Топ 10 имота по CoC (cost basis)
+
+| Имот | Cost | Asset | Debt | Net CF | **CoC** | CoC market |
+|---|---|---|---|---|---|---|
+| Иширков 24, ап.66 | 39K | 90K | 33K | 2,431 | **40.4%** | 4.3% |
+| Иширков 24, ПМ 10 | 10K | 25K | 9K | 265 | **31.6%** | 1.7% |
+| Иширков 24, ап.9 | 76K | 165K | 60K | 4,003 | **25.7%** | 3.8% |
+| Иширков 24, ап.1 | 79K | 165K | 60K | 3,762 | **20.8%** | 3.6% |
+| Мл.2 бл.214 | 49K | 120K | 35K | 2,683 | **20.0%** | 3.2% |
+| Пз. Илион 4, ап.9 | 20K | 60K | 0 | 3,773 | **18.9%** | 6.3% |
+| Мл.1 бл.64 ап.142 | 75K | 148K | 51K | 4,441 | **18.5%** | 4.6% |
+| Дружба 2, бл.275 | 73K | 140K | 59K | 2,545 | **18.4%** | 3.1% |
+| Мл.3 бл.305 | 49K | 120K | 35K | 2,700 | **18.1%** | 3.2% |
+| Пз. Илион 4, ап.8 | 25K | 60K | 0 | 2,956 | **11.8%** | 4.9% |
+
+**Insight:** Старите имоти от Иширков (купени отдавна на ниски цени) са **financial superstars** по CoC. Иширков ап.66 връща 40% на год на вложените 6K cash equity. По-новите по-малко доходни, защото пазарната apprecация е по-ниска relative към cost.
+
+### Топ 5 имота с highest appreciation (skрит paper gain)
+
+| Имот | Cost | Market | Hidden gain | % appreciation |
+|---|---|---|---|---|
+| Иширков 24, ап.66 | 39K | 90K | +51K | +131% |
+| Пз. Илион 4, ап.9 | 20K | 60K | +40K | +200% |
+| Пз. Илион 4, ап.8 | 25K | 60K | +35K | +140% |
+| Мл.3 бл.305 | 49K | 120K | +71K | +143% |
+| Иширков 24, ап.9 | 76K | 165K | +89K | +117% |
+
+Това са **realization candidates** — имоти где можеш да извадиш appreciation чрез refi или sale.
 
 ---
 
 ## 12-month forward amortization
 
-Дългът ще намалее с **25,133 EUR principal** за 12 месеца (1,027K → 1,002K). Lihva 28,664 EUR. **47% от service-а отива в principal** — здраво.
+(Без промяна от v3 — данните са същите)
 
-### По банка
+Дългът ще намалее с **25,133 EUR principal** за 12 месеца. Lihva 28,664 EUR. **47% от service-а** отива в principal — здраво.
 
 | Банка | Кредити | Balance EUR | Principal 12m | Lihva 12m | % principal |
 |---|---|---|---|---|---|
 | Пощенска | 1 | 163,043 | 4,848 | 3,860 | **56%** |
 | УниКредит | 5 | 282,261 | 7,461 | 7,533 | 50% |
-| **Прокредит** | **3** | **581,543** | 12,824 | 17,271 | **43%** |
-
-### Refi candidates по lihva-heaviness
-
-| ID | Договор | Balance | Lihva 12m | % lihva |
-|---|---|---|---|---|
-| 9 | **Прокредит ПК-3** | 261K | 7,786 | **67%** |
-| 5 | УниКредит карусел 1/3 | 59K | 1,641 | 59% |
-| 8 | Прокредит ПК-2 | 93K | 2,756 | 52% |
+| **Прокредит** | **3** | **581,543** | **12,824** | **17,271** | **43%** |
 
 ---
 
-## Top 6 Monetization Идеи (v3)
+## Top 7 Monetization Идеи (v4 — преподредени с appreciation lens)
 
-### 🥇 #1 — Завърши Фонтани 4А + ап.5 ASAP
+### 🥇 #1 — Завърши Фонтани 4А + 5 ASAP
 
-(Без промяна от v2 — все още #1 priority)
+(Без промяна от v3 — все още #1 priority)
 
-**Текущо:** 131K EUR общ дълг, ~3,955 EUR годишна lihva която тече без приход.
+**Текущо:** 131K EUR общ дълг, ~3,955 EUR годишна lihva тече без приход.
 
-**Upside при активиране:**
-- 2 × 550 EUR/мес × 12 = 13,200 EUR/год
-- Net след lihva: **+9,245 EUR/год**
-
-**Effort:** S-M (обзавеждане 15-25K EUR investment).
+**Upside при активиране:** 2 × 550 × 12 = 13,200 EUR/год.
+**Effort:** S-M (15-25K EUR обзавеждане).
 **Timeline:** 30-60 дни.
 
 ---
 
 ### 🥈 #2 — Refinance Прокредит ПК-3 (261K @ 3%)
 
-(Без промяна от v2 — 67% lihva ratio confirmed)
-
-**Опции:**
-
-A) Refi @ 2.4-2.5% → ~1,305 EUR/год спестено
-B) Частично погасяване от 0-LTV equity → намалява lihva burden
-
-**Препоръка:** Запитване до 2-3 банки.
+Без промяна. 67% lihva ratio confirmed. Refi @ 2.4-2.5% спестява ~1,305 EUR/год.
 
 ---
 
-### 🥉 #3 — План за 448K EUR cash до края на 2027 (Симеоново 12)
+### 🥉 #3 — План за 448K cash за Симеоново 12 (до 2027-12)
 
-(Без промяна от v2)
-
-Източници:
-- Operating cash flow от portfolio: ~50K/год → 18 месеца × 50K = ~75K (insufficient)
-- Equity loan от unleveraged 920K имоти → достъпен, добавя ipotekа
-- Refi-cash-out от Прокредит → 30-50K side-effect
-- Личен капитал → зависи от budget
-
-**Trigger дата:** Q1-Q2 2027 → revisit.
+Без промяна. **Source диversification** — operating CF (~50K/год × 18м = 90K), equity loan от 920K unleveraged, refi-cashout от Прокредит, личен капитал.
 
 ---
 
-### 🥉 #4 — 6-те Фонтани гаражи без приход
+### 🥉 #4 — 🆕 Realize hidden appreciation за reinvestment
 
-(Без промяна от v2)
+**Концепция:** Имаш **1.44M EUR paper wealth** който не генерира yield. При cost-basis CoC 3.89%, новата покупка с 5-6% cap rate би била по-доходна от текущото "sitting capital".
 
-Опции: A) активирай (+5.5K/год net) или B) продай за refi (~6.8K/год lihva спестено).
+**3 пътя за realization:**
+
+A) **Refi cash-out на top appreciation имоти** (Иширков ап.66, Илион ап.9, ап.8)
+- Текущо asset 210K, дълг ~50K = 160K extra equity capacity
+- При нов кредит до 65% LTV → можеш да extract ~85K cash
+- Cost на това capital: новата ипотека 2.5-3% lihva = ~2,125 EUR/год
+- Ако reinvest-неш в имот с 5% cap → +4,250 EUR/год нов NOI
+- **Net swing: +2,125 EUR/год** + увеличаваш portfolio NOI base
+
+B) **Sale на 1-2 low-CoC имота с high appreciation** + reinvest
+- Илион ап.9 cost 20K → market 60K = 40K paper gain
+- Продажба → 50K net след costs → reинvest в 90-100K имот с по-добра доходност
+- Risk: губиш appreciation момент в Илион район
+
+C) **Sale на 1 имот за финансиране на Симеоново 12 balance**
+- Вместо да теглиш equity loan → продаваш 1 имот за 200-300K
+- Net cash покрива част от 448K Симеоново balance
+- Загубата на rent компенсиран от новите Симеоново имота (когато се активират)
+
+**Препоръка:** A е най-малко-risk подход. B е agressive. C само ако Симеоново cash sourcing е проблем.
+
+**Effort:** L (банкови преговори, due diligence)
+**Timeline:** Q4 2026 — Q1 2027
 
 ---
 
-### 🥉 #5 — Reducer на lihva-heavy кредитите чрез principal sweep
+### 🥉 #5 — 6-те Фонтани гаражи без приход
 
-**НОВА идея от v3 amortization data:**
-
-Сегашен picture: 28,664 EUR годишно lihva плащаш на банките. Това е dead money.
-
-**Лост:** правене на **principal sweep** — еднократно или quarterly влагане на extra cash директно в principal (не в monthly вноска). Пример:
-
-- 5,000 EUR extra в Прокредит ПК-3 веднъж годишно
-- Намалява базата на която се смята lihva → спестено ~150 EUR/год immediate impact, расте всяка година
-- За 5 години = ~1,500 EUR cumulative + ускорено погасяване на ~2-3 месеца
-
-**Effort:** S (ако имаш cash buffer) — обикновено banks приемат overpayments без penalty (провери условията)
-**Препоръка:** Pilot 5-10K EUR sweep на Прокредит ПК-3; оценка ROI след 12 месеца.
+Без промяна. Активирай (+5,477 EUR/год) или продай (200K cash, погасява 40% от ПК-3).
 
 ---
 
-### 🥉 #6 — Insurance gap (НОВ risk item от v3)
+### 🥉 #6 — Sell-and-redeploy на Симеоново 12 след доставка (2027+)
 
-**Текущо:** Skyrent няма застраховки — нула покритие при щета, кражба, природно бедствие, отговорност към тенant injuries, и т.н.
+**Нова стратегическа идея (опционална):**
 
-**Risk:**
-- Земетресение в София → 39 имота × средно 96K EUR = $3.75M exposure
-- Един major fire/water damage в апартамент → 30-100K EUR repair
-- Tenant liability (някой се нарани в апартамента) → unlimited exposure
+След доставка на Симеоново 12 (2027), имаш 4 нови имота. Ако пазарната им стойност при доставка е > 560K (плащаш 460K total cost) → можеш да продадеш веднага и да realize gain без да ги опериращ.
 
-**Cost ако се сключат:**
-- Property insurance (само сграда): ~0.05-0.15% от market_val → 1,900-5,600 EUR/год за целия portfolio
-- Public liability (отговорност): ~500-1,000 EUR/год bulk policy
-- Total разумен ranger: **2,500-7,000 EUR/год**
+**Пример:**
+- Total cost 460K (92K paid + 368K balance)
+- Pre-construction → completion gain ~15-25% типично
+- Market value at delivery: 560-575K
+- Net sale (след costs): 480-490K
+- **Profit:** 20-30K EUR — без операционен risk
 
-**Impact на финансите:**
-- Opex ratio: 12.78% → 14-18% (нормално)
-- NOI: 103.8K → ~99K (-4% decrease)
-- DSCR: 1.93 → 1.85 (все още комфортно)
+**Alternative:** Hold и rent — operating cash flow ~30K/год = 4-5% yield.
 
-**Препоръка:** Запитване до 2-3 застрахователи. Дори basic property + liability е разумна защита при 39-имотен portfolio. Без застраховки = single event риск > 1M EUR.
+**Препоръка:** Decision tree след доставка. Ако rental demand слаба → продай. Силна → hold.
+
+---
+
+### 🥉 #7 — Insurance gap (без промяна от v3)
+
+3.75M asset, 0 застраховки. Добави 2,500-7,000 EUR/год за basic property + liability покритие.
 
 ---
 
 ## Сумарен expected impact
 
-Ако изпълниш Tier 1 (Top 3) за следващите 12-18 месеца:
+Tier 1 (Top 3) за 12-18 месеца:
 
 | Идея | Effort | Impact годишно |
 |---|---|---|
-| Завърши Фонтани 4А+5 | M (15-25K cap) | +9,245 EUR (запазен) |
-| Refi Прокредит ПК-3 | M-L | +1,305 EUR (lihva) |
+| Завърши Фонтани 4А+5 | M | +9,245 EUR |
+| Refi Прокредит ПК-3 | M-L | +1,305 EUR |
 | Активирай 6 гаража | S | +5,477 EUR |
-| **TOTAL потенциал** | | **+16,027 EUR/год = +15% над NOI** |
+| **TOTAL Tier 1** | | **+16,027 EUR/год = +32% над текущ NOI** |
 
-Plus securely:
-- Симеоново 12 cash план до 2027 → unlocks +35-50K годишно потенциал след доставка
-- Принципал sweep → 1-2K годишно cumulative
+Tier 2 (12-24 месеца):
+
+| Идея | Effort | Impact |
+|---|---|---|
+| Refi cash-out + reinvest | L | +2-3K EUR/год + NOI base growth |
+| Симеоново 12 cash план | L | unlocks +35-50K годишно от 2027+ |
+| Insurance protection | S | -2.5-7K opex но защитава 3.75M asset |
 
 ---
 
-## Action list (30 / 90 / 180 дни)
+## Strategic verdict — обновен с CoC корекция
+
+Старият verdict (v3): "Solid foundation, mediocre yields, one big drain (ПК-3) and one big risk (insurance)."
+
+**v4 verdict:** Портфолиото е **значително по-добро отколкото изглеждаше** — true CoC 3.89% е приличeн за консервативен residential. Но **1.44M paper appreciation спи в имотите**. С refi или sale strategy можеш да го превърнеш в продуктивен capital и да увеличиш portfolio NOI base с 30-40% за 2-3 години.
+
+**Ключово prozrenie:** Иширков 24 апартаментите са твоите cashflow engines — 20-40% CoC. Те носят несравнима възвращаемост на вложения капитал. Не ги продавай. Refi cash-out върху тях за нови покупки = оптималната стратегия.
+
+---
+
+## Action list (30 / 90 / 180 дни) — обновен
 
 ### Следващите 30 дни
 
-- [ ] **Реши план за обзавеждане Фонтани 4А и 5** (capital, agency, timeline)
-- [ ] **Пробен anons за наем на 1-2 гаража** (Фонтани) — да тестваш demand
-- [ ] **Запитване до УниКредит/Пощенска** за refi на Прокредит ПК-3
-- [ ] **Запитване до застрахователи** (property + liability) → реална оферта
+- [ ] **Завърши плана за Фонтани 4А+5** + capital allocation
+- [ ] **Пробен anons** за 2-3 Фонтани гаража
+- [ ] **Запитване refi** на ПК-3 към УниКредит/Пощенска
+- [ ] **Запитване застраховки** — основни property + liability quote
+- [ ] **🆕 Запитване за equity loan/refi cashout** на Иширков имотите (top CoC)
 
 ### Следващите 90 дни — Q3 2026
 
-- [ ] **Phase 2 monthly snapshots cron** — trend графики
-- [ ] **Завърши Фонтани 4А + 5** (ETA от плана)
-- [ ] **Допълни мазетата** като отделни property records
-- [ ] **Decision гаражи Фонтани** — A или B
-- [ ] **Pilot principal sweep 5-10K** на Прокредит ПК-3
+- [ ] **Активиране Фонтани 4А + 5**
+- [ ] **Phase 2 monthly snapshots cron** — trend данни за бъдещи v5 анализи
+- [ ] **Decision гаражи** — A (активирай) или B (продай)
+- [ ] **🆕 Pilot principal sweep 5-10K** на Прокредит ПК-3
+- [ ] **🆕 Decision на appreciation realization** — pursue path A (refi), B (sell+reинvest) или wait
 
 ### Следващите 180 дни — Q4 2026
 
-- [ ] **6 месеца bank data → detailed per-property NOI** ranking
-- [ ] **Strategic review** — кои имоти да продаваме, кои да activate-ваме
-- [ ] **Equity capacity report** — допълнителен дълг portfolio може да поеме
-- [ ] **Симеоново 12 cash план финален** — конкретен timeline + източници
+- [ ] **Реално NOI per имот** след 6м bank data в production
+- [ ] **🆕 Realize 1 имот appreciation** като pilot (refi или sale)
+- [ ] **Symeonovo 12 cash план финален**
 
 ### 2027 — Strategic
 
-- [ ] **Q1-Q2 2027:** Симеоново 12 cash sourcing
-- [ ] **Q4 2027:** Балanс плащане 448K + активиране на 4 имота → +35-50K годишно
+- [ ] **H1 2027:** Симеоново 12 cash sourcing finalization
+- [ ] **Q4 2027:** Плащане 448K balance + activate 4 имота
+- [ ] **🆕 Sell-or-hold decision** на Симеоново 12 immediately after доставка
 
 ---
 
-## Промени в моделирането (v1 → v2 → v3)
+## Промени в моделирането (v1 → v2 → v3 → v4)
 
-| Какво | v1 | v2 | v3 |
-|---|---|---|---|
-| Loan allocation | equal split | asset-weighted | asset-weighted |
-| Симеоново 12 | "460K заключен capital" | 92K paid + 448K future | 448K off-plan + lifecycle 'pre_construction' |
-| Equity | 2.73M (overstated) | real 2.28M | real 2.28M |
-| LTV | 27.4% | real 39.3% | real 39.3% |
-| Opex | 0 (no data) | 0 (no business bank data) | **15.2K real (3-year bank import + AI cat)** |
-| NOI | rent (overstated) | rent (overstated) | **103.8K real** |
-| Cap rate | 3.17% (overstated) | 3.17% (overstated) | **2.77% real** |
-| DSCR | 2.21 (overstated) | 2.21 (overstated) | **1.93 real** |
-| Net CF | 65K (theoretical) | 65K (theoretical) | **50K real** |
-| Insurance | not analyzed | not analyzed | **risk item identified** |
+| Какво | v1 | v2 | v3 | v4 |
+|---|---|---|---|---|
+| Loan allocation | equal | asset-weighted | asset-weighted | asset-weighted |
+| Симеоново 12 | "460K заключен" | 92K + 448K future | 92K + 448K future | + sell-or-hold strategy |
+| Opex | 0 (no data) | 0 | 15.2K real | 15.2K real |
+| Cap rate | 3.17% | 3.17% | 2.77% market | 2.77% market + **4.49% cost** |
+| Cash-on-Cash | 2.39% | 2.39% | 1.83% market | **3.89% cost (TRUE)** |
+| Hidden appreciation | not tracked | not tracked | not tracked | **+1.44M EUR identified** |
+| Refi strategy | basic | refi ПК-3 | refi ПК-3 | + appreciation realization |
 
 ---
 
-## Данни sources
-
-- `/api/metrics/portfolio` v3 endpoint (PR #7 merged 2026-06-08)
-- ProBanking 3-year business import (386 transactions, 127 expense_invoices auto-created)
-- AI-assisted categorization (`backend/scripts/suggest_categories.js` + `apply_categories.js`)
-- User clarifications (2026-06-08): tenants плащат utilities, без застраховки, SLV CORP = silver, ЛЕКС ГРУП = appliances, BONKA = Симеоново legal, КЕМПЕРИНО + 314 СМАРТ = personal, ФАСИЛИТИ = Стелар, etc.
-
----
-
-*Memo v3 финален със real prod данни. Phase 2 snapshots cron остава bucklist.*
+*Memo v4 финален. Phase 2 snapshots cron остава bucklist.*
