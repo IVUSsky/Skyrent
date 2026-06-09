@@ -333,9 +333,18 @@ module.exports = function(db) {
         p.cap_rate_cost = p.cost_basis > 0 ? Math.round((p.noi_annual / p.cost_basis) * 10000) / 10000 : null;
         p.expense_ratio = p.opex_ratio;
         p.net_cash_flow = Math.round((p.noi_annual - p.allocated_debt_service) * 100) / 100;
-        const equityInvested = p.asset_val - p.allocated_debt;
-        p.cash_on_cash = equityInvested > 0
-          ? Math.round((p.net_cash_flow / equityInvested) * 10000) / 10000
+
+        // Cash-on-Cash (standard definition) = Net CF / cash actually invested.
+        // Approximation: cost_basis - current_debt (assume principal paid =
+        //   recovered capital). Fallback to market-based ако cost_basis липсва.
+        const equityCost = p.cost_basis - p.allocated_debt;
+        const equityMarket = p.asset_val - p.allocated_debt;
+        p.cash_on_cash = equityCost > 0
+          ? Math.round((p.net_cash_flow / equityCost) * 10000) / 10000
+          : null;
+        // Equity yield на текуща пазарна стойност — alternative perspective
+        p.cash_on_cash_market = equityMarket > 0
+          ? Math.round((p.net_cash_flow / equityMarket) * 10000) / 10000
           : null;
       }
 

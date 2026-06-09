@@ -56,8 +56,8 @@ const METRIC_HINTS = {
   'Net CF':             'Net Cash Flow = NOI − дълг service. Реалните пари в джоба след всички плащания.',
   'Net CF годишен':     'Net Cash Flow годишен = NOI − годишни вноски по ипотека. Какво остава реално в портфейла.',
   'Net Cash Flow':      'Net Cash Flow = NOI − ипотечни вноски. Реалните пари след всички разходи.',
-  'Cash-on-Cash':       'CoC = Net Cash Flow / equity. Възвращаемост спрямо личния капитал. Сравни с алтернативи (ETF, депозити).',
-  'CoC':                'Cash-on-Cash = Net CF / equity. Възвращаемост на твоя капитал. Под 2% = слабо, над 5% = много добро.',
+  'Cash-on-Cash':       'CoC = Net Cash Flow / cash invested (cost_basis − дълг). Възвращаемост на парите които си вложил реално. Стандартна real-estate метрика.',
+  'CoC':                'Cash-on-Cash = Net CF / (покупна+ремонт − дълг). Реална възвращаемост на вложения капитал. Под 2% слабо, над 5% много добро.',
   'Top 5 share':        'Концентрация: процент от общия наем идващ от top 5 имотите. Под 40% = добре диверсифицирано.',
   'Имоти':              'Брой имоти в портфолиото — активни / общо.',
   'Off-plan':           'Off-plan obligations = бъдещи плащания към developers при доставка на pre-construction имоти.',
@@ -133,6 +133,129 @@ function SortHeader({ field, label, sortField, sortDir, onSort, align = 'left' }
     >
       <HintLabel>{label}</HintLabel> {arrow}
     </th>
+  )
+}
+
+function PropertyDetailRow({ x, loan, portfolio }) {
+  const rentMonthly = x.rent_monthly || 0
+  const rentAnnual = x.rent_annual || 0
+  const rentShare = portfolio.rent_annual > 0 ? rentAnnual / portfolio.rent_annual : 0
+  const noiAnnual = x.noi_annual || 0
+  const debtSvcAnnual = x.allocated_debt_service || 0
+  const netCfAnnual = x.net_cash_flow || 0
+  const equity = x.asset_val - x.allocated_debt
+  const equityCost = x.cost_basis - x.allocated_debt
+  const cocCost = equityCost > 0 ? netCfAnnual / equityCost : null
+  const apprec = x.cost_basis > 0 ? (x.asset_val / x.cost_basis - 1) : null
+
+  return (
+    <tr className="bg-blue-50 border-b-2 border-blue-200">
+      <td colSpan={12} className="px-6 py-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {/* Section 1: Имот profile */}
+          <div className="bg-white border rounded-lg p-3">
+            <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">📍 Имот</div>
+            <div className="space-y-1 text-sm">
+              <div className="flex justify-between"><span className="text-gray-600">Адрес:</span><span className="font-medium">{x.адрес}</span></div>
+              <div className="flex justify-between"><span className="text-gray-600">Тип:</span><span>{x.тип}</span></div>
+              <div className="flex justify-between"><span className="text-gray-600">Район:</span><span>{x.район || '—'}</span></div>
+              <div className="flex justify-between"><span className="text-gray-600">Наемател:</span><span>{x.наемател || '—'}</span></div>
+              <div className="flex justify-between"><span className="text-gray-600">Lifecycle:</span><span style={{ color: STAGE_COLORS[x.lifecycle_stage] }} className="font-medium">{STAGE_LABELS[x.lifecycle_stage] || x.lifecycle_stage}</span></div>
+              {x.purchase_balance_due > 0 && (
+                <div className="flex justify-between"><span className="text-gray-600"><HintLabel>Off-plan obligations</HintLabel>:</span><span className="text-cyan-700 font-semibold">{fmtEur(x.purchase_balance_due)}</span></div>
+              )}
+            </div>
+          </div>
+
+          {/* Section 2: Income & NOI */}
+          <div className="bg-white border rounded-lg p-3">
+            <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">💰 NOI разбивка</div>
+            <div className="space-y-1 text-sm">
+              <div className="flex justify-between"><span className="text-gray-600">Наем месечен:</span><span>{fmtEur(rentMonthly)}</span></div>
+              <div className="flex justify-between"><span className="text-gray-600">Наем годишен:</span><span className="font-medium">{fmtEur(rentAnnual)}</span></div>
+              {x.rent_received_12m > 0 && rentAnnual > 0 && (
+                <div className="flex justify-between"><span className="text-gray-600">Bank fill rate:</span><span className={x.rent_received_12m / rentAnnual < 0.5 ? 'text-amber-700' : 'text-green-700'}>{((x.rent_received_12m / rentAnnual) * 100).toFixed(0)}%</span></div>
+              )}
+              <div className="flex justify-between"><span className="text-gray-600"><HintLabel>Opex</HintLabel> direct:</span><span>−{fmtEur(x.opex_annual_direct)}</span></div>
+              <div className="flex justify-between"><span className="text-gray-600">Opex дял (общи):</span><span>−{fmtEur(x.opex_annual_allocated)}</span></div>
+              <div className="flex justify-between border-t pt-1"><span className="font-semibold text-gray-700"><HintLabel>NOI</HintLabel> годишен:</span><span className="font-bold text-blue-700">{fmtEur(noiAnnual)}</span></div>
+              <div className="flex justify-between text-xs italic"><span className="text-gray-500"></span><span className="text-gray-500">({fmtEur(noiAnnual / 12)}/мес)</span></div>
+            </div>
+          </div>
+
+          {/* Section 3: Cap Rates */}
+          <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3">
+            <div className="text-xs font-semibold text-emerald-700 uppercase tracking-wider mb-2">📈 Доходност</div>
+            <div className="space-y-2 text-sm">
+              <div>
+                <div className="flex justify-between"><span className="text-gray-600"><HintLabel>Cap Rate</HintLabel> (market):</span><span className="font-bold text-emerald-700">{fmtPct(x.cap_rate, 2)}</span></div>
+                <div className="text-xs text-gray-500 pl-2">= {fmtEur(noiAnnual)} / {fmtEur(x.asset_val)}</div>
+              </div>
+              <div>
+                <div className="flex justify-between"><span className="text-gray-600"><HintLabel>Cap cost</HintLabel>:</span><span className="font-bold text-emerald-700">{fmtPct(x.cap_rate_cost, 2)}</span></div>
+                <div className="text-xs text-gray-500 pl-2">= {fmtEur(noiAnnual)} / {fmtEur(x.cost_basis)}</div>
+              </div>
+              {apprec != null && apprec > 0.05 && (
+                <div className="text-xs italic text-emerald-700 mt-1">✨ Appreciation: +{(apprec * 100).toFixed(0)}% от покупка</div>
+              )}
+            </div>
+          </div>
+
+          {/* Section 4: Loan */}
+          <div className={`border rounded-lg p-3 ${loan ? 'bg-amber-50 border-amber-200' : 'bg-green-50 border-green-200'}`}>
+            <div className={`text-xs font-semibold uppercase tracking-wider mb-2 ${loan ? 'text-amber-700' : 'text-green-700'}`}>
+              {loan ? '🏦 Ипотека' : '🆓 Без дълг'}
+            </div>
+            {loan ? (
+              <div className="space-y-1 text-sm">
+                <div className="flex justify-between"><span className="text-gray-600">Банка:</span><span className="font-medium">{loan.банка}</span></div>
+                <div className="flex justify-between"><span className="text-gray-600">Договор:</span><span className="text-xs">{loan.договор}</span></div>
+                <div className="flex justify-between"><span className="text-gray-600"><HintLabel>Дълг</HintLabel> (allocated):</span><span className="text-red-700 font-semibold">{fmtEur(x.allocated_debt)}</span></div>
+                <div className="flex justify-between"><span className="text-gray-600">Service годишен:</span><span className="text-red-700">{fmtEur(debtSvcAnnual)}</span></div>
+                <div className="flex justify-between"><span className="text-gray-600"><HintLabel>LTV</HintLabel>:</span><span>{fmtPct(x.ltv)}</span></div>
+                <div className="flex justify-between"><span className="text-gray-600"><HintLabel>Principal</HintLabel> 12m:</span><span className="text-green-700">{fmtEur(x.principal_paydown_12m)}</span></div>
+                <div className="flex justify-between"><span className="text-gray-600"><HintLabel>Lihva</HintLabel> 12m:</span><span className="text-orange-700">{fmtEur(x.interest_12m)}</span></div>
+              </div>
+            ) : (
+              <div className="text-sm text-gray-700 italic">Имотът няма ипотека — целият NOI отива в Net CF.</div>
+            )}
+          </div>
+
+          {/* Section 5: Net Cash Flow */}
+          <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
+            <div className="text-xs font-semibold text-slate-700 uppercase tracking-wider mb-2">💸 Cash Flow</div>
+            <div className="space-y-1 text-sm">
+              <div className="flex justify-between"><span className="text-gray-600">NOI годишен:</span><span>{fmtEur(noiAnnual)}</span></div>
+              <div className="flex justify-between"><span className="text-gray-600">− Debt service:</span><span className="text-red-700">−{fmtEur(debtSvcAnnual)}</span></div>
+              <div className="flex justify-between border-t pt-1"><span className="font-semibold text-gray-700"><HintLabel>Net CF</HintLabel> годишен:</span><span className={`font-bold ${netCfAnnual >= 0 ? 'text-green-700' : 'text-red-700'}`}>{fmtEur(netCfAnnual)}</span></div>
+              <div className="flex justify-between text-xs"><span className="text-gray-500">Net CF месечен:</span><span className={netCfAnnual >= 0 ? 'text-green-700' : 'text-red-700'}>{fmtEur(netCfAnnual / 12)}</span></div>
+              <div className="flex justify-between text-xs italic"><span className="text-gray-500">Дял от portfolio rent:</span><span className="text-gray-500">{(rentShare * 100).toFixed(2)}%</span></div>
+            </div>
+          </div>
+
+          {/* Section 6: Equity & CoC */}
+          <div className="bg-purple-50 border border-purple-200 rounded-lg p-3">
+            <div className="text-xs font-semibold text-purple-700 uppercase tracking-wider mb-2">🎲 Equity & CoC</div>
+            <div className="space-y-2 text-sm">
+              <div>
+                <div className="flex justify-between"><span className="text-gray-600">Вложен капитал (cost − дълг):</span><span className="font-medium">{fmtEur(equityCost > 0 ? equityCost : 0)}</span></div>
+                <div className="text-xs text-gray-500 pl-2">= {fmtEur(x.cost_basis)} − {fmtEur(x.allocated_debt)}</div>
+              </div>
+              <div>
+                <div className="flex justify-between"><span className="text-gray-600 font-semibold"><HintLabel>Cash-on-Cash</HintLabel>:</span><span className="font-bold text-purple-700 text-base">{fmtPct(x.cash_on_cash, 2)}</span></div>
+                <div className="text-xs text-gray-500 pl-2">= {fmtEur(netCfAnnual)} / {fmtEur(equityCost > 0 ? equityCost : 0)}</div>
+                <div className="text-xs text-purple-600 italic pl-2 mt-1">възвращаемост на парите които си вложил</div>
+              </div>
+              <div className="border-t pt-2">
+                <div className="flex justify-between text-xs"><span className="text-gray-500"><HintLabel>Equity</HintLabel> (market):</span><span>{fmtEur(equity)}</span></div>
+                <div className="flex justify-between text-xs"><span className="text-gray-500">Equity yield (market):</span><span className="text-gray-600">{fmtPct(x.cash_on_cash_market, 2)}</span></div>
+                <div className="text-xs text-gray-400 italic pl-2">за сравнение с пазарни alternative</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </td>
+    </tr>
   )
 }
 
@@ -378,6 +501,7 @@ export default function InvestorView({ API }) {
   const [sortField, setSortField] = useState('cap_rate')
   const [sortDir, setSortDir] = useState('desc')
   const [stageFilter, setStageFilter] = useState('all')
+  const [expandedId, setExpandedId] = useState(null)
 
   useEffect(() => {
     setLoading(true)
@@ -663,6 +787,7 @@ export default function InvestorView({ API }) {
                 <SortHeader field="ltv" label="LTV" align="right" {...{sortField,sortDir,onSort:handleSort}} />
                 <SortHeader field="cap_rate" label="Cap" align="right" {...{sortField,sortDir,onSort:handleSort}} />
                 <SortHeader field="cap_rate_cost" label="Cap cost" align="right" {...{sortField,sortDir,onSort:handleSort}} />
+                <SortHeader field="cash_on_cash" label="CoC" align="right" {...{sortField,sortDir,onSort:handleSort}} />
                 <SortHeader field="net_cash_flow" label="Net CF" align="right" {...{sortField,sortDir,onSort:handleSort}} />
                 <SortHeader field="principal_paydown_12m" label="Princ 12m" align="right" {...{sortField,sortDir,onSort:handleSort}} />
               </tr>
@@ -671,33 +796,47 @@ export default function InvestorView({ API }) {
               {sortedProps.map(x => {
                 const ltvColor = x.ltv == null ? '' : x.ltv > 0.65 ? 'text-red-700 font-semibold' : x.ltv > 0.5 ? 'text-amber-700' : 'text-gray-700'
                 const cfColor = x.net_cash_flow > 0 ? 'text-green-700' : x.net_cash_flow < 0 ? 'text-red-700' : 'text-gray-500'
+                const cocColor = x.cash_on_cash == null ? 'text-gray-400' : x.cash_on_cash > 0.04 ? 'text-green-700 font-semibold' : x.cash_on_cash > 0 ? 'text-amber-700' : 'text-red-700'
+                const isExpanded = expandedId === x.id
+                const loan = (data.loan_schedules || []).find(s => (s.property_ids || []).includes(x.id))
                 return (
-                  <tr key={x.id} className="hover:bg-gray-50">
-                    <td className="px-3 py-2 text-gray-500 text-xs">{x.id}</td>
-                    <td className="px-3 py-2">
-                      <div className="text-gray-900">{x.адрес}</div>
-                      <div className="text-xs text-gray-400">{x.тип}{x.наемател ? ` · ${x.наемател}` : ''}</div>
-                    </td>
-                    <td className="px-3 py-2">
-                      <span
-                        className="inline-block px-2 py-0.5 rounded text-xs font-medium"
-                        style={{
-                          background: (STAGE_COLORS[x.lifecycle_stage] || '#94a3b8') + '20',
-                          color: STAGE_COLORS[x.lifecycle_stage] || '#475569',
-                        }}
-                      >
-                        {STAGE_LABELS[x.lifecycle_stage] || x.lifecycle_stage}
-                      </span>
-                    </td>
-                    <td className="px-3 py-2 text-right">{fmtEur(x.rent_annual)}</td>
-                    <td className="px-3 py-2 text-right">{fmtEur(x.asset_val)}</td>
-                    <td className="px-3 py-2 text-right text-gray-700">{fmtEur(x.allocated_debt)}</td>
-                    <td className={`px-3 py-2 text-right ${ltvColor}`}>{fmtPct(x.ltv)}</td>
-                    <td className="px-3 py-2 text-right">{fmtPct(x.cap_rate, 2)}</td>
-                    <td className="px-3 py-2 text-right text-emerald-700 font-medium">{fmtPct(x.cap_rate_cost, 2)}</td>
-                    <td className={`px-3 py-2 text-right ${cfColor}`}>{fmtEur(x.net_cash_flow)}</td>
-                    <td className="px-3 py-2 text-right text-green-700">{fmtEur(x.principal_paydown_12m)}</td>
-                  </tr>
+                  <React.Fragment key={x.id}>
+                    <tr className={`hover:bg-gray-50 cursor-pointer ${isExpanded ? 'bg-blue-50' : ''}`} onClick={() => setExpandedId(isExpanded ? null : x.id)}>
+                      <td className="px-3 py-2 text-gray-500 text-xs">
+                        <span className="inline-flex items-center gap-1">
+                          <span className="text-gray-300">{isExpanded ? '▼' : '▶'}</span>
+                          {x.id}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2">
+                        <div className="text-gray-900">{x.адрес}</div>
+                        <div className="text-xs text-gray-400">{x.тип}{x.наемател ? ` · ${x.наемател}` : ''}</div>
+                      </td>
+                      <td className="px-3 py-2">
+                        <span
+                          className="inline-block px-2 py-0.5 rounded text-xs font-medium"
+                          style={{
+                            background: (STAGE_COLORS[x.lifecycle_stage] || '#94a3b8') + '20',
+                            color: STAGE_COLORS[x.lifecycle_stage] || '#475569',
+                          }}
+                        >
+                          {STAGE_LABELS[x.lifecycle_stage] || x.lifecycle_stage}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 text-right">{fmtEur(x.rent_annual)}</td>
+                      <td className="px-3 py-2 text-right">{fmtEur(x.asset_val)}</td>
+                      <td className="px-3 py-2 text-right text-gray-700">{fmtEur(x.allocated_debt)}</td>
+                      <td className={`px-3 py-2 text-right ${ltvColor}`}>{fmtPct(x.ltv)}</td>
+                      <td className="px-3 py-2 text-right">{fmtPct(x.cap_rate, 2)}</td>
+                      <td className="px-3 py-2 text-right text-emerald-700 font-medium">{fmtPct(x.cap_rate_cost, 2)}</td>
+                      <td className={`px-3 py-2 text-right ${cocColor}`}>{fmtPct(x.cash_on_cash, 2)}</td>
+                      <td className={`px-3 py-2 text-right ${cfColor}`}>{fmtEur(x.net_cash_flow)}</td>
+                      <td className="px-3 py-2 text-right text-green-700">{fmtEur(x.principal_paydown_12m)}</td>
+                    </tr>
+                    {isExpanded && (
+                      <PropertyDetailRow x={x} loan={loan} portfolio={p} />
+                    )}
+                  </React.Fragment>
                 )
               })}
             </tbody>
