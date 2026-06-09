@@ -56,8 +56,8 @@ const METRIC_HINTS = {
   'Net CF':             'Net Cash Flow = NOI − дълг service. Реалните пари в джоба след всички плащания.',
   'Net CF годишен':     'Net Cash Flow годишен = NOI − годишни вноски по ипотека. Какво остава реално в портфейла.',
   'Net Cash Flow':      'Net Cash Flow = NOI − ипотечни вноски. Реалните пари след всички разходи.',
-  'Cash-on-Cash':       'CoC = Net Cash Flow / equity. Възвращаемост спрямо личния капитал. Сравни с алтернативи (ETF, депозити).',
-  'CoC':                'Cash-on-Cash = Net CF / equity. Възвращаемост на твоя капитал. Под 2% = слабо, над 5% = много добро.',
+  'Cash-on-Cash':       'CoC = Net Cash Flow / cash invested (cost_basis − дълг). Възвращаемост на парите които си вложил реално. Стандартна real-estate метрика.',
+  'CoC':                'Cash-on-Cash = Net CF / (покупна+ремонт − дълг). Реална възвращаемост на вложения капитал. Под 2% слабо, над 5% много добро.',
   'Top 5 share':        'Концентрация: процент от общия наем идващ от top 5 имотите. Под 40% = добре диверсифицирано.',
   'Имоти':              'Брой имоти в портфолиото — активни / общо.',
   'Off-plan':           'Off-plan obligations = бъдещи плащания към developers при доставка на pre-construction имоти.',
@@ -238,19 +238,19 @@ function PropertyDetailRow({ x, loan, portfolio }) {
             <div className="text-xs font-semibold text-purple-700 uppercase tracking-wider mb-2">🎲 Equity & CoC</div>
             <div className="space-y-2 text-sm">
               <div>
-                <div className="flex justify-between"><span className="text-gray-600"><HintLabel>Equity</HintLabel> (market):</span><span className="font-medium">{fmtEur(equity)}</span></div>
-                <div className="text-xs text-gray-500 pl-2">= asset − дълг</div>
+                <div className="flex justify-between"><span className="text-gray-600">Вложен капитал (cost − дълг):</span><span className="font-medium">{fmtEur(equityCost > 0 ? equityCost : 0)}</span></div>
+                <div className="text-xs text-gray-500 pl-2">= {fmtEur(x.cost_basis)} − {fmtEur(x.allocated_debt)}</div>
               </div>
               <div>
-                <div className="flex justify-between"><span className="text-gray-600"><HintLabel>Cash-on-Cash</HintLabel>:</span><span className="font-bold text-purple-700">{fmtPct(x.cash_on_cash, 2)}</span></div>
-                <div className="text-xs text-gray-500 pl-2">= {fmtEur(netCfAnnual)} / {fmtEur(equity)}</div>
+                <div className="flex justify-between"><span className="text-gray-600 font-semibold"><HintLabel>Cash-on-Cash</HintLabel>:</span><span className="font-bold text-purple-700 text-base">{fmtPct(x.cash_on_cash, 2)}</span></div>
+                <div className="text-xs text-gray-500 pl-2">= {fmtEur(netCfAnnual)} / {fmtEur(equityCost > 0 ? equityCost : 0)}</div>
+                <div className="text-xs text-purple-600 italic pl-2 mt-1">възвращаемост на парите които си вложил</div>
               </div>
-              {equityCost > 0 && (
-                <div>
-                  <div className="flex justify-between"><span className="text-gray-600">CoC на вложен капитал:</span><span className="font-bold text-purple-700">{fmtPct(cocCost, 2)}</span></div>
-                  <div className="text-xs text-gray-500 pl-2">= {fmtEur(netCfAnnual)} / {fmtEur(equityCost)}</div>
-                </div>
-              )}
+              <div className="border-t pt-2">
+                <div className="flex justify-between text-xs"><span className="text-gray-500"><HintLabel>Equity</HintLabel> (market):</span><span>{fmtEur(equity)}</span></div>
+                <div className="flex justify-between text-xs"><span className="text-gray-500">Equity yield (market):</span><span className="text-gray-600">{fmtPct(x.cash_on_cash_market, 2)}</span></div>
+                <div className="text-xs text-gray-400 italic pl-2">за сравнение с пазарни alternative</div>
+              </div>
             </div>
           </div>
         </div>
