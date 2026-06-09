@@ -735,7 +735,10 @@ export default function InvestorView({ API }) {
 
         {bankData.length > 0 && (
           <div className="bg-white border rounded-xl p-4">
-            <div className="text-sm font-semibold text-gray-700 mb-3">По банка</div>
+            <div className="text-sm font-semibold text-gray-700 mb-1">Split на вноските по банка (12m)</div>
+            <div className="text-xs text-gray-500 mb-3">
+              Показва къде отиват парите от месечната вноска. <span className="text-green-700 font-medium">Зелено = principal</span> (намалява дълга — "savings"). <span className="text-red-700 font-medium">Червено = lihva</span> (чист разход). И двете са positive — това е структурата на дълга, НЕ net cash flow. За реален Net CF per група → виж "Левередж анализ" секцията.
+            </div>
             <ResponsiveContainer width="100%" height={200}>
               <BarChart data={bankData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
@@ -743,8 +746,8 @@ export default function InvestorView({ API }) {
                 <YAxis />
                 <Tooltip formatter={(v) => fmtEur(v)} />
                 <Legend />
-                <Bar dataKey="principal" name="Principal 12m" fill="#22c55e" />
-                <Bar dataKey="interest" name="Lihva 12m" fill="#ef4444" />
+                <Bar dataKey="principal" name="Principal 12m (намалява дълга)" fill="#22c55e" />
+                <Bar dataKey="interest" name="Lihva 12m (разход)" fill="#ef4444" />
               </BarChart>
             </ResponsiveContainer>
           </div>
