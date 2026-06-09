@@ -21,7 +21,8 @@ module.exports = function(db) {
 
   // ── Income CRUD ──────────────────────────────────────────────────────────
   router.get('/income', (req, res) => {
-    const { month, тип } = req.query;
+    const { тип } = req.query;
+    const month = req.query.month || req.query['месец'];  // и двата формата
     let sql = `SELECT pi.*, t.контрагент AS tx_контрагент, t.основание AS tx_основание
                FROM personal_income pi
                LEFT JOIN transactions t ON t.id = pi.bank_tx_id
@@ -141,10 +142,12 @@ module.exports = function(db) {
     return `${y}-${m}-${day}`;
   }
   function parsePeriod(q) {
-    if (q.month && /^\d{4}-\d{2}$/.test(q.month)) {
-      const [y, m] = q.month.split('-');
+    // Поддържат се и двете: q.month (английски) и q.месец (кирилица) — за консистенция с другите endpoint-и
+    const monthParam = q.month || q['месец'];
+    if (monthParam && /^\d{4}-\d{2}$/.test(monthParam)) {
+      const [y, m] = monthParam.split('-');
       const last = localDate(new Date(Number(y), Number(m), 0));
-      return { from: `${q.month}-01`, to: last, label: q.month };
+      return { from: `${monthParam}-01`, to: last, label: monthParam };
     }
     if (q.from && q.to) {
       return { from: q.from, to: q.to, label: `${q.from}…${q.to}` };
