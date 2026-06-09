@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useMemo } from 'react'
+import React, { useState, useEffect, useMemo, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell,
   PieChart, Pie, Legend
@@ -78,17 +79,80 @@ const METRIC_HINTS = {
   'rent_received_12m':  'Реално получени наеми по банковата сметка за последните 12 месеца. Разлика спрямо contracted показва наеми получени в кеш или Stripe.',
 }
 
+/**
+ * Portal-based tooltip — escape-ва table overflow containers.
+ * Auto-flip: ako няма място отдолу → показва се отгоре.
+ */
 function InfoTooltip({ text, children }) {
   if (!text) return children
+  const [open, setOpen] = useState(false)
+  const [coords, setCoords] = useState({ top: 0, left: 0, placement: 'bottom' })
+  const ref = useRef(null)
+
+  const updatePosition = () => {
+    if (!ref.current) return
+    const rect = ref.current.getBoundingClientRect()
+    const tooltipHeight = 110  // approximate
+    const spaceBelow = window.innerHeight - rect.bottom
+    const placement = spaceBelow >= tooltipHeight + 20 ? 'bottom' : 'top'
+    setCoords({
+      top: placement === 'bottom' ? rect.bottom + 8 : rect.top - 8,
+      left: rect.left + rect.width / 2,
+      placement,
+    })
+  }
+
+  const handleEnter = () => {
+    updatePosition()
+    setOpen(true)
+  }
+  const handleLeave = () => setOpen(false)
+
+  // Reposition on scroll/resize when open
+  useEffect(() => {
+    if (!open) return
+    const handler = () => updatePosition()
+    window.addEventListener('scroll', handler, true)
+    window.addEventListener('resize', handler)
+    return () => {
+      window.removeEventListener('scroll', handler, true)
+      window.removeEventListener('resize', handler)
+    }
+  }, [open])
+
   return (
-    <span className="inline-flex items-center gap-1 group relative">
-      {children}
-      <span className="cursor-help text-gray-400 hover:text-gray-600 text-[10px] leading-none border border-current rounded-full w-3.5 h-3.5 inline-flex items-center justify-center">?</span>
-      <span className="invisible opacity-0 group-hover:visible group-hover:opacity-100 absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-2 bg-gray-900 text-white text-xs font-normal normal-case tracking-normal rounded-lg shadow-xl w-72 z-50 pointer-events-none transition-opacity duration-150">
-        {text}
-        <span className="absolute top-full left-1/2 -translate-x-1/2 -mt-px border-4 border-transparent border-t-gray-900"></span>
+    <>
+      <span
+        ref={ref}
+        onMouseEnter={handleEnter}
+        onMouseLeave={handleLeave}
+        className="inline-flex items-center gap-1 relative"
+      >
+        {children}
+        <span className="cursor-help text-gray-400 hover:text-gray-600 text-[10px] leading-none border border-current rounded-full w-3.5 h-3.5 inline-flex items-center justify-center">?</span>
       </span>
-    </span>
+      {open && typeof document !== 'undefined' && createPortal(
+        <div
+          style={{
+            position: 'fixed',
+            top: coords.top,
+            left: coords.left,
+            transform: coords.placement === 'bottom' ? 'translateX(-50%)' : 'translate(-50%, -100%)',
+            zIndex: 9999,
+            pointerEvents: 'none',
+          }}
+          className="px-3 py-2 bg-gray-900 text-white text-xs font-normal normal-case tracking-normal rounded-lg shadow-xl w-72 transition-opacity duration-150"
+        >
+          {text}
+          {coords.placement === 'bottom' ? (
+            <span className="absolute bottom-full left-1/2 -translate-x-1/2 -mb-px border-4 border-transparent border-b-gray-900"></span>
+          ) : (
+            <span className="absolute top-full left-1/2 -translate-x-1/2 -mt-px border-4 border-transparent border-t-gray-900"></span>
+          )}
+        </div>,
+        document.body
+      )}
+    </>
   )
 }
 
