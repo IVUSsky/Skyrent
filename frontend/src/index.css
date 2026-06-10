@@ -94,6 +94,24 @@ html[data-mode="dark"]{
   display:flex;align-items:center;gap:9px;}
 .iv-section-h::before{content:'';width:14px;height:1.5px;background:var(--accent);opacity:.8;}
 
+/* ── InvestorView · editorial таблици ─────────────────────────────────────── */
+.iv-root table{font-variant-numeric:tabular-nums;}
+.iv-root thead th{font-size:10px !important;font-weight:600 !important;
+  letter-spacing:.13em !important;text-transform:uppercase;
+  color:var(--muted) !important;padding-top:11px !important;padding-bottom:11px !important;
+  border-bottom:1px solid var(--surface-border);background:transparent !important;}
+.iv-root tbody td{padding-top:11px !important;padding-bottom:11px !important;
+  border-color:var(--surface-border) !important;}
+.iv-root tbody tr{transition:background .14s ease;}
+.iv-root tbody tr:hover{background:color-mix(in srgb, var(--accent) 8%, transparent) !important;}
+/* числови клетки — по-добра четимост */
+.iv-root td.text-right, .iv-root th.text-right{font-variant-numeric:tabular-nums;}
+
+/* leverage group summary карти — editorial вместо плътен цвят */
+.iv-root .border-2{border-width:1px !important;}
+html[data-mode="dark"] .iv-root .border-green-300{border-color:rgba(95,211,160,.30) !important;}
+html[data-mode="dark"] .iv-root .border-amber-300{border-color:rgba(230,180,92,.30) !important;}
+
 /* ───────────────────────────────────────────────────────────────────────────
    InvestorView — theme adoption (scoped to .iv-root)
    Претонира неутралите към активната тема. Семантичните цветове (green/red за
