@@ -838,6 +838,11 @@ async function main() {
   }
   console.log('users table ready');
 
+  // Health (public, lightweight) — за keep-alive pinger (UptimeRobot) който държи
+  // Railway контейнера буден и предотвратява 20-30s cold-start след престой.
+  // НЕ докосва базата → нулева цена.
+  app.get('/api/health', (req, res) => res.json({ ok: true, ts: Date.now() }));
+
   // Auth (public)
   app.use('/api/auth', require('./routes/auth')(db));
 
@@ -874,6 +879,27 @@ async function main() {
       res.setHeader('Content-Disposition', `attachment; filename="skyrent_backup_${date}.db"`);
       res.setHeader('Content-Length', buf.length);
       res.send(buf);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // VACUUM — освобождава място след масови delete/update (sql.js не auto-vacuum-ва).
+  // Свива .db файла → по-бърз cold-start (зарежда се по-малко) и по-бързи записи
+  // (export-ва се по-малко). Само admin.
+  app.post('/api/admin/vacuum', (req, res) => {
+    if (req.user?.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+    try {
+      const before = db._sqlDb.export().length;
+      db._sqlDb.exec('VACUUM');
+      db._maybeSave();
+      const after = db._sqlDb.export().length;
+      res.json({
+        ok: true,
+        before_kb: Math.round(before / 1024),
+        after_kb: Math.round(after / 1024),
+        saved_kb: Math.round((before - after) / 1024),
+      });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
