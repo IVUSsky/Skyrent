@@ -1102,5 +1102,36 @@ module.exports = function(db) {
     }
   });
 
+  // POST /retag-2025-rent-currency — еднократен data fix.
+  // 2025 'наем' Кт транзакции са записани в EUR-величина но таггнати BGN
+  // (доказано: всеки имот 2025 наем ≈ EUR договор; 2026 = BGN-величина).
+  // Re-tag → currency='EUR' за да не се делят при BGN→EUR конверсия.
+  // ?dry=1 за preview без промяна.
+  router.post('/retag-2025-rent-currency', (req, res) => {
+    if (req.user?.role === 'tenant') return res.status(403).json({ error: 'Forbidden' });
+    try {
+      const dry = req.query.dry === '1' || req.body?.dry === true;
+      const sel = db.prepare(`
+        SELECT COUNT(*) AS cnt, ROUND(SUM(сума),2) AS sum_native
+        FROM transactions
+        WHERE категория='наем' AND operation='Кт'
+          AND месец < '2026-01'
+          AND UPPER(COALESCE(currency,'BGN'))='BGN'
+      `).get();
+      if (dry) {
+        return res.json({ ok: true, dry: true, would_update: sel.cnt, sum_native: sel.sum_native });
+      }
+      const r = db.prepare(`
+        UPDATE transactions SET currency='EUR'
+        WHERE категория='наем' AND operation='Кт'
+          AND месец < '2026-01'
+          AND UPPER(COALESCE(currency,'BGN'))='BGN'
+      `).run();
+      res.json({ ok: true, updated: r.changes, sum_native: sel.sum_native });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   return router;
 };
