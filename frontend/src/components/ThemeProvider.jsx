@@ -32,9 +32,12 @@ function ensureFonts() {
 
 export function ThemeProvider({ children, activeTab }) {
   const [picked, setPicked] = useState(() => localStorage.getItem(STORAGE_KEY) || 'current')
+  // Bloomberg-auto за финансови табове — OPT-IN (default OFF). Преди беше ON по
+  // подразбиране, което насилваше Bloomberg на Dashboard и правеше избора от
+  // picker-а да изглежда счупен (effective оставаше bloomberg каквото и да избереш).
   const [financeAuto, setFinanceAuto] = useState(() => {
     const raw = localStorage.getItem(FINANCE_AUTO_KEY)
-    return raw === null ? true : raw === '1'
+    return raw === null ? false : raw === '1'
   })
 
   const effective = (financeAuto && FINANCE_TABS.has(activeTab)) ? 'bloomberg' : picked
@@ -54,7 +57,11 @@ export function ThemeProvider({ children, activeTab }) {
   }, [financeAuto])
 
   const setTheme = useCallback((name) => {
-    if (THEMES[name]) setPicked(name)
+    if (!THEMES[name]) return
+    setPicked(name)
+    // Изричният избор винаги печели — изключваме Bloomberg-auto, за да се
+    // приложи избраната тема веднага (иначе на финансов таб остава bloomberg).
+    setFinanceAuto(false)
   }, [])
 
   const toggleFinanceAuto = useCallback(() => setFinanceAuto(v => !v), [])
