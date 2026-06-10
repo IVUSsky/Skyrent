@@ -174,8 +174,13 @@ export default function Analysis({ API }) {
   }
 
   return (
-    <div>
-      <h2 className="text-2xl font-bold text-gray-800 mb-6">Анализ на портфолио</h2>
+    <div className="fin-surface">
+      <header className="iv-mast mb-6">
+        <div>
+          <div className="iv-mast-eyebrow">Портфолио · разбор</div>
+          <h2 className="iv-mast-title">Анализ</h2>
+        </div>
+      </header>
 
       {/* Risk Indicators */}
       <div className="mb-8">

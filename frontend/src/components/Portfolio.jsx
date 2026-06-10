@@ -163,9 +163,12 @@ export default function Portfolio({ API }) {
   if (error) return <div className="bg-red-50 text-red-700 p-4 rounded-lg">Грешка: {error}</div>
 
   return (
-    <div>
-      <div className="flex justify-between items-center mb-4">
-        <h2 className="text-2xl font-bold text-gray-800">Портфолио имоти</h2>
+    <div className="fin-surface">
+      <header className="iv-mast mb-5">
+        <div>
+          <div className="iv-mast-eyebrow">Активи · имоти</div>
+          <h2 className="iv-mast-title">Портфолио</h2>
+        </div>
         <div className="flex items-center gap-3">
         <button
           onClick={() => { setAddingNew(true); setNewForm(EMPTY_FORM) }}
@@ -178,7 +181,7 @@ export default function Portfolio({ API }) {
           <span className="font-bold text-blue-700 text-base">{fmt(totalRent)} €</span>
         </div>
         </div>
-      </div>
+      </header>
 
       <div className="bg-white rounded-xl shadow overflow-hidden">
         {/* Top scrollbar */}

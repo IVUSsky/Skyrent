@@ -299,7 +299,7 @@ export default function PersonalBudget() {
   const dispKt = sv.дисциплина === 'над цел' ? 'text-emerald-700' : sv.дисциплина === 'под цел' ? 'text-rose-700' : 'text-gray-500'
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 fin-surface">
       {/* Header — view tabs + period selector */}
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4 space-y-3">
         <div className="flex items-center justify-between flex-wrap gap-2">

@@ -15,9 +15,12 @@ export default function Investments({ API }) {
   const [asset, setAsset] = useState('gold')
   const metalConfig = METALS.find(m => m.id === asset)
   return (
-    <div>
+    <div className="fin-surface">
       <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
-        <h2 className="text-2xl font-bold text-gray-800">📈 Инвестиции</h2>
+        <div>
+          <div className="iv-mast-eyebrow">Капитал · метали</div>
+          <h2 className="iv-mast-title">Инвестиции</h2>
+        </div>
         <div className="flex gap-1 flex-wrap">
           {METALS.map(t => (
             <button key={t.id} onClick={() => setAsset(t.id)}
