@@ -45,7 +45,7 @@ function TenantHistory({ propertyId, API }) {
   }
 
   return (
-    <div>
+    <div className="fin-surface">
       <div className="flex justify-between items-center mb-3">
         <h4 className="font-bold text-gray-700">История на наемателите</h4>
         <button onClick={() => setAdding(!adding)}

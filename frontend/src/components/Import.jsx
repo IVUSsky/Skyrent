@@ -77,7 +77,7 @@ function DepositsTab({ API, properties }) {
     .reduce((s, r) => s + (r.сума || 0), 0)
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-5 fin-surface">
       <div className="bg-teal-50 border border-teal-200 rounded-xl p-4 text-sm text-teal-800">
         <strong>Депозити</strong> — гаранции от наематели. Не са приход/разход докато не бъдат задържани.
         При нарушение на договора натиснете <strong>"🔒 Задържи"</strong> — сумата се добавя към приходите.

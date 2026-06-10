@@ -232,7 +232,7 @@ export default function Invoices({ API, role }) {
   const sumNet    = sumTotal - sumCN
 
   return (
-    <div>
+    <div className="fin-surface">
       {toast && (
         <div className={`fixed top-4 right-4 z-50 px-5 py-3 rounded-xl shadow-lg text-white text-sm font-medium ${toast.type === 'error' ? 'bg-red-600' : 'bg-green-600'}`}>
           {toast.msg}
