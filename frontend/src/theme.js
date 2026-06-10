@@ -27,6 +27,30 @@ export const THEMES = {
       '--shadow-card': '0 18px 50px -28px rgba(0,0,0,0.65)',
     }
   },
+  // ── Ivory — светъл премиум: ink masthead + топла хартия + brass ────────────
+  ivory: {
+    label: 'Ivory',
+    hint: 'светло · хартия · brass',
+    icon: '◈',
+    vars: {
+      '--page-bg': '#F2EEE3',
+      '--page-fg': '#1B201C',
+      '--shell-bg': '#0F1E18',
+      '--shell-fg': '#B8BEB2',
+      '--shell-fg-strong': '#F2EEE3',
+      '--shell-hover-bg': 'rgba(216,182,106,0.14)',
+      '--accent': '#B5872F',
+      '--accent-fg': '#FFFBF2',
+      '--surface': '#FBF8F1',
+      '--surface-border': '#E6DFCF',
+      '--muted': '#6E746A',
+      '--font-display': "'Fraunces', Georgia, serif",
+      '--font-sans': "'Hanken Grotesk', system-ui, sans-serif",
+      '--font-mono': "'Space Mono', ui-monospace, monospace",
+      '--radius': '12px',
+      '--shadow-card': '0 1px 2px rgba(20,15,5,0.05), 0 8px 24px -18px rgba(20,15,5,0.18)',
+    }
+  },
   current: {
     label: 'Sky Capital',
     hint: 'оригинална визия',
@@ -118,4 +142,4 @@ export const THEMES = {
   }
 }
 
-export const THEME_ORDER = ['capital', 'current', 'linear', 'stripe', 'bloomberg']
+export const THEME_ORDER = ['ivory', 'capital', 'current', 'linear', 'stripe', 'bloomberg']
