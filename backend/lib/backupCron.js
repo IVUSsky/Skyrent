@@ -31,8 +31,11 @@ function writeFreshDbFile(db, target) {
   // Force a fresh in-memory export, then write to disk. This makes the
   // backup capture the latest committed state even if the SQLite file
   // on disk is slightly stale (sql.js writes asynchronously).
+  // Atomic: temp + rename, за да не оставим частичен backup при crash.
   const data = db._sqlDb.export();
-  fs.writeFileSync(target, Buffer.from(data));
+  const tmp = target + '.tmp';
+  fs.writeFileSync(tmp, Buffer.from(data));
+  fs.renameSync(tmp, target);
 }
 
 function pruneOldBackups(dir) {

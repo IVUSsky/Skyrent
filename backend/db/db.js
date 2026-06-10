@@ -89,7 +89,12 @@ class DB {
   _maybeSave() {
     if (this._inTx) return;
     const data = this._sqlDb.export();
-    fs.writeFileSync(DB_PATH, Buffer.from(data));
+    // Atomic write: пиши в temp файл, после rename. rename() е атомарен на
+    // същия filesystem → ако процесът умре по средата (deploy/OOM/crash),
+    // оригиналният DB файл остава непокътнат вместо да се коруптира.
+    const tmp = DB_PATH + '.tmp';
+    fs.writeFileSync(tmp, Buffer.from(data));
+    fs.renameSync(tmp, DB_PATH);
   }
 
   prepare(sql) {

@@ -845,6 +845,23 @@ async function main() {
   const authMiddleware = require('./middleware/auth');
   app.use('/api', authMiddleware);
 
+  // ─── Tenant containment (secure by default) ───────────────────────────────
+  // Наемателите ползват ИЗКЛЮЧИТЕЛНО /api/tenant/* (целият tenant портал е там)
+  // + /api/auth/* за login/password. ВСИЧКО друго (metrics, import, expenses,
+  // loans, smart, personal, settings, ...) е admin/broker и трябва да е скрито
+  // от tenant роля. Преди този guard tenant token можеше да чете цялото
+  // портфолио, личните банкови движения и да управлява smart устройствата.
+  //
+  // "Secure by default": всеки НОВ route автоматично е tenant-blocked освен ако
+  // изрично е под /api/tenant — критично за SaaS multi-tenant изолация.
+  const TENANT_ALLOWED = ['/api/tenant', '/api/auth'];
+  app.use('/api', (req, res, next) => {
+    if (req.user?.role !== 'tenant') return next();           // admin/broker → пълен достъп
+    const url = req.originalUrl.split('?')[0];
+    if (TENANT_ALLOWED.some(p => url === p || url.startsWith(p + '/'))) return next();
+    return res.status(403).json({ error: 'Forbidden' });
+  });
+
   // Backup — download the SQLite database file
   const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'db', 'portfolio.db');
   app.get('/api/backup', (req, res) => {
@@ -1013,7 +1030,31 @@ async function main() {
     console.error('Failed to register internet cron:', e.message);
   }
 
+  // ─── Express error-handling middleware (must be LAST, след всички routes) ──
+  // Хваща synchronous грешки + такива подадени през next(err). Гарантира че
+  // винаги връщаме JSON 500 вместо да оставим заявката да виси или процесът да
+  // падне от неуловена грешка в route handler.
+  app.use((err, req, res, next) => {
+    console.error('[express error]', req.method, req.path, '—', err.message);
+    if (res.headersSent) return next(err);
+    res.status(err.status || 500).json({ error: err.message || 'Internal server error' });
+  });
+
   app.listen(PORT, () => console.log(`Backend running on port ${PORT}`));
 }
+
+// ─── Process-level safety net ───────────────────────────────────────────────
+// Express 4 НЕ хваща async rejections в route handlers, а cron jobs работят
+// извън request lifecycle. Без тези handlers един unhandled rejection в който
+// и да е cron/endpoint може тихо да свали целия процес — tenant портал, Stripe
+// webhooks, всичко. Логваме и продължаваме (не exit) — по-добре degraded от dead.
+process.on('unhandledRejection', (reason) => {
+  console.error('[unhandledRejection]', reason instanceof Error ? reason.stack : reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('[uncaughtException]', err.stack || err.message || err);
+  // Не правим process.exit — оставяме процеса жив. Ако състоянието е наистина
+  // коруптирано, Railway health check ще го рестартира.
+});
 
 main().catch(err => { console.error(err); process.exit(1); });
