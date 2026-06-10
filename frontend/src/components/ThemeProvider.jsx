@@ -19,6 +19,17 @@ function applyVars(themeName) {
   root.setAttribute('data-theme', themeName)
 }
 
+// Премиум шрифтове (Fraunces / Hanken / Space Mono) — заредени веднъж глобално,
+// за да работят темите които ги ползват из целия shell (не само на login).
+function ensureFonts() {
+  if (document.querySelector('link[data-skygfont]')) return
+  const pre1 = document.createElement('link'); pre1.rel = 'preconnect'; pre1.href = 'https://fonts.googleapis.com'; pre1.setAttribute('data-skygfont', '1')
+  const pre2 = document.createElement('link'); pre2.rel = 'preconnect'; pre2.href = 'https://fonts.gstatic.com'; pre2.crossOrigin = 'anonymous'; pre2.setAttribute('data-skygfont', '1')
+  const css = document.createElement('link'); css.rel = 'stylesheet'; css.setAttribute('data-skygfont', '1')
+  css.href = 'https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..600;1,9..144,400&family=Hanken+Grotesk:wght@400;500;600&family=Space+Mono:wght@400;700&display=swap'
+  document.head.append(pre1, pre2, css)
+}
+
 export function ThemeProvider({ children, activeTab }) {
   const [picked, setPicked] = useState(() => localStorage.getItem(STORAGE_KEY) || 'current')
   const [financeAuto, setFinanceAuto] = useState(() => {
@@ -27,6 +38,8 @@ export function ThemeProvider({ children, activeTab }) {
   })
 
   const effective = (financeAuto && FINANCE_TABS.has(activeTab)) ? 'bloomberg' : picked
+
+  useEffect(() => { ensureFonts() }, [])
 
   useEffect(() => {
     applyVars(effective)
