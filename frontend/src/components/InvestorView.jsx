@@ -652,7 +652,7 @@ export default function InvestorView({ API }) {
   const hasNoOpex = !p.opex_annual || p.opex_annual === 0
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 iv-root">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h2 className="text-2xl font-bold" style={{ color: '#1a1a2e' }}>📊 Инвеститорско view</h2>
