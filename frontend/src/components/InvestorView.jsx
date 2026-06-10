@@ -649,7 +649,7 @@ export default function InvestorView({ API }) {
   const hasNoOpex = !p.opex_annual || p.opex_annual === 0
 
   return (
-    <div className="space-y-6 iv-root">
+    <div className="space-y-6 fin-surface">
       <header className="iv-mast">
         <div>
           <div className="iv-mast-eyebrow">Портфолио · отчет</div>

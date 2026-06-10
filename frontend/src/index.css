@@ -64,20 +64,20 @@ html[data-mode="dark"]{
 }
 
 /* ── InvestorView · editorial KPI card (bespoke) ──────────────────────────── */
-.iv-root .kpi-card{position:relative;background:var(--surface);
+.fin-surface .kpi-card{position:relative;background:var(--surface);
   border:1px solid var(--surface-border);border-radius:14px;
   padding:18px 18px 16px;overflow:visible;
   box-shadow:var(--shadow-card);transition:transform .18s ease, box-shadow .18s ease;}
-.iv-root .kpi-card:hover{transform:translateY(-2px);
+.fin-surface .kpi-card:hover{transform:translateY(-2px);
   box-shadow:0 14px 34px -22px rgba(0,0,0,.45);}
-.iv-root .kpi-rule{position:absolute;top:0;left:18px;right:18px;height:2px;border-radius:0 0 2px 2px;opacity:.9;}
-.iv-root .kpi-head{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:12px;}
-.iv-root .kpi-label{font-size:10px;font-weight:600;letter-spacing:.15em;text-transform:uppercase;color:var(--muted);}
-.iv-root .kpi-icon{font-size:17px;opacity:.45;line-height:1;}
-.iv-root .kpi-value{font-family:var(--font-display,Georgia,serif);font-weight:400;
+.fin-surface .kpi-rule{position:absolute;top:0;left:18px;right:18px;height:2px;border-radius:0 0 2px 2px;opacity:.9;}
+.fin-surface .kpi-head{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:12px;}
+.fin-surface .kpi-label{font-size:10px;font-weight:600;letter-spacing:.15em;text-transform:uppercase;color:var(--muted);}
+.fin-surface .kpi-icon{font-size:17px;opacity:.45;line-height:1;}
+.fin-surface .kpi-value{font-family:var(--font-display,Georgia,serif);font-weight:400;
   font-size:clamp(26px,2.4vw,32px);line-height:1.02;letter-spacing:-.012em;
   color:var(--page-fg);font-variant-numeric:tabular-nums;}
-.iv-root .kpi-sub{margin-top:8px;font-size:11.5px;line-height:1.4;color:var(--muted);}
+.fin-surface .kpi-sub{margin-top:8px;font-size:11.5px;line-height:1.4;color:var(--muted);}
 
 /* ── InvestorView · editorial masthead ────────────────────────────────────── */
 .iv-mast{display:flex;align-items:flex-end;justify-content:space-between;gap:18px;
@@ -95,80 +95,80 @@ html[data-mode="dark"]{
 .iv-section-h::before{content:'';width:14px;height:1.5px;background:var(--accent);opacity:.8;}
 
 /* ── InvestorView · editorial таблици ─────────────────────────────────────── */
-.iv-root table{font-variant-numeric:tabular-nums;}
-.iv-root thead th{font-size:10px !important;font-weight:600 !important;
+.fin-surface table{font-variant-numeric:tabular-nums;}
+.fin-surface thead th{font-size:10px !important;font-weight:600 !important;
   letter-spacing:.13em !important;text-transform:uppercase;
   color:var(--muted) !important;padding-top:11px !important;padding-bottom:11px !important;
   border-bottom:1px solid var(--surface-border);background:transparent !important;}
-.iv-root tbody td{padding-top:11px !important;padding-bottom:11px !important;
+.fin-surface tbody td{padding-top:11px !important;padding-bottom:11px !important;
   border-color:var(--surface-border) !important;}
-.iv-root tbody tr{transition:background .14s ease;}
-.iv-root tbody tr:hover{background:color-mix(in srgb, var(--accent) 8%, transparent) !important;}
+.fin-surface tbody tr{transition:background .14s ease;}
+.fin-surface tbody tr:hover{background:color-mix(in srgb, var(--accent) 8%, transparent) !important;}
 /* числови клетки — по-добра четимост */
-.iv-root td.text-right, .iv-root th.text-right{font-variant-numeric:tabular-nums;}
+.fin-surface td.text-right, .fin-surface th.text-right{font-variant-numeric:tabular-nums;}
 
 /* leverage group summary карти — editorial вместо плътен цвят */
-.iv-root .border-2{border-width:1px !important;}
-html[data-mode="dark"] .iv-root .border-green-300{border-color:rgba(95,211,160,.30) !important;}
-html[data-mode="dark"] .iv-root .border-amber-300{border-color:rgba(230,180,92,.30) !important;}
+.fin-surface .border-2{border-width:1px !important;}
+html[data-mode="dark"] .fin-surface .border-green-300{border-color:rgba(95,211,160,.30) !important;}
+html[data-mode="dark"] .fin-surface .border-amber-300{border-color:rgba(230,180,92,.30) !important;}
 
 /* ───────────────────────────────────────────────────────────────────────────
-   InvestorView — theme adoption (scoped to .iv-root)
+   InvestorView — theme adoption (scoped to .fin-surface)
    Претонира неутралите към активната тема. Семантичните цветове (green/red за
    пари нагоре/надолу) се запазват; под тъмни теми се правят dark-appropriate.
    Pattern за следващите компоненти.
    ─────────────────────────────────────────────────────────────────────────── */
 
 /* Neutrals → theme variables (адаптират се за всяка тема) */
-.iv-root .bg-white            { background: var(--surface) !important; }
-.iv-root .bg-gray-50,
-.iv-root .bg-slate-50         { background: color-mix(in srgb, var(--surface) 92%, var(--page-fg) 8%) !important; }
-.iv-root .bg-slate-100        { background: color-mix(in srgb, var(--surface) 85%, var(--page-fg) 15%) !important; }
-.iv-root .text-gray-900       { color: var(--page-fg) !important; }
-.iv-root .text-gray-700,
-.iv-root .text-gray-600       { color: color-mix(in srgb, var(--page-fg) 75%, transparent) !important; }
-.iv-root .text-gray-500,
-.iv-root .text-gray-400,
-.iv-root .text-gray-300       { color: var(--muted) !important; }
-.iv-root .border,
-.iv-root .border-gray-100,
-.iv-root .border-gray-200     { border-color: var(--surface-border) !important; }
-.iv-root .divide-gray-100 > * + * { border-color: var(--surface-border) !important; }
-.iv-root .bg-blue-50          { background: color-mix(in srgb, var(--accent) 12%, var(--surface)) !important; }
+.fin-surface .bg-white            { background: var(--surface) !important; }
+.fin-surface .bg-gray-50,
+.fin-surface .bg-slate-50         { background: color-mix(in srgb, var(--surface) 92%, var(--page-fg) 8%) !important; }
+.fin-surface .bg-slate-100        { background: color-mix(in srgb, var(--surface) 85%, var(--page-fg) 15%) !important; }
+.fin-surface .text-gray-900       { color: var(--page-fg) !important; }
+.fin-surface .text-gray-700,
+.fin-surface .text-gray-600       { color: color-mix(in srgb, var(--page-fg) 75%, transparent) !important; }
+.fin-surface .text-gray-500,
+.fin-surface .text-gray-400,
+.fin-surface .text-gray-300       { color: var(--muted) !important; }
+.fin-surface .border,
+.fin-surface .border-gray-100,
+.fin-surface .border-gray-200     { border-color: var(--surface-border) !important; }
+.fin-surface .divide-gray-100 > * + * { border-color: var(--surface-border) !important; }
+.fin-surface .bg-blue-50          { background: color-mix(in srgb, var(--accent) 12%, var(--surface)) !important; }
 
 /* Дисплей шрифт за големите KPI стойности когато темата го дефинира */
-.iv-root [data-fin] { font-variant-numeric: tabular-nums; }
+.fin-surface [data-fin] { font-variant-numeric: tabular-nums; }
 
 /* ── Под ТЪМНИ теми: semantic tints/text стават dark-appropriate ─────────── */
-html[data-mode="dark"] .iv-root .bg-green-50   { background: rgba( 34,197,148,0.10) !important; }
-html[data-mode="dark"] .iv-root .bg-red-50     { background: rgba(239,108, 92,0.10) !important; }
-html[data-mode="dark"] .iv-root .bg-amber-50   { background: rgba(216,182,106,0.11) !important; }
-html[data-mode="dark"] .iv-root .bg-orange-50  { background: rgba(240,150, 80,0.10) !important; }
-html[data-mode="dark"] .iv-root .bg-purple-50  { background: rgba(176,150,232,0.10) !important; }
-html[data-mode="dark"] .iv-root .bg-cyan-50    { background: rgba(110,200,220,0.10) !important; }
-html[data-mode="dark"] .iv-root .bg-emerald-50 { background: rgba(133,184,160,0.10) !important; }
+html[data-mode="dark"] .fin-surface .bg-green-50   { background: rgba( 34,197,148,0.10) !important; }
+html[data-mode="dark"] .fin-surface .bg-red-50     { background: rgba(239,108, 92,0.10) !important; }
+html[data-mode="dark"] .fin-surface .bg-amber-50   { background: rgba(216,182,106,0.11) !important; }
+html[data-mode="dark"] .fin-surface .bg-orange-50  { background: rgba(240,150, 80,0.10) !important; }
+html[data-mode="dark"] .fin-surface .bg-purple-50  { background: rgba(176,150,232,0.10) !important; }
+html[data-mode="dark"] .fin-surface .bg-cyan-50    { background: rgba(110,200,220,0.10) !important; }
+html[data-mode="dark"] .fin-surface .bg-emerald-50 { background: rgba(133,184,160,0.10) !important; }
 
-html[data-mode="dark"] .iv-root .border-green-200,
-html[data-mode="dark"] .iv-root .border-green-300   { border-color: rgba( 34,197,148,0.28) !important; }
-html[data-mode="dark"] .iv-root .border-red-200     { border-color: rgba(239,108, 92,0.28) !important; }
-html[data-mode="dark"] .iv-root .border-amber-200,
-html[data-mode="dark"] .iv-root .border-amber-300   { border-color: rgba(216,182,106,0.30) !important; }
-html[data-mode="dark"] .iv-root .border-cyan-200    { border-color: rgba(110,200,220,0.28) !important; }
-html[data-mode="dark"] .iv-root .border-purple-200  { border-color: rgba(176,150,232,0.28) !important; }
-html[data-mode="dark"] .iv-root .border-emerald-200 { border-color: rgba(133,184,160,0.28) !important; }
+html[data-mode="dark"] .fin-surface .border-green-200,
+html[data-mode="dark"] .fin-surface .border-green-300   { border-color: rgba( 34,197,148,0.28) !important; }
+html[data-mode="dark"] .fin-surface .border-red-200     { border-color: rgba(239,108, 92,0.28) !important; }
+html[data-mode="dark"] .fin-surface .border-amber-200,
+html[data-mode="dark"] .fin-surface .border-amber-300   { border-color: rgba(216,182,106,0.30) !important; }
+html[data-mode="dark"] .fin-surface .border-cyan-200    { border-color: rgba(110,200,220,0.28) !important; }
+html[data-mode="dark"] .fin-surface .border-purple-200  { border-color: rgba(176,150,232,0.28) !important; }
+html[data-mode="dark"] .fin-surface .border-emerald-200 { border-color: rgba(133,184,160,0.28) !important; }
 
 /* Семантичен текст — изсветлен за четимост на тъмно */
-html[data-mode="dark"] .iv-root .text-green-700,
-html[data-mode="dark"] .iv-root .text-green-800   { color: #5FD3A0 !important; }
-html[data-mode="dark"] .iv-root .text-red-700,
-html[data-mode="dark"] .iv-root .text-red-800     { color: #F0917E !important; }
-html[data-mode="dark"] .iv-root .text-amber-700,
-html[data-mode="dark"] .iv-root .text-amber-800   { color: #E6B45C !important; }
-html[data-mode="dark"] .iv-root .text-emerald-700 { color: #86C9A8 !important; }
-html[data-mode="dark"] .iv-root .text-orange-700  { color: #F0A75C !important; }
-html[data-mode="dark"] .iv-root .text-purple-700,
-html[data-mode="dark"] .iv-root .text-purple-600  { color: #C2A2EC !important; }
-html[data-mode="dark"] .iv-root .text-blue-700,
-html[data-mode="dark"] .iv-root .text-cyan-700,
-html[data-mode="dark"] .iv-root .text-cyan-900    { color: #84BDE6 !important; }
-html[data-mode="dark"] .iv-root .text-\[\#4AABCC\] { color: var(--accent) !important; }
+html[data-mode="dark"] .fin-surface .text-green-700,
+html[data-mode="dark"] .fin-surface .text-green-800   { color: #5FD3A0 !important; }
+html[data-mode="dark"] .fin-surface .text-red-700,
+html[data-mode="dark"] .fin-surface .text-red-800     { color: #F0917E !important; }
+html[data-mode="dark"] .fin-surface .text-amber-700,
+html[data-mode="dark"] .fin-surface .text-amber-800   { color: #E6B45C !important; }
+html[data-mode="dark"] .fin-surface .text-emerald-700 { color: #86C9A8 !important; }
+html[data-mode="dark"] .fin-surface .text-orange-700  { color: #F0A75C !important; }
+html[data-mode="dark"] .fin-surface .text-purple-700,
+html[data-mode="dark"] .fin-surface .text-purple-600  { color: #C2A2EC !important; }
+html[data-mode="dark"] .fin-surface .text-blue-700,
+html[data-mode="dark"] .fin-surface .text-cyan-700,
+html[data-mode="dark"] .fin-surface .text-cyan-900    { color: #84BDE6 !important; }
+html[data-mode="dark"] .fin-surface .text-\[\#4AABCC\] { color: var(--accent) !important; }

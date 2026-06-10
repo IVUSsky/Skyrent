@@ -11,35 +11,24 @@ const fmt = (n, decimals = 0) => {
 
 const fmtPct = (n) => n != null && !isNaN(n) ? `${(n * 100).toFixed(1)}%` : '—'
 
-function KpiCard({ label, value, sub, color, icon }) {
-  const colorMap = {
-    blue:   'border-[#b2dce8] bg-[#e3f4f9]',
-    green:  'border-green-200 bg-green-50',
-    red:    'border-red-200 bg-red-50',
-    yellow: 'border-amber-200 bg-amber-50',
-    purple: 'border-[#b2dce8] bg-[#d6eef5]',
-    gray:   'border-gray-200 bg-gray-50',
-    orange: 'border-orange-200 bg-orange-50',
-  }
-  const textMap = {
-    blue:   'text-[#0e3d52]',
-    green:  'text-green-700',
-    red:    'text-red-700',
-    yellow: 'text-amber-700',
-    purple: 'text-[#1a5f7a]',
-    gray:   'text-gray-700',
-    orange: 'text-orange-700',
-  }
+// Editorial stat блок (споделен език с InvestorView — .kpi-card / Fraunces числа)
+const KPI_ACCENT = {
+  blue: 'var(--info)', green: 'var(--pos)', red: 'var(--neg)',
+  yellow: 'var(--warn)', orange: 'var(--warn)', purple: 'var(--special)',
+  gray: 'var(--accent)',
+}
+function KpiCard({ label, value, sub, color = 'gray', icon }) {
+  const accent = KPI_ACCENT[color] || 'var(--accent)'
+  const valueColor = (color === 'green' || color === 'red') ? accent : 'var(--page-fg)'
   return (
-    <div className={`border rounded-xl p-4 ${colorMap[color] || colorMap.gray}`}>
-      <div className="flex items-start justify-between">
-        <div>
-          <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider">{label}</div>
-          <div className={`text-2xl font-bold mt-1 ${textMap[color] || textMap.gray}`}>{value}</div>
-          {sub && <div className="text-xs text-gray-500 mt-0.5">{sub}</div>}
-        </div>
-        {icon && <span className="text-2xl opacity-70">{icon}</span>}
+    <div className="kpi-card">
+      <span className="kpi-rule" style={{ background: accent }} />
+      <div className="kpi-head">
+        <div className="kpi-label">{label}</div>
+        {icon && <span className="kpi-icon">{icon}</span>}
       </div>
+      <div className="kpi-value" style={{ color: valueColor }}>{value}</div>
+      {sub && <div className="kpi-sub">{sub}</div>}
     </div>
   )
 }
@@ -192,14 +181,17 @@ export default function Dashboard({ API }) {
     .sort((a, b) => b.rent - a.rent)
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-6">
-        <h2 className="text-2xl font-bold" style={{ color: '#1a1a2e' }}>Dashboard</h2>
+    <div className="fin-surface">
+      <header className="iv-mast mb-6">
+        <div>
+          <div className="iv-mast-eyebrow">Sky Capital · преглед</div>
+          <h2 className="iv-mast-title">Dashboard</h2>
+        </div>
         <button onClick={() => setShowLegend(true)}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-500 hover:text-blue-700 border border-gray-200 hover:border-blue-300 rounded-lg transition-colors bg-white">
+          className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-500 hover:text-blue-700 border border-gray-200 rounded-lg transition-colors bg-white">
           <span className="font-bold text-base leading-none">?</span> Легенда
         </button>
-      </div>
+      </header>
       {showLegend && <LegendModal onClose={() => setShowLegend(false)} />}
 
       {/* KPI Grid */}
@@ -293,7 +285,7 @@ export default function Dashboard({ API }) {
       {/* Expenses section */}
       {monthly.length > 0 && (
         <div className="bg-white rounded-xl shadow border border-gray-100 p-5 mb-8">
-          <h3 className="text-base font-bold text-gray-800 mb-4">💸 Разходи</h3>
+          <h3 className="iv-section-h">💸 Разходи</h3>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
 
             {/* Bank expenses */}
@@ -386,7 +378,7 @@ export default function Dashboard({ API }) {
       {/* ── Финансово резюме / P&L ── */}
       <div className="bg-white rounded-xl shadow border border-gray-100 p-5 mb-8">
         <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
-          <h3 className="text-base font-bold text-gray-800">📊 Финансово резюме</h3>
+          <h3 className="iv-section-h">📊 Финансово резюме</h3>
           <div className="flex items-center gap-2">
             <label className="text-xs text-gray-500">Месец:</label>
             <input type="month" value={plMonth} onChange={e => setPlMonth(e.target.value)}
@@ -545,7 +537,7 @@ export default function Dashboard({ API }) {
 
       {/* Bar chart - rent by район */}
       <div className="bg-white rounded-xl shadow p-5 border border-gray-100 mb-8">
-        <h3 className="text-base font-bold text-gray-800 mb-4">Наем по район (€/мес)</h3>
+        <h3 className="iv-section-h">Наем по район (€/мес)</h3>
         <ResponsiveContainer width="100%" height={280}>
           <BarChart data={rayonData} margin={{ top: 5, right: 20, left: 10, bottom: 60 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
@@ -574,7 +566,7 @@ export default function Dashboard({ API }) {
       {monthly.length > 0 && (
         <div className="bg-white rounded-xl shadow overflow-hidden border border-gray-100">
           <div className="px-5 py-4 border-b border-gray-200">
-            <h3 className="text-base font-bold text-gray-800">Месечен кеш флоу (от импорт)</h3>
+            <h3 className="iv-section-h">Месечен кеш флоу (от импорт)</h3>
           </div>
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200 text-sm">
