@@ -164,29 +164,26 @@ function HintLabel({ children }) {
   return <InfoTooltip text={text}>{children}</InfoTooltip>
 }
 
+// Editorial "wealth statement" stat block — Fraunces числа, brass/семантичен
+// hairline вместо цветна кутия. Тонира се през theme tokens (всички теми).
+const KPI_ACCENT = {
+  blue: 'var(--info)', green: 'var(--pos)', red: 'var(--neg)',
+  yellow: 'var(--warn)', orange: 'var(--warn)', purple: 'var(--special)',
+  gray: 'var(--accent)',
+}
 function KpiCard({ label, value, sub, color = 'gray', icon }) {
-  const map = {
-    blue:   { border: 'border-[#b2dce8]', bg: 'bg-[#e3f4f9]', text: 'text-[#0e3d52]' },
-    green:  { border: 'border-green-200',  bg: 'bg-green-50',  text: 'text-green-700' },
-    red:    { border: 'border-red-200',    bg: 'bg-red-50',    text: 'text-red-700' },
-    yellow: { border: 'border-amber-200',  bg: 'bg-amber-50',  text: 'text-amber-700' },
-    purple: { border: 'border-purple-200', bg: 'bg-purple-50', text: 'text-purple-700' },
-    gray:   { border: 'border-gray-200',   bg: 'bg-gray-50',   text: 'text-gray-700' },
-    orange: { border: 'border-orange-200', bg: 'bg-orange-50', text: 'text-orange-700' },
-  }
-  const c = map[color] || map.gray
+  const accent = KPI_ACCENT[color] || 'var(--accent)'
+  // Само печалба/загуба оцветяват самото число; останалите остават неутрални.
+  const valueColor = (color === 'green' || color === 'red') ? accent : 'var(--page-fg)'
   return (
-    <div className={`border rounded-xl p-4 ${c.border} ${c.bg} overflow-visible`}>
-      <div className="flex items-start justify-between">
-        <div className="min-w-0">
-          <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
-            <HintLabel>{label}</HintLabel>
-          </div>
-          <div className={`text-2xl font-bold mt-1 ${c.text}`}>{value}</div>
-          {sub && <div className="text-xs text-gray-500 mt-1">{sub}</div>}
-        </div>
-        {icon && <span className="text-2xl opacity-70">{icon}</span>}
+    <div className="kpi-card">
+      <span className="kpi-rule" style={{ background: accent }} />
+      <div className="kpi-head">
+        <div className="kpi-label"><HintLabel>{label}</HintLabel></div>
+        {icon && <span className="kpi-icon">{icon}</span>}
       </div>
+      <div className="kpi-value" style={{ color: valueColor }}>{value}</div>
+      {sub && <div className="kpi-sub">{sub}</div>}
     </div>
   )
 }
@@ -402,7 +399,7 @@ function LeverageAnalysis({ byProperty, loanSchedules }) {
 
   return (
     <section>
-      <h3 className="text-sm font-semibold text-gray-700 mb-3">⚖️ Левередж анализ — кеш флоу по групи</h3>
+      <h3 className="iv-section-h">⚖️ Левередж анализ — кеш флоу по групи</h3>
 
       {/* Group summary cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
@@ -653,14 +650,19 @@ export default function InvestorView({ API }) {
 
   return (
     <div className="space-y-6 iv-root">
-      <div className="flex items-center justify-between flex-wrap gap-3">
+      <header className="iv-mast">
         <div>
-          <h2 className="text-2xl font-bold" style={{ color: '#1a1a2e' }}>📊 Инвеститорско view</h2>
-          <div className="text-sm text-gray-500 mt-1">
-            Asof: {data.asof} · Opex period: {data.opex_period_from} → now · Currency: {data.currency}
-          </div>
+          <div className="iv-mast-eyebrow">Портфолио · отчет</div>
+          <h2 className="iv-mast-title">Инвеститорско view</h2>
         </div>
-      </div>
+        <div className="iv-mast-meta">
+          <span>към {data.asof}</span>
+          <span className="iv-mast-dot" />
+          <span>opex {data.opex_period_from} → сега</span>
+          <span className="iv-mast-dot" />
+          <span>{data.currency}</span>
+        </div>
+      </header>
 
       {/* Warning banners */}
       {hasNoOpex && (
@@ -677,7 +679,7 @@ export default function InvestorView({ API }) {
 
       {/* Lifecycle breakdown */}
       <section>
-        <h3 className="text-sm font-semibold text-gray-700 mb-3">Lifecycle разпределение</h3>
+        <h3 className="iv-section-h">Lifecycle разпределение</h3>
         <div className="flex flex-wrap gap-2">
           {stageBreakdown.map(s => (
             <button
@@ -703,7 +705,7 @@ export default function InvestorView({ API }) {
 
       {/* Main KPI cards */}
       <section>
-        <h3 className="text-sm font-semibold text-gray-700 mb-3">Портфолио KPI</h3>
+        <h3 className="iv-section-h">Портфолио KPI</h3>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <KpiCard label="Asset base" value={fmtEur(p.asset_base)} icon="🏠" color="blue" />
           <KpiCard label="Total debt" value={fmtEur(p.total_debt)} sub={`+ off-plan: ${fmtEur(p.off_plan_obligations || 0)}`} icon="🏦" color="orange" />
@@ -725,7 +727,7 @@ export default function InvestorView({ API }) {
 
       {/* 12m amortization */}
       <section>
-        <h3 className="text-sm font-semibold text-gray-700 mb-3">Дълг — 12 месеца напред</h3>
+        <h3 className="iv-section-h">Дълг — 12 месеца напред</h3>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
           <KpiCard label="Principal погасен" value={fmtEur(p.principal_paydown_12m)} sub="дълг намалява с" color="green" />
           <KpiCard label="Lihva 12m" value={fmtEur(p.interest_12m)} sub="плащате lihva" color="orange" />
@@ -757,7 +759,7 @@ export default function InvestorView({ API }) {
       {/* Loan schedules table */}
       {data.loan_schedules?.length > 0 && (
         <section>
-          <h3 className="text-sm font-semibold text-gray-700 mb-3">Кредити (12m amortization)</h3>
+          <h3 className="iv-section-h">Кредити (12m amortization)</h3>
           <div className="bg-white border rounded-xl overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-gray-50">
@@ -848,7 +850,7 @@ export default function InvestorView({ API }) {
 
       {/* Per-property full table */}
       <section>
-        <h3 className="text-sm font-semibold text-gray-700 mb-3">
+        <h3 className="iv-section-h">
           Per-property {stageFilter !== 'all' && <span className="text-[#4AABCC]">(филтър: {STAGE_LABELS[stageFilter]})</span>}
           <span className="text-gray-400 font-normal"> — {sortedProps.length} имота</span>
         </h3>

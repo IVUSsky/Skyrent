@@ -55,6 +55,45 @@ html[data-theme="bloomberg"] main .bg-white canvas {
   color: var(--shell-fg-strong);
 }
 
+/* Семантични accent цветове (пари нагоре/надолу/внимание) — адаптират за mode */
+:root{
+  --pos:#1F9D63; --neg:#CF5247; --warn:#B5872F; --info:#3F93C4; --special:#7C5CD6;
+}
+html[data-mode="dark"]{
+  --pos:#5FD3A0; --neg:#F0917E; --warn:#E6B45C; --info:#84BDE6; --special:#C2A2EC;
+}
+
+/* ── InvestorView · editorial KPI card (bespoke) ──────────────────────────── */
+.iv-root .kpi-card{position:relative;background:var(--surface);
+  border:1px solid var(--surface-border);border-radius:14px;
+  padding:18px 18px 16px;overflow:visible;
+  box-shadow:var(--shadow-card);transition:transform .18s ease, box-shadow .18s ease;}
+.iv-root .kpi-card:hover{transform:translateY(-2px);
+  box-shadow:0 14px 34px -22px rgba(0,0,0,.45);}
+.iv-root .kpi-rule{position:absolute;top:0;left:18px;right:18px;height:2px;border-radius:0 0 2px 2px;opacity:.9;}
+.iv-root .kpi-head{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:12px;}
+.iv-root .kpi-label{font-size:10px;font-weight:600;letter-spacing:.15em;text-transform:uppercase;color:var(--muted);}
+.iv-root .kpi-icon{font-size:17px;opacity:.45;line-height:1;}
+.iv-root .kpi-value{font-family:var(--font-display,Georgia,serif);font-weight:400;
+  font-size:clamp(26px,2.4vw,32px);line-height:1.02;letter-spacing:-.012em;
+  color:var(--page-fg);font-variant-numeric:tabular-nums;}
+.iv-root .kpi-sub{margin-top:8px;font-size:11.5px;line-height:1.4;color:var(--muted);}
+
+/* ── InvestorView · editorial masthead ────────────────────────────────────── */
+.iv-mast{display:flex;align-items:flex-end;justify-content:space-between;gap:18px;
+  flex-wrap:wrap;padding-bottom:18px;border-bottom:1px solid var(--surface-border);}
+.iv-mast-eyebrow{font-size:10.5px;font-weight:600;letter-spacing:.22em;text-transform:uppercase;color:var(--accent);margin-bottom:10px;}
+.iv-mast-title{font-family:var(--font-display,Georgia,serif);font-weight:400;
+  font-size:clamp(28px,3.4vw,40px);line-height:1;letter-spacing:-.015em;color:var(--page-fg);margin:0;}
+.iv-mast-meta{font-size:12px;color:var(--muted);letter-spacing:.02em;display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
+.iv-mast-dot{width:3px;height:3px;border-radius:50%;background:var(--accent);opacity:.7;}
+
+/* Секционни заглавия — по-изчистени */
+.iv-section-h{font-family:var(--font-display,Georgia,serif);font-weight:400;
+  font-size:18px;letter-spacing:-.01em;color:var(--page-fg);margin-bottom:14px;
+  display:flex;align-items:center;gap:9px;}
+.iv-section-h::before{content:'';width:14px;height:1.5px;background:var(--accent);opacity:.8;}
+
 /* ───────────────────────────────────────────────────────────────────────────
    InvestorView — theme adoption (scoped to .iv-root)
    Претонира неутралите към активната тема. Семантичните цветове (green/red за
