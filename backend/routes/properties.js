@@ -33,8 +33,10 @@ module.exports = function(db) {
 
     // Bank-imported payments — aggregate + per-tx detail
     const bankPaid = db.prepare(
-      `SELECT property_id, SUM(сума) as paid_amount, COUNT(*) as tx_count
-       FROM transactions WHERE категория = 'наем' AND месец = ?
+      `SELECT property_id,
+              SUM(CASE WHEN UPPER(COALESCE(currency,'BGN'))='BGN' THEN сума/1.95583 ELSE сума END) as paid_amount,
+              COUNT(*) as tx_count
+       FROM transactions WHERE категория = 'наем' AND operation = 'Кт' AND месец = ?
        GROUP BY property_id`
     ).all(month);
     const bankMap = {};
@@ -96,9 +98,10 @@ module.exports = function(db) {
 
       // 1. Duplicates — ≥2 'наем' txs same property + month
       const dupRows = db.prepare(
-        `SELECT property_id, COUNT(*) as cnt, SUM(сума) as total
+        `SELECT property_id, COUNT(*) as cnt,
+                SUM(CASE WHEN UPPER(COALESCE(currency,'BGN'))='BGN' THEN сума/1.95583 ELSE сума END) as total
          FROM transactions
-         WHERE категория = 'наем' AND месец = ? AND property_id IS NOT NULL
+         WHERE категория = 'наем' AND operation = 'Кт' AND месец = ? AND property_id IS NOT NULL
          GROUP BY property_id
          HAVING cnt >= 2`
       ).all(month);
@@ -213,9 +216,11 @@ module.exports = function(db) {
       ).all();
 
       const bank = db.prepare(
-        `SELECT property_id, месец, SUM(сума) as paid_amount, COUNT(*) as tx_count
+        `SELECT property_id, месец,
+                SUM(CASE WHEN UPPER(COALESCE(currency,'BGN'))='BGN' THEN сума/1.95583 ELSE сума END) as paid_amount,
+                COUNT(*) as tx_count
          FROM transactions
-         WHERE категория = 'наем' AND property_id IS NOT NULL
+         WHERE категория = 'наем' AND operation = 'Кт' AND property_id IS NOT NULL
            AND месец >= ? AND месец <= ?
          GROUP BY property_id, месец`
       ).all(monthFrom, monthTo);
