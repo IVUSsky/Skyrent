@@ -12,11 +12,25 @@ export function useTheme() {
   return ctx
 }
 
+// Светла или тъмна тема — от относителната яркост на --page-bg. Авто за
+// всяка нова тема, без да трябва ръчно да маркираме. Дава [data-mode] селектор
+// за component adoption (напр. .iv-root retint под тъмни теми).
+function isDarkBg(hex) {
+  if (typeof hex !== 'string') return false
+  const h = hex.replace('#', '')
+  if (h.length < 6) return false
+  const r = parseInt(h.slice(0, 2), 16)
+  const g = parseInt(h.slice(2, 4), 16)
+  const b = parseInt(h.slice(4, 6), 16)
+  return (0.299 * r + 0.587 * g + 0.114 * b) < 110
+}
+
 function applyVars(themeName) {
   const theme = THEMES[themeName] || THEMES.current
   const root = document.documentElement
   Object.entries(theme.vars).forEach(([k, v]) => root.style.setProperty(k, v))
   root.setAttribute('data-theme', themeName)
+  root.setAttribute('data-mode', isDarkBg(theme.vars['--page-bg']) ? 'dark' : 'light')
 }
 
 // Премиум шрифтове (Fraunces / Hanken / Space Mono) — заредени веднъж глобално,

@@ -54,3 +54,64 @@ html[data-theme="bloomberg"] main .bg-white canvas {
   background: var(--shell-hover-bg);
   color: var(--shell-fg-strong);
 }
+
+/* ───────────────────────────────────────────────────────────────────────────
+   InvestorView — theme adoption (scoped to .iv-root)
+   Претонира неутралите към активната тема. Семантичните цветове (green/red за
+   пари нагоре/надолу) се запазват; под тъмни теми се правят dark-appropriate.
+   Pattern за следващите компоненти.
+   ─────────────────────────────────────────────────────────────────────────── */
+
+/* Neutrals → theme variables (адаптират се за всяка тема) */
+.iv-root .bg-white            { background: var(--surface) !important; }
+.iv-root .bg-gray-50,
+.iv-root .bg-slate-50         { background: color-mix(in srgb, var(--surface) 92%, var(--page-fg) 8%) !important; }
+.iv-root .bg-slate-100        { background: color-mix(in srgb, var(--surface) 85%, var(--page-fg) 15%) !important; }
+.iv-root .text-gray-900       { color: var(--page-fg) !important; }
+.iv-root .text-gray-700,
+.iv-root .text-gray-600       { color: color-mix(in srgb, var(--page-fg) 75%, transparent) !important; }
+.iv-root .text-gray-500,
+.iv-root .text-gray-400,
+.iv-root .text-gray-300       { color: var(--muted) !important; }
+.iv-root .border,
+.iv-root .border-gray-100,
+.iv-root .border-gray-200     { border-color: var(--surface-border) !important; }
+.iv-root .divide-gray-100 > * + * { border-color: var(--surface-border) !important; }
+.iv-root .bg-blue-50          { background: color-mix(in srgb, var(--accent) 12%, var(--surface)) !important; }
+
+/* Дисплей шрифт за големите KPI стойности когато темата го дефинира */
+.iv-root [data-fin] { font-variant-numeric: tabular-nums; }
+
+/* ── Под ТЪМНИ теми: semantic tints/text стават dark-appropriate ─────────── */
+html[data-mode="dark"] .iv-root .bg-green-50   { background: rgba( 34,197,148,0.10) !important; }
+html[data-mode="dark"] .iv-root .bg-red-50     { background: rgba(239,108, 92,0.10) !important; }
+html[data-mode="dark"] .iv-root .bg-amber-50   { background: rgba(216,182,106,0.11) !important; }
+html[data-mode="dark"] .iv-root .bg-orange-50  { background: rgba(240,150, 80,0.10) !important; }
+html[data-mode="dark"] .iv-root .bg-purple-50  { background: rgba(176,150,232,0.10) !important; }
+html[data-mode="dark"] .iv-root .bg-cyan-50    { background: rgba(110,200,220,0.10) !important; }
+html[data-mode="dark"] .iv-root .bg-emerald-50 { background: rgba(133,184,160,0.10) !important; }
+
+html[data-mode="dark"] .iv-root .border-green-200,
+html[data-mode="dark"] .iv-root .border-green-300   { border-color: rgba( 34,197,148,0.28) !important; }
+html[data-mode="dark"] .iv-root .border-red-200     { border-color: rgba(239,108, 92,0.28) !important; }
+html[data-mode="dark"] .iv-root .border-amber-200,
+html[data-mode="dark"] .iv-root .border-amber-300   { border-color: rgba(216,182,106,0.30) !important; }
+html[data-mode="dark"] .iv-root .border-cyan-200    { border-color: rgba(110,200,220,0.28) !important; }
+html[data-mode="dark"] .iv-root .border-purple-200  { border-color: rgba(176,150,232,0.28) !important; }
+html[data-mode="dark"] .iv-root .border-emerald-200 { border-color: rgba(133,184,160,0.28) !important; }
+
+/* Семантичен текст — изсветлен за четимост на тъмно */
+html[data-mode="dark"] .iv-root .text-green-700,
+html[data-mode="dark"] .iv-root .text-green-800   { color: #5FD3A0 !important; }
+html[data-mode="dark"] .iv-root .text-red-700,
+html[data-mode="dark"] .iv-root .text-red-800     { color: #F0917E !important; }
+html[data-mode="dark"] .iv-root .text-amber-700,
+html[data-mode="dark"] .iv-root .text-amber-800   { color: #E6B45C !important; }
+html[data-mode="dark"] .iv-root .text-emerald-700 { color: #86C9A8 !important; }
+html[data-mode="dark"] .iv-root .text-orange-700  { color: #F0A75C !important; }
+html[data-mode="dark"] .iv-root .text-purple-700,
+html[data-mode="dark"] .iv-root .text-purple-600  { color: #C2A2EC !important; }
+html[data-mode="dark"] .iv-root .text-blue-700,
+html[data-mode="dark"] .iv-root .text-cyan-700,
+html[data-mode="dark"] .iv-root .text-cyan-900    { color: #84BDE6 !important; }
+html[data-mode="dark"] .iv-root .text-\[\#4AABCC\] { color: var(--accent) !important; }
