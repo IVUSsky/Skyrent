@@ -124,7 +124,8 @@ html[data-mode="dark"] .fin-surface .border-amber-300{border-color:rgba(230,180,
 .fin-surface .bg-gray-50,
 .fin-surface .bg-slate-50         { background: color-mix(in srgb, var(--surface) 92%, var(--page-fg) 8%) !important; }
 .fin-surface .bg-slate-100        { background: color-mix(in srgb, var(--surface) 85%, var(--page-fg) 15%) !important; }
-.fin-surface .text-gray-900       { color: var(--page-fg) !important; }
+.fin-surface .text-gray-900,
+.fin-surface .text-gray-800       { color: var(--page-fg) !important; }
 .fin-surface .text-gray-700,
 .fin-surface .text-gray-600       { color: color-mix(in srgb, var(--page-fg) 75%, transparent) !important; }
 .fin-surface .text-gray-500,
@@ -172,3 +173,23 @@ html[data-mode="dark"] .fin-surface .text-blue-700,
 html[data-mode="dark"] .fin-surface .text-cyan-700,
 html[data-mode="dark"] .fin-surface .text-cyan-900    { color: #84BDE6 !important; }
 html[data-mode="dark"] .fin-surface .text-\[\#4AABCC\] { color: var(--accent) !important; }
+
+/* ── Badge/pill -100 фонове под тъмни теми → тъмни tint-ове ──────────────────
+   Иначе светло-Tailwind-фон + изсветлен текст = светло-на-светло (бледи балони). */
+html[data-mode="dark"] .fin-surface .bg-gray-100   { background: rgba(236,230,215,0.12) !important; }
+html[data-mode="dark"] .fin-surface .bg-green-100  { background: rgba( 34,197,148,0.18) !important; }
+html[data-mode="dark"] .fin-surface .bg-red-100    { background: rgba(239,108, 92,0.18) !important; }
+html[data-mode="dark"] .fin-surface .bg-blue-100   { background: rgba(132,189,230,0.18) !important; }
+html[data-mode="dark"] .fin-surface .bg-amber-100,
+html[data-mode="dark"] .fin-surface .bg-yellow-100 { background: rgba(216,182,106,0.18) !important; }
+html[data-mode="dark"] .fin-surface .bg-purple-100 { background: rgba(176,150,232,0.18) !important; }
+html[data-mode="dark"] .fin-surface .bg-cyan-100   { background: rgba(110,200,220,0.18) !important; }
+html[data-mode="dark"] .fin-surface .bg-emerald-100{ background: rgba(133,184,160,0.18) !important; }
+html[data-mode="dark"] .fin-surface .bg-orange-100 { background: rgba(240,150, 80,0.18) !important; }
+
+/* Badge текст за -600/-800 нюанси, които още не са изсветлени */
+html[data-mode="dark"] .fin-surface .text-gray-600,
+html[data-mode="dark"] .fin-surface .text-gray-700 { color: color-mix(in srgb, var(--page-fg) 82%, transparent) !important; }
+html[data-mode="dark"] .fin-surface .text-blue-800 { color: #84BDE6 !important; }
+html[data-mode="dark"] .fin-surface .text-red-600  { color: #F0917E !important; }
+html[data-mode="dark"] .fin-surface .text-green-600{ color: #5FD3A0 !important; }
