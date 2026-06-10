@@ -845,6 +845,23 @@ async function main() {
   const authMiddleware = require('./middleware/auth');
   app.use('/api', authMiddleware);
 
+  // ─── Tenant containment (secure by default) ───────────────────────────────
+  // Наемателите ползват ИЗКЛЮЧИТЕЛНО /api/tenant/* (целият tenant портал е там)
+  // + /api/auth/* за login/password. ВСИЧКО друго (metrics, import, expenses,
+  // loans, smart, personal, settings, ...) е admin/broker и трябва да е скрито
+  // от tenant роля. Преди този guard tenant token можеше да чете цялото
+  // портфолио, личните банкови движения и да управлява smart устройствата.
+  //
+  // "Secure by default": всеки НОВ route автоматично е tenant-blocked освен ако
+  // изрично е под /api/tenant — критично за SaaS multi-tenant изолация.
+  const TENANT_ALLOWED = ['/api/tenant', '/api/auth'];
+  app.use('/api', (req, res, next) => {
+    if (req.user?.role !== 'tenant') return next();           // admin/broker → пълен достъп
+    const url = req.originalUrl.split('?')[0];
+    if (TENANT_ALLOWED.some(p => url === p || url.startsWith(p + '/'))) return next();
+    return res.status(403).json({ error: 'Forbidden' });
+  });
+
   // Backup — download the SQLite database file
   const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'db', 'portfolio.db');
   app.get('/api/backup', (req, res) => {
