@@ -1013,7 +1013,31 @@ async function main() {
     console.error('Failed to register internet cron:', e.message);
   }
 
+  // ─── Express error-handling middleware (must be LAST, след всички routes) ──
+  // Хваща synchronous грешки + такива подадени през next(err). Гарантира че
+  // винаги връщаме JSON 500 вместо да оставим заявката да виси или процесът да
+  // падне от неуловена грешка в route handler.
+  app.use((err, req, res, next) => {
+    console.error('[express error]', req.method, req.path, '—', err.message);
+    if (res.headersSent) return next(err);
+    res.status(err.status || 500).json({ error: err.message || 'Internal server error' });
+  });
+
   app.listen(PORT, () => console.log(`Backend running on port ${PORT}`));
 }
+
+// ─── Process-level safety net ───────────────────────────────────────────────
+// Express 4 НЕ хваща async rejections в route handlers, а cron jobs работят
+// извън request lifecycle. Без тези handlers един unhandled rejection в който
+// и да е cron/endpoint може тихо да свали целия процес — tenant портал, Stripe
+// webhooks, всичко. Логваме и продължаваме (не exit) — по-добре degraded от dead.
+process.on('unhandledRejection', (reason) => {
+  console.error('[unhandledRejection]', reason instanceof Error ? reason.stack : reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('[uncaughtException]', err.stack || err.message || err);
+  // Не правим process.exit — оставяме процеса жив. Ако състоянието е наистина
+  // коруптирано, Railway health check ще го рестартира.
+});
 
 main().catch(err => { console.error(err); process.exit(1); });
