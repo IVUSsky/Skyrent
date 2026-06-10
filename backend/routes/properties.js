@@ -429,15 +429,23 @@ module.exports = function(db) {
   // ── Monthly history per property ──────────────────────────────
   router.get('/:id/monthly', (req, res) => {
     const id = req.params.id;
+    // Нормализираме всичко в EUR (фиксиран курс 1.95583). Сумите в transactions
+    // и expense_invoices са в native валута (BGN преди EUR прехода, но някои
+    // акаунти остават BGN-деноминирани и в 2026). Без конверсия BGN стойностите
+    // изглеждат ~2× когато се показват с € етикет. + само Кт за наем (приход).
     const rentRows = db.prepare(`
-      SELECT месец, SUM(сума) as наем_total, COUNT(*) as tx_count
+      SELECT месец,
+             SUM(CASE WHEN UPPER(COALESCE(currency,'BGN'))='BGN' THEN сума/1.95583 ELSE сума END) as наем_total,
+             COUNT(*) as tx_count
       FROM transactions
-      WHERE property_id = ? AND категория = 'наем' AND месец IS NOT NULL
+      WHERE property_id = ? AND категория = 'наем' AND operation = 'Кт' AND месец IS NOT NULL
       GROUP BY месец ORDER BY месец
     `).all(id);
 
     const expRows = db.prepare(`
-      SELECT месец, SUM(amount) as expense_total, COUNT(*) as exp_count
+      SELECT месец,
+             SUM(CASE WHEN UPPER(COALESCE(currency,'BGN'))='BGN' THEN amount/1.95583 ELSE amount END) as expense_total,
+             COUNT(*) as exp_count
       FROM expense_invoices
       WHERE property_id = ? AND месец IS NOT NULL
       GROUP BY месец ORDER BY месец
