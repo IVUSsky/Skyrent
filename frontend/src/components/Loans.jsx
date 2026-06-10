@@ -82,8 +82,13 @@ export default function Loans({ API }) {
   }
 
   return (
-    <div>
-      <h2 className="text-2xl font-bold text-gray-800 mb-6">Кредити</h2>
+    <div className="fin-surface">
+      <header className="iv-mast mb-6">
+        <div>
+          <div className="iv-mast-eyebrow">Капиталова структура</div>
+          <h2 className="iv-mast-title">Кредити</h2>
+        </div>
+      </header>
 
       {/* Bank Concentration */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
