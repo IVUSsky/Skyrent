@@ -2,4 +2,55 @@
 @tailwind components;
 @tailwind utilities;
 
-body { font-family: system-ui, -apple-system, sans-serif; }
+:root {
+  --page-bg: #f0f2f8;
+  --page-fg: #0f172a;
+  --shell-bg: #1a1a2e;
+  --shell-fg: #cbd5e1;
+  --shell-fg-strong: #ffffff;
+  --shell-hover-bg: rgba(255,255,255,0.10);
+  --accent: #4AABCC;
+  --accent-fg: #ffffff;
+  --surface: #ffffff;
+  --surface-border: #e2e8f0;
+  --muted: #64748b;
+  --font-sans: system-ui, -apple-system, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, monospace;
+  --radius: 8px;
+  --shadow-card: 0 1px 2px rgba(0,0,0,0.06);
+}
+
+body {
+  font-family: var(--font-sans);
+  background: var(--page-bg);
+  color: var(--page-fg);
+}
+
+/* Bloomberg theme: глобални финансови tweaks без да пипаме всеки компонент */
+html[data-theme="bloomberg"] body {
+  background: var(--page-bg);
+}
+
+/* Числа в mono когато сме на Bloomberg — само на табули и явно числови блокове */
+html[data-theme="bloomberg"] table,
+html[data-theme="bloomberg"] .tabular,
+html[data-theme="bloomberg"] [class*="tabular"] {
+  font-variant-numeric: tabular-nums;
+  font-family: var(--font-mono);
+}
+
+/* На Bloomberg, картите с бял фон да изглеждат "тонирани" — мек филтър */
+html[data-theme="bloomberg"] main .bg-white {
+  filter: invert(0.92) hue-rotate(180deg);
+}
+html[data-theme="bloomberg"] main .bg-white img,
+html[data-theme="bloomberg"] main .bg-white svg,
+html[data-theme="bloomberg"] main .bg-white canvas {
+  filter: invert(1) hue-rotate(180deg);
+}
+
+/* Theme-aware nav button hover (works on light + dark shells) */
+.shell-nav-btn:not(.active):hover {
+  background: var(--shell-hover-bg);
+  color: var(--shell-fg-strong);
+}
