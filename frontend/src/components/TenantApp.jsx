@@ -126,7 +126,18 @@ export default function TenantApp({ userName, onLogout, mustChangePassword }) {
   const property = me?.properties?.find(p => p.id === activeContract?.property_id) || me?.properties?.[0]
 
   return (
-    <div className="min-h-screen pb-20" style={{ background: '#f0f2f8' }}>
+    <div className="min-h-screen pb-20 ten-root fin-surface" style={{ background: '#F4F1EA' }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300..500&family=Hanken+Grotesk:wght@400;500;600&display=swap');
+        .ten-root{font-family:'Hanken Grotesk',system-ui,sans-serif;
+          --surface:#FFFDF8;--surface-border:#E7E0D0;--page-fg:#1B201C;--muted:#6E746A;
+          --accent:#B5872F;--pos:#1F9D63;--neg:#CF5247;}
+        .ten-head{position:relative;background:#0C1A15;}
+        .ten-head::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;
+          background:linear-gradient(90deg,#D8B66A,#85B8A0);opacity:.85;}
+        .ten-hello{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:#9AA59C;}
+        .ten-name{font-family:'Fraunces',serif;font-weight:400;font-size:17px;color:#ECE6D7;line-height:1.1;}
+      `}</style>
       {/* PWA install banner */}
       {showInstallBanner && (
         <div className="bg-blue-600 text-white px-4 py-3 text-sm">
@@ -174,15 +185,15 @@ export default function TenantApp({ userName, onLogout, mustChangePassword }) {
       )}
 
       {/* Header */}
-      <header className="shadow-md sticky top-0 z-10" style={{ background: '#1a1a2e' }}>
+      <header className="ten-head shadow-md sticky top-0 z-10">
         <div className="max-w-2xl mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div style={{ background: 'white', borderRadius: '6px', padding: '3px 8px' }}>
               <img src="/sky_capital_logo.png" alt="Sky Capital" style={{ height: '32px' }} />
             </div>
-            <div className="text-white">
-              <div className="text-xs text-slate-400">Здравей,</div>
-              <div className="text-sm font-semibold">{userName || me?.user?.name || 'наемател'}</div>
+            <div>
+              <div className="ten-hello">Здравей,</div>
+              <div className="ten-name">{userName || me?.user?.name || 'наемател'}</div>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -218,14 +229,19 @@ export default function TenantApp({ userName, onLogout, mustChangePassword }) {
       </main>
 
       {/* Bottom nav */}
-      <nav className="fixed bottom-0 inset-x-0 bg-white border-t shadow-lg z-20">
+      <nav className="fixed bottom-0 inset-x-0 border-t shadow-lg z-20"
+           style={{ background: '#FFFDF8', borderColor: '#E7E0D0' }}>
         <div className="max-w-2xl mx-auto grid grid-cols-10">
           {TABS.map(t => (
             <button
               key={t.id}
               onClick={() => setTab(t.id)}
-              className={`py-2 flex flex-col items-center text-xs ${tab === t.id ? 'text-blue-600 font-semibold' : 'text-slate-500'}`}
-              style={tab === t.id ? { borderTop: '2px solid #4AABCC' } : {}}
+              className="py-2 flex flex-col items-center text-xs"
+              style={{
+                color: tab === t.id ? '#B5872F' : '#8A9088',
+                fontWeight: tab === t.id ? 600 : 400,
+                borderTop: tab === t.id ? '2px solid #B5872F' : '2px solid transparent',
+              }}
             >
               <span className="text-lg leading-none">{t.icon}</span>
               <span className="mt-1">{t.label}</span>
