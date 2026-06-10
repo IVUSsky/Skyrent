@@ -1133,5 +1133,56 @@ module.exports = function(db) {
     }
   });
 
+  // POST /transactions/:id/split-deposit — раздели наем+депозит транзакция.
+  // Оригиналът остава 'наем' но сумата му се намалява до наемната част;
+  // създава се нов запис 'депозит_получен' за депозитната част (същата дата/имот/
+  // контрагент/валута/scope). Така rent графиките показват точния наем,
+  // а депозитът не влиза в plIncome (получен депозит = задължение, не приход).
+  // Body: { deposit_amount } (в нативната валута на транзакцията, положителна).
+  // Опц. rent_amount — иначе се смята като сума − deposit_amount.
+  router.post('/transactions/:id/split-deposit', (req, res) => {
+    if (req.user?.role === 'tenant') return res.status(403).json({ error: 'Forbidden' });
+    try {
+      const tx = db.prepare('SELECT * FROM transactions WHERE id=?').get(req.params.id);
+      if (!tx) return res.status(404).json({ error: 'Транзакцията не е намерена' });
+      if (tx.operation !== 'Кт') return res.status(400).json({ error: 'Само за входящи (Кт) плащания' });
+
+      const dep = Number(req.body?.deposit_amount);
+      if (!(dep > 0)) return res.status(400).json({ error: 'deposit_amount трябва да е положителна' });
+      const total = Math.abs(Number(tx.сума));
+      const rent = req.body?.rent_amount != null ? Number(req.body.rent_amount) : (total - dep);
+      if (rent < 0 || dep >= total + 0.005) {
+        return res.status(400).json({ error: 'deposit_amount не може да надвишава сумата на транзакцията' });
+      }
+
+      const insertTx = db.prepare(`
+        INSERT INTO transactions (session_id, дата, контрагент, основание, сума, operation, категория, property_id, месец, validated, currency, scope)
+        VALUES (?, ?, ?, ?, ?, 'Кт', 'депозит_получен', ?, ?, 1, ?, ?)
+      `);
+
+      let depositTxId = null;
+      const doSplit = db.transaction(() => {
+        // намали оригинала до наемната част
+        db.prepare('UPDATE transactions SET сума=?, категория=?, validated=1 WHERE id=?')
+          .run(Number(rent.toFixed(2)), 'наем', tx.id);
+        // създай депозитен запис
+        const r = insertTx.run(
+          tx.session_id, tx.дата, tx.контрагент || '',
+          'ДЕПОЗИТ (split от #' + tx.id + '): ' + (tx.основание || ''),
+          Number(dep.toFixed(2)),
+          tx.property_id || null, tx.месец || null,
+          tx.currency || null, tx.scope || 'business'
+        );
+        depositTxId = r.lastInsertRowid;
+      });
+      doSplit();
+
+      res.json({ ok: true, rent_tx_id: Number(tx.id), rent_amount: Number(rent.toFixed(2)),
+        deposit_tx_id: depositTxId, deposit_amount: Number(dep.toFixed(2)) });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   return router;
 };
