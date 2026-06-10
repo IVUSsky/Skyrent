@@ -1,6 +1,8 @@
 import React, { useState, useEffect, lazy, Suspense } from 'react'
 import Login from './components/Login'
 import NotificationBell from './components/NotificationBell'
+import { ThemeProvider } from './components/ThemeProvider'
+import ThemePicker from './components/ThemePicker'
 import { apiFetch } from './api'
 
 // Lazy-loaded tabs — намалява initial bundle (само избраното се сваля)
@@ -137,8 +139,9 @@ export default function App() {
   const validTab = tabs.find(t => t.id === activeTab) ? activeTab : tabs[0]?.id
 
   return (
-    <div className="min-h-screen" style={{ background: '#f0f2f8' }}>
-      <header className="shadow-lg" style={{ background: '#1a1a2e' }}>
+    <ThemeProvider activeTab={validTab}>
+    <div className="min-h-screen" style={{ background: 'var(--page-bg)' }}>
+      <header className="shadow-lg" style={{ background: 'var(--shell-bg)' }}>
         <div className="max-w-7xl mx-auto px-4 py-2 flex items-center gap-5 flex-wrap">
           <div className="shrink-0" style={{ background: 'white', borderRadius: '7px', padding: '4px 10px', display: 'inline-flex', alignItems: 'center' }}>
             <img src="/sky_capital_logo.png" alt="Sky Capital" style={{ height: '42px', display: 'block' }} />
@@ -148,11 +151,11 @@ export default function App() {
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                style={validTab === tab.id ? { background: '#4AABCC', color: '#ffffff' } : {}}
-                className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                  validTab === tab.id
-                    ? 'shadow font-semibold'
-                    : 'text-slate-300 hover:text-white hover:bg-white/10'
+                style={validTab === tab.id
+                  ? { background: 'var(--accent)', color: 'var(--accent-fg)' }
+                  : { color: 'var(--shell-fg)' }}
+                className={`shell-nav-btn px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                  validTab === tab.id ? 'shadow font-semibold active' : ''
                 }`}
               >
                 {tab.label}
@@ -160,6 +163,7 @@ export default function App() {
             ))}
           </nav>
           <div className="ml-auto flex items-center gap-3">
+            <ThemePicker />
             <NotificationBell
               API={API}
               basePath="/api/notifications"
@@ -228,5 +232,6 @@ export default function App() {
         </Suspense>
       </main>
     </div>
+    </ThemeProvider>
   )
 }
