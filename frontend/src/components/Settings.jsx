@@ -106,7 +106,7 @@ export default function Settings({ API }) {
   if (error) return <div className="bg-red-50 text-red-700 p-4 rounded-lg">Грешка: {error}</div>
 
   return (
-    <div className="max-w-3xl">
+    <div className="max-w-3xl fin-surface">
       <h2 className="text-2xl font-bold text-gray-800 mb-6">Настройки</h2>
 
       {/* Toast */}

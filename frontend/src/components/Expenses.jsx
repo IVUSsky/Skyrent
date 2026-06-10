@@ -1014,7 +1014,7 @@ export default function Expenses({ API }) {
   const pendingIds = invoices.filter(i => i.status === 'pending').map(i => i.id)
 
   return (
-    <div>
+    <div className="fin-surface">
       <div className="flex items-center justify-between mb-5">
         <h2 className="text-2xl font-bold text-gray-800">💸 Разходи</h2>
         {/* Sub-tabs */}

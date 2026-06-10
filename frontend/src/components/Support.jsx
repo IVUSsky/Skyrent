@@ -69,7 +69,7 @@ export default function Support({ API }) {
   }
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-[360px,1fr] gap-4">
+    <div className="grid grid-cols-1 md:grid-cols-[360px,1fr] gap-4 fin-surface">
       {toast && (
         <div className={`fixed top-4 right-4 z-50 px-5 py-3 rounded-xl shadow-lg text-white text-sm font-medium ${toast.type === 'error' ? 'bg-red-600' : 'bg-green-600'}`}>
           {toast.msg}
