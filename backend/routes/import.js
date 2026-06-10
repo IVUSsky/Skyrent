@@ -593,6 +593,20 @@ module.exports = function(db) {
     }
   });
 
+  // PATCH /transactions/:id/month — поправя 'месец' (наемния период), когато се
+  // разминава с датата на плащане (предплатен/закъснял наем). Формат 'YYYY-MM'.
+  router.patch('/transactions/:id/month', (req, res) => {
+    if (req.user?.role === 'tenant') return res.status(403).json({ error: 'Forbidden' });
+    try {
+      const m = req.body?.месец;
+      if (!/^\d{4}-\d{2}$/.test(m || '')) return res.status(400).json({ error: 'месец трябва да е YYYY-MM' });
+      const r = db.prepare('UPDATE transactions SET месец=? WHERE id=?').run(m, req.params.id);
+      res.json({ ok: true, changed: r.changes });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // ── PATCH /transactions/:id/category ──────────────────────
   // Auto-learns: saves a rule and retroactively applies it to matching unvalidated transactions.
   // Personal categories (заплата, управление, друго_лично) автоматично сменят scope='personal'
