@@ -1229,26 +1229,37 @@ module.exports = function(db) {
   router.post('/cash-rent', (req, res) => {
     if (req.user?.role === 'tenant') return res.status(403).json({ error: 'Forbidden' });
     try {
-      const { property_ids, месец } = req.body || {};
-      if (!Array.isArray(property_ids) || !property_ids.length) return res.status(400).json({ error: 'property_ids required' });
-      if (!/^\d{4}-\d{2}$/.test(месец || '')) return res.status(400).json({ error: 'месец трябва да е YYYY-MM' });
-
       const ins = db.prepare(`INSERT INTO transactions
         (session_id, дата, контрагент, основание, сума, operation, категория, property_id, месец, validated, currency, scope)
         VALUES (NULL, ?, ?, ?, ?, 'Кт', 'наем', ?, ?, 1, ?, 'business')`);
       const existsStmt = db.prepare("SELECT id FROM transactions WHERE property_id=? AND месец=? AND категория='наем' AND operation='Кт'");
-      const currency = месец >= '2026-01' ? 'EUR' : 'BGN';
       const created = [], skipped = [];
-
-      for (const pid of property_ids) {
+      const recordOne = (pid, месец, сума, currency) => {
         const p = db.prepare('SELECT id, наем, наемател FROM properties WHERE id=?').get(pid);
-        if (!p) { skipped.push({ property_id: pid, reason: 'няма имот' }); continue; }
-        if (existsStmt.get(pid, месец)) { skipped.push({ property_id: pid, reason: 'вече има наем за месеца' }); continue; }
-        const amount = Number(p.наем) || 0;
-        const r = ins.run(`${месец}-01`, p.наемател || '', `Кеш наем ${месец}`, amount, pid, месец, currency);
-        created.push({ property_id: pid, tx_id: r.lastInsertRowid, сума: amount, currency });
+        if (!p) { skipped.push({ property_id: pid, месец, reason: 'няма имот' }); return; }
+        if (existsStmt.get(pid, месец)) { skipped.push({ property_id: pid, месец, reason: 'вече има наем' }); return; }
+        const amount = сума != null ? Number(сума) : (Number(p.наем) || 0);
+        const cur = currency || (месец >= '2026-01' ? 'EUR' : 'BGN');
+        const r = ins.run(`${месец}-01`, p.наемател || '', `Кеш наем ${месец}`, amount, pid, месец, cur);
+        created.push({ property_id: pid, месец, tx_id: r.lastInsertRowid, сума: amount, currency: cur });
+      };
+
+      const { property_ids, месец, entries } = req.body || {};
+
+      // Режим A: explicit entries [{property_id, месец, сума, currency}]
+      if (Array.isArray(entries) && entries.length) {
+        for (const e of entries) {
+          if (!/^\d{4}-\d{2}$/.test(e.месец || '')) { skipped.push({ ...e, reason: 'лош месец' }); continue; }
+          recordOne(Number(e.property_id), e.месец, e.сума, e.currency);
+        }
+        return res.json({ ok: true, mode: 'entries', created, skipped });
       }
-      res.json({ ok: true, created, skipped });
+
+      // Режим B: property_ids + един месец (сума = наема на имота)
+      if (!Array.isArray(property_ids) || !property_ids.length) return res.status(400).json({ error: 'property_ids или entries required' });
+      if (!/^\d{4}-\d{2}$/.test(месец || '')) return res.status(400).json({ error: 'месец трябва да е YYYY-MM' });
+      for (const pid of property_ids) recordOne(Number(pid), месец, null, null);
+      res.json({ ok: true, mode: 'bulk', created, skipped });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
