@@ -56,4 +56,16 @@ assert(dbProxy.control === cdb, 'dbProxy.control != controlDb');
 // кеш: повторно getOrgDb връща същия инстанс
 assert(getOrgDb(1) === db1, 'org cache не работи');
 
+// users VIEW: org връзката вижда САМО своите users (auto-filter по organization_id)
+cdb.prepare("INSERT INTO users (username, role, organization_id) VALUES ('ivo','admin',1)").run();
+cdb.prepare("INSERT INTO users (username, role, organization_id) VALUES ('client','admin',2)").run();
+assert.strictEqual(db1.prepare('SELECT COUNT(*) n FROM users').get().n, 1, 'org1 view трябва да вижда 1 user');
+assert.strictEqual(db1.prepare('SELECT username FROM users').get().username, 'ivo');
+assert.strictEqual(db2.prepare('SELECT username FROM users').get().username, 'client', 'org2 view грешен');
+// JOIN срещу view работи (както в route-овете)
+db1.exec('CREATE TABLE IF NOT EXISTS tix (id INTEGER PRIMARY KEY, user_id INTEGER)');
+db1.prepare('INSERT INTO tix (user_id) VALUES (?)').run(cdb.prepare("SELECT id FROM users WHERE username='ivo'").get().id);
+const joined = db1.prepare('SELECT t.id, u.username FROM tix t LEFT JOIN users u ON u.id = t.user_id').get();
+assert.strictEqual(joined.username, 'ivo', 'JOIN през users view не работи');
+
 console.log('✓ multi-tenancy db слой: изолация, proxy, ALS, bootstrap, кеш — всичко OK');

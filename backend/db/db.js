@@ -77,13 +77,32 @@ function initControlDb() {
 
 function setTenantMigrator(fn) { tenantMigrator = fn; }
 
+/**
+ * users достъп от org контекст: org връзката ATTACH-ва control.db като `ctrl`
+ * и има VIEW `users` = ctrl.users WHERE organization_id = <id>.
+ * → Всички съществуващи SELECT/JOIN срещу users работят непроменени И са
+ *   автоматично org-филтрирани. Записите по users минават през db.control.
+ */
+function ensureUsersView(db, orgId) {
+  // ВАЖНО: qualified main.* — при ATTACH unqualified имена resolve-ват и към ctrl!
+  // legacy users таблица (копие от portfolio.db) → встрани, не се трие (rollback safety)
+  const existing = db.prepare("SELECT type FROM main.sqlite_master WHERE name='users'").get();
+  if (existing && existing.type === 'table') db.exec('ALTER TABLE main.users RENAME TO users_legacy');
+  // Персистентен view НЕ може да реферира attached схема → TEMP view (живее
+  // за връзката; връзките са кеширани за процеса). temp.users печели пред
+  // main/ctrl при unqualified резолюция → всички SELECT/JOIN работят.
+  db.exec('CREATE TEMP VIEW users AS SELECT * FROM ctrl.users WHERE organization_id = ' + Number(orgId));
+}
+
 function getOrgDb(orgId) {
   const id = Number(orgId);
   if (!id || id < 1) throw new Error('getOrgDb: невалиден orgId: ' + orgId);
   if (orgCache.has(id)) return orgCache.get(id);
   const file = path.join(ORGS_DIR, id + '.db');
   const db = openDb(file, id);
+  db.exec("ATTACH DATABASE '" + CONTROL_PATH.replace(/'/g, "''") + "' AS ctrl");
   if (tenantMigrator) tenantMigrator(db);
+  ensureUsersView(db, id);
   orgCache.set(id, db);
   return db;
 }
