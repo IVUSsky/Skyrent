@@ -614,11 +614,13 @@ module.exports = function(db) {
   router.patch('/transactions/:id/reclassify', (req, res) => {
     if (req.user?.role === 'tenant') return res.status(403).json({ error: 'Forbidden' });
     try {
-      const { категория, месец } = req.body || {};
+      const { категория, месец, сума, currency } = req.body || {};
       if (месец != null && !/^\d{4}-\d{2}$/.test(месец)) return res.status(400).json({ error: 'месец трябва да е YYYY-MM' });
       const sets = [], vals = [];
       if (категория != null) { sets.push('категория=?'); vals.push(категория); }
       if (месец != null)     { sets.push('месец=?');     vals.push(месец); }
+      if (сума != null)      { sets.push('сума=?');      vals.push(Number(сума)); }
+      if (currency != null)  { sets.push('currency=?');  vals.push(currency); }
       if (!sets.length) return res.status(400).json({ error: 'нищо за промяна' });
       vals.push(req.params.id);
       const r = db.prepare('UPDATE transactions SET ' + sets.join(', ') + ' WHERE id=?').run(...vals);
