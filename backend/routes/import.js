@@ -607,6 +607,27 @@ module.exports = function(db) {
     }
   });
 
+  // PATCH /transactions/:id/reclassify — директна смяна на категория/месец БЕЗ да
+  // създава tx_rule (за разлика от /category). За еднократни корекции напр.
+  // move-in депозит таггнат като наем, без бъдещите плащания на същия наемател
+  // да станат депозит. Подавай само полетата за промяна.
+  router.patch('/transactions/:id/reclassify', (req, res) => {
+    if (req.user?.role === 'tenant') return res.status(403).json({ error: 'Forbidden' });
+    try {
+      const { категория, месец } = req.body || {};
+      if (месец != null && !/^\d{4}-\d{2}$/.test(месец)) return res.status(400).json({ error: 'месец трябва да е YYYY-MM' });
+      const sets = [], vals = [];
+      if (категория != null) { sets.push('категория=?'); vals.push(категория); }
+      if (месец != null)     { sets.push('месец=?');     vals.push(месец); }
+      if (!sets.length) return res.status(400).json({ error: 'нищо за промяна' });
+      vals.push(req.params.id);
+      const r = db.prepare('UPDATE transactions SET ' + sets.join(', ') + ' WHERE id=?').run(...vals);
+      res.json({ ok: true, changed: r.changes });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // ── PATCH /transactions/:id/category ──────────────────────
   // Auto-learns: saves a rule and retroactively applies it to matching unvalidated transactions.
   // Personal categories (заплата, управление, друго_лично) автоматично сменят scope='personal'
