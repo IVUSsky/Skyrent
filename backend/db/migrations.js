@@ -11,9 +11,10 @@ function runTenantMigrations(db) {
   const schema = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
   db.exec(schema);
 
-  // Seed (idempotent)
-  seed(db);
-  patchMarketVal(db);
+  // ВНИМАНИЕ: НЕ seed(db)/patchMarketVal(db) тук! Те сийдват имотите на
+  // Sky Capital → в multi-tenant контекст биха ИЗТЕКЛИ в всяка нова org база
+  // (хванато от E2E изолационния тест). Org 1 е копие на portfolio.db (данните
+  // са там); новите организации започват с празна, само-структурна база.
 
   // Ensure columns exist (idempotent migrations)
   try { db.exec("ALTER TABLE properties ADD COLUMN тип TEXT");           console.log('Migration: added column тип'); }    catch(_) {}
