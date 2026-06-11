@@ -1106,8 +1106,8 @@ module.exports = function(db) {
 
       let info = ensureTenantUser(db, contract);
       if (!info.user) return res.status(500).json({ error: 'Не успях да създам акаунт' });
-      db.prepare("UPDATE users SET password_hash=?, must_change_password=1 WHERE id=?")
-        .run(bcrypt.hashSync(tempPassword, 10), info.user.id);
+      db.control.prepare("UPDATE users SET password_hash=?, must_change_password=1 WHERE id=? AND organization_id=?")
+        .run(bcrypt.hashSync(tempPassword, 10), info.user.id, db.orgId);
 
       const result = await sendWelcomeEmail(db, {
         user: info.user, contract, tempPassword,

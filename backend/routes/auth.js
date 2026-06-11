@@ -116,7 +116,12 @@ function requireAuth(req, res, next) {
   } catch { res.status(401).json({ error: 'Invalid token' }); }
 }
 
-module.exports = function(db) {
+// Multi-tenant (Phase 1): users + login_audit живеят в control.db → модулът
+// получава controlDb (като `db` — заявките остават непроменени) + getOrgDb
+// за org-специфични неща (issuer/branding от org settings таблицата).
+module.exports = function(controlDb, getOrgDb) {
+  const db = controlDb;
+  const orgDbOf = (u) => getOrgDb(Number(u?.organization_id) || 1);
   const router = express.Router();
   const JWT_SECRET = process.env.JWT_SECRET || 'skyrent-secret';
 
@@ -145,10 +150,11 @@ module.exports = function(db) {
 
     // No 2FA — issue full JWT immediately
     try { db.prepare("UPDATE users SET last_login_at=datetime('now') WHERE id=?").run(user.id); } catch (_) {}
-    const token = jwt.sign({ id: user.id, username: user.username, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
+    const token = jwt.sign({ id: user.id, username: user.username, role: user.role,
+      organization_id: user.organization_id || 1, is_superadmin: user.is_superadmin || 0 }, JWT_SECRET, { expiresIn: '7d' });
     logAttempt(db, { user, username: ident, success: true, ip, userAgent, totpUsed: false });
     if (user.role === 'admin') {
-      sendAdminLoginAlert(db, { user, ip, userAgent, totpUsed: false }).catch(() => {});
+      sendAdminLoginAlert(orgDbOf(user), { user, ip, userAgent, totpUsed: false }).catch(() => {});
     }
     res.json({
       token,
@@ -191,10 +197,11 @@ module.exports = function(db) {
     }
 
     try { db.prepare("UPDATE users SET last_login_at=datetime('now') WHERE id=?").run(user.id); } catch (_) {}
-    const token = jwt.sign({ id: user.id, username: user.username, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
+    const token = jwt.sign({ id: user.id, username: user.username, role: user.role,
+      organization_id: user.organization_id || 1, is_superadmin: user.is_superadmin || 0 }, JWT_SECRET, { expiresIn: '7d' });
     logAttempt(db, { user, username: user.username, success: true, ip, userAgent, totpUsed: true });
     if (user.role === 'admin') {
-      sendAdminLoginAlert(db, { user, ip, userAgent, totpUsed: true }).catch(() => {});
+      sendAdminLoginAlert(orgDbOf(user), { user, ip, userAgent, totpUsed: true }).catch(() => {});
     }
     res.json({
       token,
@@ -220,7 +227,7 @@ module.exports = function(db) {
     const secret = authenticator.generateSecret();
     // Store secret as "pending" — we don't flip totp_enabled until verify
     db.prepare("UPDATE users SET totp_secret=? WHERE id=?").run(secret, u.id);
-    const issuer = getIssuer(db).name || 'Sky Capital';
+    const issuer = getIssuer(orgDbOf(req.user)).name || 'Sky Capital';
     const otpauth = authenticator.keyuri(u.username, `Skyrent (${issuer})`, secret);
     const qr = await QRCode.toDataURL(otpauth);
     res.json({ secret, otpauth_url: otpauth, qr_data_url: qr });

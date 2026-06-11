@@ -43,16 +43,17 @@ function ensureTenantUser(db, contract) {
       // actually be a tenant. Until then they cannot use the tenant portal.
       roleConflict = 'broker';
     } else if (user.role !== 'tenant') {
-      db.prepare("UPDATE users SET role='tenant' WHERE id=?").run(user.id);
+      db.control.prepare("UPDATE users SET role='tenant' WHERE id=? AND organization_id=?").run(user.id, db.orgId);
       user.role = 'tenant';
     }
   } else {
     tempPassword = genTempPassword();
     const username = genUsername(db, email, contract.tenant_name);
     const hash = bcrypt.hashSync(tempPassword, 10);
-    const r = db.prepare(
-      "INSERT INTO users (username, password_hash, role, name, email, phone, must_change_password) VALUES (?,?,?,?,?,?,1)"
-    ).run(username, hash, 'tenant', contract.tenant_name || '', email, contract.tenant_phone || '');
+    // tenant user → control.db, в организацията на договора (текущия контекст)
+    const r = db.control.prepare(
+      "INSERT INTO users (username, password_hash, role, name, email, phone, must_change_password, organization_id) VALUES (?,?,?,?,?,?,1,?)"
+    ).run(username, hash, 'tenant', contract.tenant_name || '', email, contract.tenant_phone || '', db.orgId);
     user = db.prepare('SELECT * FROM users WHERE id=?').get(r.lastInsertRowid);
   }
 

@@ -19,23 +19,26 @@ module.exports = function(db) {
   router.post('/', adminOnly, (req, res) => {
     const { username, password, role, name, email } = req.body;
     if (!username || !password) return res.status(400).json({ error: 'username и password са задължителни' });
-    const existing = db.prepare('SELECT id FROM users WHERE username=?').get(username);
+    // username е глобално UNIQUE (control.db, всички org-и)
+    const existing = db.control.prepare('SELECT id FROM users WHERE username=?').get(username);
     if (existing) return res.status(400).json({ error: 'Потребителят вече съществува' });
     const hash = bcrypt.hashSync(password, 10);
-    const r = db.prepare('INSERT INTO users (username, password_hash, role, name, email) VALUES (?,?,?,?,?)')
-      .run(username, hash, role || 'broker', name || '', email || '');
+    // users записи → control.db с organization_id на текущата org
+    const r = db.control.prepare('INSERT INTO users (username, password_hash, role, name, email, organization_id) VALUES (?,?,?,?,?,?)')
+      .run(username, hash, role || 'broker', name || '', email || '', db.orgId);
     res.status(201).json({ id: r.lastInsertRowid });
   });
 
   // Update user (admin only)
   router.put('/:id', adminOnly, (req, res) => {
     const { role, name, email, password } = req.body;
+    // AND organization_id — org-admin не може да пипа users на чужда org
     if (password) {
-      db.prepare('UPDATE users SET role=?, name=?, email=?, password_hash=? WHERE id=?')
-        .run(role, name || '', email || '', bcrypt.hashSync(password, 10), req.params.id);
+      db.control.prepare('UPDATE users SET role=?, name=?, email=?, password_hash=? WHERE id=? AND organization_id=?')
+        .run(role, name || '', email || '', bcrypt.hashSync(password, 10), req.params.id, db.orgId);
     } else {
-      db.prepare('UPDATE users SET role=?, name=?, email=? WHERE id=?')
-        .run(role, name || '', email || '', req.params.id);
+      db.control.prepare('UPDATE users SET role=?, name=?, email=? WHERE id=? AND organization_id=?')
+        .run(role, name || '', email || '', req.params.id, db.orgId);
     }
     res.json({ ok: true });
   });
@@ -48,7 +51,7 @@ module.exports = function(db) {
       const adminCount = db.prepare("SELECT COUNT(*) as c FROM users WHERE role='admin'").get().c;
       if (adminCount <= 1) return res.status(400).json({ error: 'Не може да изтриете последния администратор' });
     }
-    db.prepare('DELETE FROM users WHERE id=?').run(req.params.id);
+    db.control.prepare('DELETE FROM users WHERE id=? AND organization_id=?').run(req.params.id, db.orgId);
     res.json({ ok: true });
   });
 
