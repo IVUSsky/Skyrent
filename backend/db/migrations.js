@@ -823,6 +823,9 @@ function runControlMigrations(db) {
   // multi-tenancy колони (Phase 1) — ПРЕДИ seed-а (той ги реферира)
   try { db.exec("ALTER TABLE users ADD COLUMN organization_id INTEGER DEFAULT 1"); console.log('Migration: added users.organization_id'); } catch(_) {}
   try { db.exec("ALTER TABLE users ADD COLUMN is_superadmin INTEGER DEFAULT 0");   console.log('Migration: added users.is_superadmin'); }   catch(_) {}
+  // Phase 2: trial основа за billing (Phase 3)
+  try { db.exec("ALTER TABLE organizations ADD COLUMN plan TEXT DEFAULT 'trial'");  console.log('Migration: added organizations.plan'); }          catch(_) {}
+  try { db.exec("ALTER TABLE organizations ADD COLUMN trial_ends_at DATETIME");     console.log('Migration: added organizations.trial_ends_at'); } catch(_) {}
   // ВАЖНО: env-seed на първия admin е в server.js СЛЕД bootstrap() — иначе
   // изпреварва копието на реалните users от orgs/1.db и то се скипва.
   console.log('users table ready');

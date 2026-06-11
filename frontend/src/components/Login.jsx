@@ -42,13 +42,18 @@ const C = {
 
 export default function Login({ API, onLogin }) {
   useFonts()
-  const [step, setStep]         = useState('credentials')  // 'credentials' | 'totp'
+  const [step, setStep]         = useState('credentials')  // 'credentials' | 'totp' | 'signup'
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [stageToken, setStageToken] = useState('')
   const [code, setCode]         = useState('')
   const [error, setError]       = useState(null)
   const [loading, setLoading]   = useState(false)
+  // signup (закрита бета)
+  const [signupCode, setSignupCode] = useState('')
+  const [orgName, setOrgName]       = useState('')
+  const [email, setEmail]           = useState('')
+  const [fullName, setFullName]     = useState('')
   const codeRef = useRef(null)
 
   useEffect(() => { if (step === 'totp') setTimeout(() => codeRef.current?.focus(), 50) }, [step])
@@ -102,6 +107,27 @@ export default function Login({ API, onLogin }) {
   }
 
   const goBack = () => { setStep('credentials'); setStageToken(''); setCode(''); setError(null) }
+
+  const submitSignup = (e) => {
+    e.preventDefault()
+    setLoading(true); setError(null)
+    fetch(`${API}/api/auth/signup`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ signup_code: signupCode, org_name: orgName, username, password, email, name: fullName }),
+    })
+      .then(r => r.json())
+      .then(data => {
+        setLoading(false)
+        if (data.token) {
+          localStorage.setItem('skyrent_token', data.token)
+          onLogin({ role: data.role, name: data.name, must_change_password: false })
+        } else {
+          setError(data.error || 'Грешка при регистрация')
+        }
+      })
+      .catch(() => { setLoading(false); setError('Не може да се свърже със сървъра') })
+  }
 
   return (
     <div style={{ minHeight: '100vh', background: C.ink, color: C.bone, fontFamily: "'Hanken Grotesk', system-ui, sans-serif", position: 'relative', overflow: 'hidden' }}>
@@ -176,6 +202,29 @@ export default function Login({ API, onLogin }) {
                          onChange={setPassword} />
                   {error && <div className="sky-error">{error}</div>}
                   <SubmitBtn loading={loading} idle="Влез" busy="Влизане…" />
+                  <button type="button" className="sky-back"
+                    onClick={() => { setStep('signup'); setError(null) }}>
+                    Нямаш акаунт? Регистрация →
+                  </button>
+                </form>
+              </>
+            ) : step === 'signup' ? (
+              <>
+                <div className="sky-card-head">
+                  <div className="sky-eyebrow">Закрита бета · с код за достъп</div>
+                  <h2 className="sky-card-title">Регистрация</h2>
+                  <p className="sky-card-note">Нова организация — собствено изолирано портфолио.</p>
+                </div>
+                <form onSubmit={submitSignup} className="sky-fields">
+                  <Field id="sc" label="Код за достъп" value={signupCode} onChange={setSignupCode} autoFocus />
+                  <Field id="on" label="Фирма / организация" value={orgName} onChange={setOrgName} />
+                  <Field id="fn" label="Вашето име" value={fullName} onChange={setFullName} />
+                  <Field id="em" label="Имейл" type="email" value={email} onChange={setEmail} />
+                  <Field id="su" label="Потребителско име" value={username} onChange={setUsername} />
+                  <Field id="sp" label="Парола (мин. 8 знака)" type="password" value={password} onChange={setPassword} />
+                  {error && <div className="sky-error">{error}</div>}
+                  <SubmitBtn loading={loading} idle="Създай акаунт" busy="Създаване…" />
+                  <button type="button" onClick={goBack} className="sky-back">← обратно към вход</button>
                 </form>
               </>
             ) : (
