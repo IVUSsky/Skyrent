@@ -826,6 +826,9 @@ function runControlMigrations(db) {
   // Phase 2: trial основа за billing (Phase 3)
   try { db.exec("ALTER TABLE organizations ADD COLUMN plan TEXT DEFAULT 'trial'");  console.log('Migration: added organizations.plan'); }          catch(_) {}
   try { db.exec("ALTER TABLE organizations ADD COLUMN trial_ends_at DATETIME");     console.log('Migration: added organizations.trial_ends_at'); } catch(_) {}
+  // Phase 3: Stripe SaaS billing
+  try { db.exec("ALTER TABLE organizations ADD COLUMN stripe_customer_id TEXT");     console.log('Migration: added organizations.stripe_customer_id'); }     catch(_) {}
+  try { db.exec("ALTER TABLE organizations ADD COLUMN stripe_subscription_id TEXT"); console.log('Migration: added organizations.stripe_subscription_id'); } catch(_) {}
   // ВАЖНО: env-seed на първия admin е в server.js СЛЕД bootstrap() — иначе
   // изпреварва копието на реалните users от orgs/1.db и то се скипва.
   console.log('users table ready');

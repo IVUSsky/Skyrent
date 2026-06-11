@@ -8,6 +8,10 @@ export function apiFetch(url, options = {}) {
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...options.headers,
     },
+  }).then(r => {
+    // 402 = изтекъл trial / спрян абонамент → прати към таб Абонамент
+    if (r.status === 402) window.dispatchEvent(new CustomEvent('skyrent:billing-required'));
+    return r;
   });
 }
 

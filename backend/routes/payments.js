@@ -304,6 +304,13 @@ function webhookHandler(db) {
     }
 
     try {
+      // SaaS billing събития (организационни абонаменти, Phase 3) — отделен
+      // handler върху control.db. true → обработено, спираме дотук.
+      try {
+        const { handleBillingEvent } = require('../lib/saasBilling');
+        if (handleBillingEvent(db.control, event)) return res.json({ received: true });
+      } catch (e) { console.error('[billing webhook]', e.message); }
+
       switch (event.type) {
         case 'checkout.session.completed': {
           const session = event.data.object;
