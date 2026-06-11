@@ -78,8 +78,8 @@ module.exports = function(db) {
         return res.status(401).json({ error: 'Грешна текуща парола' });
       }
     }
-    db.prepare("UPDATE users SET password_hash=?, must_change_password=0 WHERE id=?")
-      .run(bcrypt.hashSync(new_password, 10), req.user.id);
+    db.control.prepare("UPDATE users SET password_hash=?, must_change_password=0 WHERE id=? AND organization_id=?")
+      .run(bcrypt.hashSync(new_password, 10), req.user.id, db.orgId);
     res.json({ ok: true });
   });
 

@@ -189,7 +189,7 @@ function tenantPaymentsRouter(db) {
           metadata: { skyrent_user_id: String(user.id) },
         });
         customerId = customer.id;
-        db.prepare('UPDATE users SET stripe_customer_id=? WHERE id=?').run(customerId, user.id);
+        db.control.prepare('UPDATE users SET stripe_customer_id=? WHERE id=?').run(customerId, user.id);
       }
 
       // Stripe Checkout in setup mode collects the SEPA mandate without charging.
@@ -250,7 +250,7 @@ function tenantPaymentsRouter(db) {
         try { await s.paymentMethods.detach(user.sepa_payment_method_id); }
         catch (e) { console.warn('Detach SEPA pm failed (continuing):', e.message); }
       }
-      db.prepare(`
+      db.control.prepare(`
         UPDATE users
         SET autopay_enabled=0, sepa_payment_method_id=NULL, sepa_iban_last4=NULL
         WHERE id=?
@@ -490,7 +490,7 @@ function webhookHandler(db) {
           } catch (e) {
             console.warn('Could not retrieve payment method:', e.message);
           }
-          db.prepare(`
+          db.control.prepare(`
             UPDATE users
             SET sepa_payment_method_id=?, sepa_iban_last4=?, autopay_enabled=1,
                 autopay_activated_at=datetime('now')
@@ -503,9 +503,9 @@ function webhookHandler(db) {
           // Mandate state changes (e.g. tenant revoked it on their bank's side)
           const mandate = event.data.object;
           if (mandate.status === 'inactive' && mandate.payment_method) {
-            const user = db.prepare('SELECT id FROM users WHERE sepa_payment_method_id=?').get(mandate.payment_method);
+            const user = db.control.prepare('SELECT id FROM users WHERE sepa_payment_method_id=?').get(mandate.payment_method);
             if (user) {
-              db.prepare('UPDATE users SET autopay_enabled=0 WHERE id=?').run(user.id);
+              db.control.prepare('UPDATE users SET autopay_enabled=0 WHERE id=?').run(user.id);
               console.log(`SEPA mandate revoked for user ${user.id} — autopay disabled`);
               // TODO: email admin + tenant
             }

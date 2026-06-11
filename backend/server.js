@@ -156,7 +156,9 @@ async function main() {
   const { tenantPaymentsRouter, webhookHandler } = require('./routes/payments');
   app.use('/api/tenant', tenantPaymentsRouter(db));
   // Wire up the pre-registered webhook handler (was placeholder before DB init)
-  stripeWebhookHandler = webhookHandler(db);
+  // Webhook-ът идва от Stripe БЕЗ auth → няма ALS контекст → bound org-1 handle.
+  // (Stripe billing е само за org 1 в Phase 1; per-org Stripe = Phase 3.)
+  stripeWebhookHandler = webhookHandler(orgMain);
 
   // Contract expiry notifications — runs on startup + once per 24h
   const { sendRenewalNotice } = require('./lib/tenantOnboarding');
