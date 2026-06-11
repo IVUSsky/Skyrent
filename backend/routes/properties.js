@@ -589,5 +589,15 @@ module.exports = function(db) {
     }
   });
 
+  // PATCH /:id/rent-channel — как се проследява наемът (this|other|cash).
+  // 'other'/'cash' потискат integrity проверките active_no_rent + period_gap.
+  router.patch('/:id/rent-channel', (req, res) => {
+    if (req.user?.role === 'tenant') return res.status(403).json({ error: 'Forbidden' });
+    const ch = req.body?.rent_channel;
+    if (!['this', 'other', 'cash'].includes(ch)) return res.status(400).json({ error: 'rent_channel: this|other|cash' });
+    db.prepare('UPDATE properties SET rent_channel=? WHERE id=?').run(ch, req.params.id);
+    res.json({ ok: true });
+  });
+
   return router;
 };
