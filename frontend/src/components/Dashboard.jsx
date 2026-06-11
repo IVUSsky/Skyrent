@@ -194,21 +194,15 @@ export default function Dashboard({ API }) {
       </header>
       {showLegend && <LegendModal onClose={() => setShowLegend(false)} />}
 
-      {/* KPI Grid */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-8">
+      {/* KPI Grid — ОПЕРАТИВЕН месечен пулс. Портфейлните метрики (NOI/DSCR/
+          LTV/Cap Rate/Капитал/Активи) живеят в 📊 Инвеститор — без дублаж. */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
         <KpiCard
           label="Месечен наем"
           value={`${fmt(metrics.наем_мес)} €`}
           sub="активни имоти"
           color="blue"
           icon="💰"
-        />
-        <KpiCard
-          label="Годишен наем"
-          value={`${fmt(metrics.наем_год)} €`}
-          sub={`NOI: ${fmt(metrics.NOI)} €`}
-          color="blue"
-          icon="📅"
         />
         <KpiCard
           label="Брой имоти"
@@ -218,53 +212,11 @@ export default function Dashboard({ API }) {
           icon="🏠"
         />
         <KpiCard
-          label="Общ дълг"
-          value={`${fmt(metrics.total_debt)} €`}
-          sub="по всички кредити"
-          color="red"
-          icon="🏦"
-        />
-        <KpiCard
           label="Месечна вноска"
           value={`${fmt(metrics.total_вноска)} €`}
           sub="всички банки"
           color="orange"
           icon="📤"
-        />
-        <KpiCard
-          label="NOI"
-          value={`${fmt(metrics.NOI)} €`}
-          sub="наем × 12 × 90%"
-          color="green"
-          icon="📊"
-        />
-        <KpiCard
-          label="DSCR"
-          value={metrics.DSCR != null ? metrics.DSCR.toFixed(2) : '—'}
-          sub={metrics.DSCR >= 1.25 ? 'Устойчив' : metrics.DSCR >= 1.0 ? 'Приемлив' : 'Риск!'}
-          color={dscrColor}
-          icon="⚖️"
-        />
-        <KpiCard
-          label="LTV"
-          value={fmtPct(metrics.LTV)}
-          sub={metrics.LTV < 0.5 ? 'Нисък риск' : metrics.LTV < 0.65 ? 'Умерен' : 'Висок!'}
-          color={ltvColor}
-          icon="📉"
-        />
-        <KpiCard
-          label="Капитал"
-          value={`${fmt(metrics.equity)} €`}
-          sub="активи − дълг"
-          color="green"
-          icon="💎"
-        />
-        <KpiCard
-          label="Cap Rate"
-          value={fmtPct(metrics.cap_rate)}
-          sub="NOI / asset base"
-          color="blue"
-          icon="📈"
         />
         <KpiCard
           label="Нетен CF"
@@ -274,11 +226,18 @@ export default function Dashboard({ API }) {
           icon="💵"
         />
         <KpiCard
-          label="Активи"
-          value={`${fmt(metrics.asset_base)} €`}
-          sub="пазарна/счетоводна ст-ст"
-          color="gray"
-          icon="🏗️"
+          label="DSCR"
+          value={metrics.DSCR != null ? metrics.DSCR.toFixed(2) : '—'}
+          sub={metrics.DSCR >= 1.25 ? 'Устойчив' : metrics.DSCR >= 1.0 ? 'Приемлив' : 'Риск!'}
+          color={dscrColor}
+          icon="⚖️"
+        />
+        <KpiCard
+          label="Годишен наем"
+          value={`${fmt(metrics.наем_год)} €`}
+          sub="прогнозен (×12)"
+          color="blue"
+          icon="📅"
         />
       </div>
 
