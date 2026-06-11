@@ -27,6 +27,7 @@ const Support        = lazy(() => import('./components/Support'))
 const Internet       = lazy(() => import('./components/Internet'))
 const TenantApp      = lazy(() => import('./components/TenantApp'))
 const ChatLearning   = lazy(() => import('./components/ChatLearning'))
+const Integrity      = lazy(() => import('./components/Integrity'))
 
 const TabFallback = () => (
   <div className="flex items-center justify-center py-20 text-gray-400">
@@ -59,6 +60,7 @@ const ALL_TABS = [
   { id: 'investments', label: '📈 Инвестиции',  roles: ['admin'] },
   { id: 'personal',    label: '💰 Личен бюджет', roles: ['admin'] },
   { id: 'smart',       label: '⚡ Смарт',       roles: ['admin'] },
+  { id: 'integrity',   label: '🩺 Интегритет', roles: ['admin'] },
   { id: 'settings',    label: '⚙️ Настройки',  roles: ['admin'] },
 ]
 
@@ -228,6 +230,7 @@ export default function App() {
           {validTab === 'smart'        && <Smart API={API} />}
           {validTab === 'investments'  && <Investments API={API} />}
           {validTab === 'personal'     && <PersonalBudget />}
+          {validTab === 'integrity'    && <Integrity API={API} />}
           {validTab === 'settings'     && <Settings API={API} />}
         </Suspense>
       </main>
