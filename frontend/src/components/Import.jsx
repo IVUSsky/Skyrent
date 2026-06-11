@@ -790,6 +790,7 @@ function ImportTab({ API, onSaved }) {
   const [parsing, setParsing]     = useState(false)
   const [saving, setSaving]       = useState(false)
   const [transactions, setTx]     = useState([])
+  const [batchWarn, setBatchWarn] = useState({}) // integrity флагове per ред: {'new<idx>': [{check,severity,title}]}
   const [unknownTenants, setUT]   = useState([])
   const [fileNames, setFileNames] = useState([])
   const [parseError, setParseError] = useState(null)
@@ -920,6 +921,23 @@ function ImportTab({ API, onSaved }) {
     setDragging(false)
     parseFiles(e.dataTransfer.files)
   }, [parseFiles])
+
+  // Integrity флагове на staged редовете (debounce — staged редактиране е често).
+  useEffect(() => {
+    if (!transactions.length) { setBatchWarn({}); return }
+    const timer = setTimeout(() => {
+      const rows = transactions.map(t => ({
+        дата: t.дата, сума: t.сума, currency: t.currency, operation: t.operation,
+        категория: t.категория, property_id: t.property_id, месец: t.месец,
+        контрагент: t.контрагент, основание: t.основание,
+      }))
+      apiFetch(`${API}/api/integrity/check-batch`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rows }),
+      }).then(r => r.json()).then(d => setBatchWarn(d.byRow || {})).catch(() => {})
+    }, 700)
+    return () => clearTimeout(timer)
+  }, [transactions, API])
 
   const handleSave = () => {
     if (!transactions.length) return
@@ -1295,12 +1313,16 @@ function ImportTab({ API, onSaved }) {
                             onChange={e => setTx(prev => prev.map((t,i) => i===realIdx?{...t,property_id:Number(e.target.value)||null}:t))}
                             className="w-14 border border-gray-200 rounded px-1 py-0.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"/>
                         </td>
-                        <td className="px-3 py-2 text-center">
+                        <td className="px-3 py-2 text-center whitespace-nowrap">
                           {tx.is_duplicate
                             ? <span className="text-red-500 text-xs font-bold" title="Вече съществува — ще се пропусне">⚠ дубл.</span>
                             : tx.validated===0
                               ? <span className="text-amber-500" title="Авто по правило">⚡</span>
                               : <span className="text-gray-200">—</span>}
+                          {batchWarn['new'+realIdx]?.length
+                            ? <span className="ml-1 text-amber-600 text-xs cursor-help"
+                                title={batchWarn['new'+realIdx].map(w => w.title).join('; ')}>🟠</span>
+                            : null}
                         </td>
                       </tr>
                     )

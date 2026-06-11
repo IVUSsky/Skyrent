@@ -96,6 +96,17 @@ async function main() {
   try { db.exec("ALTER TABLE properties ADD COLUMN purchase_balance_due REAL"); console.log('Migration: added purchase_balance_due'); } catch(_) {}
   try { db.exec("ALTER TABLE properties ADD COLUMN purchase_balance_due_date DATE"); console.log('Migration: added purchase_balance_due_date'); } catch(_) {}
 
+  // data-integrity: acknowledgments + per-property rent tracking channel
+  db.exec(`CREATE TABLE IF NOT EXISTS integrity_acks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    signature TEXT UNIQUE NOT NULL,
+    status TEXT NOT NULL DEFAULT 'accepted',
+    note TEXT,
+    acked_at TEXT
+  )`);
+  try { db.exec("ALTER TABLE properties ADD COLUMN rent_channel TEXT DEFAULT 'this'"); console.log('Migration: added properties.rent_channel'); } catch(_) {}
+  console.log('integrity tables ready');
+
   // Default lifecycle_stage from emoji status (idempotent — only if NULL).
   // User-ът после може да override-не через UI.
   db.exec("UPDATE properties SET lifecycle_stage = 'active'    WHERE lifecycle_stage IS NULL AND статус = '✅'");
@@ -932,6 +943,7 @@ async function main() {
   app.use('/api/support', require('./routes/support')(db));
   app.use('/api/notifications', require('./routes/notifications')(db));
   app.use('/api/internet', require('./routes/internet')(db));
+  app.use('/api/integrity', require('./routes/integrity')(db));
 
   // Stripe payments — tenant-facing endpoints mounted under /api/tenant (auth + tenant guard inside)
   const { tenantPaymentsRouter, webhookHandler } = require('./routes/payments');
