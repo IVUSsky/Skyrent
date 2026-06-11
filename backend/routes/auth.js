@@ -125,6 +125,47 @@ module.exports = function(controlDb, getOrgDb) {
   const router = express.Router();
   const JWT_SECRET = process.env.JWT_SECRET || 'skyrent-secret';
 
+  // ── Signup (Phase 2, закрита бета) ───────────────────────────────────
+  // Нова организация + owner акаунт + auto-login. Изисква SIGNUP_CODE (env).
+  // Без env код → 403 (signup изключен). Кодът се сменя/маха само от Railway.
+  router.post('/signup', loginLimiter, async (req, res) => {
+    try {
+      const { signup_code, org_name, username, password, email, name } = req.body || {};
+      const required = process.env.SIGNUP_CODE;
+      if (!required) return res.status(403).json({ error: 'Регистрацията е затворена в момента' });
+      if (String(signup_code || '') !== required) {
+        logAttempt(db, { username, success: false, ip: clientIp(req), userAgent: req.headers['user-agent'], reason: 'bad_signup_code' });
+        return res.status(403).json({ error: 'Невалиден код за достъп' });
+      }
+      const { createOrg } = require('../lib/createOrg');
+      const r = createOrg(db, getOrgDb, {
+        name: org_name, owner_username: username, owner_password: password,
+        owner_email: email, owner_name: name,
+      });
+      const token = jwt.sign({ id: r.owner_user_id, username, role: 'admin',
+        organization_id: r.organization_id, is_superadmin: 0 }, JWT_SECRET, { expiresIn: '7d' });
+      logAttempt(db, { user: { id: r.owner_user_id, username }, username, success: true, ip: clientIp(req), userAgent: req.headers['user-agent'] });
+      // welcome email — не блокира при липсващ ключ/грешка
+      if (process.env.RESEND_API_KEY && email) {
+        fetch('https://api.resend.com/emails', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${process.env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            from: `Skyrent <${process.env.RESEND_FROM_EMAIL || 'info@skycapital.pro'}>`,
+            to: [email],
+            subject: 'Добре дошъл в Skyrent 🏠',
+            html: `<h2>Добре дошъл, ${name || username}!</h2>
+              <p>Организацията <b>${org_name}</b> е създадена. Пробен период: 30 дни.</p>
+              <p>Започни с добавяне на първия си имот от таб <b>Портфолио</b>.</p>`,
+          }),
+        }).catch(() => {});
+      }
+      res.status(201).json({ token, role: 'admin', name: name || username, organization_id: r.organization_id, must_change_password: false });
+    } catch (e) {
+      res.status(e.status || 500).json({ error: e.message });
+    }
+  });
+
   // ── Step 1: username + password ──────────────────────────────────────
   router.post('/login', loginLimiter, async (req, res) => {
     const { username, password } = req.body;

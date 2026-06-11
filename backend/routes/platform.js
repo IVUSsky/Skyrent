@@ -1,7 +1,6 @@
 // Платформени route-ове (SaaS Phase 1) — само superadmin (ти).
 // Провизиране и преглед на организации. Публичен signup = Phase 2.
 const express = require('express');
-const bcrypt = require('bcryptjs');
 
 module.exports = function (controlDb, getOrgDb) {
   const router = express.Router();
@@ -28,22 +27,10 @@ module.exports = function (controlDb, getOrgDb) {
   // Body: { name, owner_username, owner_password, owner_email? , owner_name? }
   router.post('/orgs', (req, res) => {
     try {
-      const { name, owner_username, owner_password, owner_email, owner_name } = req.body || {};
-      if (!name || !owner_username || !owner_password) {
-        return res.status(400).json({ error: 'name, owner_username и owner_password са задължителни' });
-      }
-      if (controlDb.prepare('SELECT id FROM users WHERE username=?').get(owner_username)) {
-        return res.status(400).json({ error: 'owner_username вече съществува' });
-      }
-      const orgR = controlDb.prepare("INSERT INTO organizations (name, status) VALUES (?, 'active')").run(name);
-      const orgId = Number(orgR.lastInsertRowid);
-      getOrgDb(orgId); // създава orgs/<id>.db + пуска tenant миграциите
-      const hash = bcrypt.hashSync(owner_password, 10);
-      const uR = controlDb.prepare(
-        'INSERT INTO users (username, password_hash, role, name, email, organization_id, is_superadmin) VALUES (?,?,?,?,?,?,0)'
-      ).run(owner_username, hash, 'admin', owner_name || '', owner_email || '', orgId);
-      res.status(201).json({ ok: true, organization_id: orgId, owner_user_id: Number(uR.lastInsertRowid) });
-    } catch (e) { res.status(500).json({ error: e.message }); }
+      const { createOrg } = require('../lib/createOrg');
+      const r = createOrg(controlDb, getOrgDb, req.body || {});
+      res.status(201).json({ ok: true, ...r });
+    } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
   });
 
   // PATCH /api/platform/orgs/:id — статус (active|suspended)
