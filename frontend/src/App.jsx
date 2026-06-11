@@ -28,6 +28,7 @@ const Internet       = lazy(() => import('./components/Internet'))
 const TenantApp      = lazy(() => import('./components/TenantApp'))
 const ChatLearning   = lazy(() => import('./components/ChatLearning'))
 const Integrity      = lazy(() => import('./components/Integrity'))
+const Billing        = lazy(() => import('./components/Billing'))
 
 const TabFallback = () => (
   <div className="flex items-center justify-center py-20 text-gray-400">
@@ -61,6 +62,7 @@ const ALL_TABS = [
   { id: 'personal',    label: '💰 Личен бюджет', roles: ['admin'] },
   { id: 'smart',       label: '⚡ Смарт',       roles: ['admin'] },
   { id: 'integrity',   label: '🩺 Интегритет', roles: ['admin'] },
+  { id: 'billing',     label: '💳 Абонамент',  roles: ['admin'] },
   { id: 'settings',    label: '⚙️ Настройки',  roles: ['admin'] },
 ]
 
@@ -81,6 +83,13 @@ export default function App() {
   const [mustChangePwd, setMustChangePwd] = useState(localStorage.getItem('skyrent_must_change_pwd') === '1')
   const [learningCount, setLearningCount] = useState(0)
   const [showLearning, setShowLearning]   = useState(false)
+
+  // 402 (изтекъл trial / спрян абонамент) → отвори таб Абонамент
+  useEffect(() => {
+    const h = () => setActiveTab('billing')
+    window.addEventListener('skyrent:billing-required', h)
+    return () => window.removeEventListener('skyrent:billing-required', h)
+  }, [])
 
   const refreshLearningCount = () => {
     if (!authenticated || role === 'tenant') return
@@ -231,6 +240,7 @@ export default function App() {
           {validTab === 'investments'  && <Investments API={API} />}
           {validTab === 'personal'     && <PersonalBudget />}
           {validTab === 'integrity'    && <Integrity API={API} />}
+          {validTab === 'billing'      && <Billing API={API} />}
           {validTab === 'settings'     && <Settings API={API} />}
         </Suspense>
       </main>

@@ -85,6 +85,37 @@ async function main() {
     return res.status(403).json({ error: 'Forbidden' });
   });
 
+  // ─── Billing enforcement (SaaS Phase 3) ────────────────────────────────────
+  // Изтекъл trial / suspended абонамент → 402 за всичко освен billing+auth,
+  // за да може клиентът да си избере/поднови план. Org 1 + superadmin exempt.
+  // + лимит имоти по план (Starter 5 / Pro 30 / Business ∞) при добавяне.
+  const { PLANS: SAAS_PLANS } = require('./lib/saasBilling');
+  const BILLING_ALLOWED = ['/api/billing', '/api/auth'];
+  app.use('/api', (req, res, next) => {
+    const orgId = req.user?.organization_id;
+    if (!orgId || orgId === 1 || req.user?.is_superadmin) return next();
+    const url = req.originalUrl.split('?')[0];
+    if (BILLING_ALLOWED.some(p => url === p || url.startsWith(p + '/'))) return next();
+    const org = controlDb.prepare('SELECT plan, status, trial_ends_at FROM organizations WHERE id=?').get(orgId);
+    if (!org) return res.status(403).json({ error: 'Организацията не съществува' });
+    if (org.status === 'suspended') {
+      return res.status(402).json({ error: 'Абонаментът е спрян — избери план, за да продължиш', billing: true });
+    }
+    const today = new Date().toISOString().slice(0, 10);
+    if ((org.plan || 'trial') === 'trial' && org.trial_ends_at && org.trial_ends_at < today) {
+      return res.status(402).json({ error: 'Пробният период изтече — избери план, за да продължиш', billing: true });
+    }
+    // лимит имоти по план
+    if (req.method === 'POST' && url === '/api/properties') {
+      const limit = SAAS_PLANS[org.plan]?.limit;
+      if (limit != null) {
+        const n = db.prepare('SELECT COUNT(*) AS n FROM properties').get().n;
+        if (n >= limit) return res.status(402).json({ error: `Планът ${org.plan} позволява до ${limit} имота — надгради за повече`, billing: true });
+      }
+    }
+    next();
+  });
+
   // Backup — download the SQLite database file
   const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'db', 'portfolio.db');
   app.get('/api/backup', (req, res) => {
@@ -152,6 +183,7 @@ async function main() {
   app.use('/api/internet', require('./routes/internet')(db));
   app.use('/api/integrity', require('./routes/integrity')(db));
   app.use('/api/platform', require('./routes/platform')(controlDb, getOrgDb));
+  app.use('/api/billing', require('./routes/billing')(db, controlDb));
 
   // Stripe payments — tenant-facing endpoints mounted under /api/tenant (auth + tenant guard inside)
   const { tenantPaymentsRouter, webhookHandler } = require('./routes/payments');
