@@ -151,6 +151,7 @@ async function main() {
   app.use('/api/notifications', require('./routes/notifications')(db));
   app.use('/api/internet', require('./routes/internet')(db));
   app.use('/api/integrity', require('./routes/integrity')(db));
+  app.use('/api/platform', require('./routes/platform')(controlDb, getOrgDb));
 
   // Stripe payments — tenant-facing endpoints mounted under /api/tenant (auth + tenant guard inside)
   const { tenantPaymentsRouter, webhookHandler } = require('./routes/payments');
