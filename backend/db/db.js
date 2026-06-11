@@ -1,8 +1,8 @@
 /**
- * sql.js wrapper mimicking the better-sqlite3 synchronous API.
- * Supports: positional ? params, named @param params, and db.transaction().
+ * better-sqlite3 wrapper preserving the previous sql.js-mimicking API.
+ * Synchronous, on-disk, WAL. Drop-in for all existing call sites.
  */
-const initSqlJs = require('sql.js');
+const Database = require('better-sqlite3');
 const fs = require('fs');
 const path = require('path');
 
@@ -10,130 +10,42 @@ const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'portfolio.db');
 const DB_DIR = path.dirname(DB_PATH);
 if (!fs.existsSync(DB_DIR)) fs.mkdirSync(DB_DIR, { recursive: true });
 
-function normalizeParams(args) {
-  if (!args || args.length === 0) return null;
-
-  // Single object → named params — add @ prefix to each key
-  if (args.length === 1 && args[0] !== null && typeof args[0] === 'object' && !Array.isArray(args[0])) {
-    const obj = args[0];
-    const named = {};
-    for (const [k, v] of Object.entries(obj)) {
-      named[/^[@:$]/.test(k) ? k : '@' + k] = v;
-    }
-    return named;
-  }
-
-  // Single array → positional
-  if (args.length === 1 && Array.isArray(args[0])) {
-    return args[0].length ? args[0] : null;
-  }
-
-  // Multiple primitives → positional array
-  return Array.from(args);
-}
-
-class Statement {
-  constructor(sql, sqlDb, dbInst) {
-    this._sql = sql;
-    this._sqlDb = sqlDb;
-    this._db = dbInst;
-  }
-
-  _readRows(params) {
-    const stmt = this._sqlDb.prepare(this._sql);
-    try {
-      if (params !== null) stmt.bind(params);
-      const rows = [];
-      while (stmt.step()) rows.push(stmt.getAsObject());
-      return rows;
-    } finally {
-      stmt.free();
-    }
-  }
-
-  all(...args) {
-    return this._readRows(normalizeParams(args));
-  }
-
-  get(...args) {
-    return this._readRows(normalizeParams(args))[0];
-  }
-
-  run(...args) {
-    const params = normalizeParams(args);
-    const stmt = this._sqlDb.prepare(this._sql);
-    try {
-      // sql.js stmt.run() accepts array or object or nothing
-      if (params === null) stmt.run([]);
-      else stmt.run(params);
-    } finally {
-      stmt.free();
-    }
-    const changes = this._sqlDb.getRowsModified();
-    let lastInsertRowid = null;
-    try {
-      const r = this._sqlDb.exec('SELECT last_insert_rowid()');
-      lastInsertRowid = r[0]?.values[0][0] ?? null;
-    } catch (_) {}
-    this._db._maybeSave();
-    return { changes, lastInsertRowid };
-  }
+// Normalize call-site args to what better-sqlite3 expects:
+//  - single array   → spread as positional
+//  - single object  → named params (passed through)
+//  - multiple values → positional
+function normalizeArgs(args) {
+  if (args.length === 1 && Array.isArray(args[0])) return args[0];
+  return args;
 }
 
 class DB {
-  constructor(sqlDb) {
-    this._sqlDb = sqlDb;
-    this._inTx = false;
-  }
-
-  _maybeSave() {
-    if (this._inTx) return;
-    const data = this._sqlDb.export();
-    // Atomic write: пиши в temp файл, после rename. rename() е атомарен на
-    // същия filesystem → ако процесът умре по средата (deploy/OOM/crash),
-    // оригиналният DB файл остава непокътнат вместо да се коруптира.
-    const tmp = DB_PATH + '.tmp';
-    fs.writeFileSync(tmp, Buffer.from(data));
-    fs.renameSync(tmp, DB_PATH);
-  }
-
-  prepare(sql) {
-    return new Statement(sql, this._sqlDb, this);
-  }
-
-  exec(sql) {
-    this._sqlDb.exec(sql);
-    this._maybeSave();
-  }
-
-  pragma(str) {
-    try { this._sqlDb.exec(`PRAGMA ${str};`); } catch (_) {}
-  }
-
-  transaction(fn) {
-    const self = this;
-    return function (...args) {
-      self._inTx = true;
-      self._sqlDb.exec('BEGIN');
-      try {
-        fn(...args);
-        self._sqlDb.exec('COMMIT');
-      } catch (e) {
-        try { self._sqlDb.exec('ROLLBACK'); } catch (_) {}
-        throw e;
-      } finally {
-        self._inTx = false;
-      }
-      self._maybeSave();
+  constructor(bdb) {
+    this._db = bdb;
+    // compat shim for code that used the old sql.js handle (backup + vacuum endpoints)
+    this._sqlDb = {
+      export: () => { try { bdb.pragma('wal_checkpoint(TRUNCATE)'); } catch (_) {} return fs.readFileSync(DB_PATH); },
+      exec: (sql) => bdb.exec(sql),
     };
   }
+  prepare(sql) {
+    const stmt = this._db.prepare(sql);
+    return {
+      all: (...a) => stmt.all(...normalizeArgs(a)),
+      get: (...a) => stmt.get(...normalizeArgs(a)),
+      run: (...a) => stmt.run(...normalizeArgs(a)),
+    };
+  }
+  exec(sql) { this._db.exec(sql); }
+  pragma(str) { try { this._db.pragma(str); } catch (_) {} }
+  transaction(fn) { return this._db.transaction(fn); }
+  _maybeSave() { /* no-op: better-sqlite3 persists natively */ }
 }
 
 async function initDb() {
-  const SQL = await initSqlJs();
-  const buf = fs.existsSync(DB_PATH) ? fs.readFileSync(DB_PATH) : null;
-  const sqlDb = buf ? new SQL.Database(buf) : new SQL.Database();
-  return new DB(sqlDb);
+  const bdb = new Database(DB_PATH);
+  bdb.pragma('journal_mode = WAL');
+  return new DB(bdb);
 }
 
 module.exports = { initDb };
