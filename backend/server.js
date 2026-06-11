@@ -116,6 +116,22 @@ async function main() {
     next();
   });
 
+  // ─── Org-1-only интеграции ─────────────────────────────────────────────────
+  // Trading 212, злато/метали, Tuya smart и личният бюджет ползват ENV ключове
+  // на Sky Capital (лични акаунти) → ДРУГИТЕ организации НЕ трябва да ги виждат
+  // (иначе виждат личните данни на платформата — T212 баланс и т.н.).
+  // Per-org API ключове в settings = бъдеща фаза.
+  const ORG1_ONLY = ['/api/investments', '/api/smart', '/api/personal'];
+  app.use('/api', (req, res, next) => {
+    const orgId = req.user?.organization_id;
+    if (!orgId || orgId === 1) return next();
+    const url = req.originalUrl.split('?')[0];
+    if (ORG1_ONLY.some(p => url === p || url.startsWith(p + '/'))) {
+      return res.status(403).json({ error: 'Функцията не е налична за вашата организация' });
+    }
+    next();
+  });
+
   // Backup — download the SQLite database file
   const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'db', 'portfolio.db');
   app.get('/api/backup', (req, res) => {
