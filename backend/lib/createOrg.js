@@ -20,7 +20,15 @@ function createOrg(controlDb, getOrgDb, { name, owner_username, owner_password, 
     .run(String(name).trim(), plan, trialEnds);
   const orgId = Number(orgR.lastInsertRowid);
 
-  getOrgDb(orgId); // създава orgs/<id>.db + tenant миграции (празна структура, без seed)
+  const orgDb = getOrgDb(orgId); // създава orgs/<id>.db + tenant миграции (празна структура, без seed)
+
+  // White-label (Phase 4): issuer.name = името на организацията → PDF фактури/
+  // договори, имейли и 2FA issuer излизат с бранда на клиента от ден 1.
+  // (Допълва се от Settings → Издател: ЕИК, ДДС, IBAN, лого.)
+  try {
+    orgDb.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('issuer', ?)")
+      .run(JSON.stringify({ name: String(name).trim() }));
+  } catch (e) { console.warn('[createOrg] issuer seed:', e.message); }
 
   const hash = bcrypt.hashSync(owner_password, 10);
   const uR = controlDb.prepare(

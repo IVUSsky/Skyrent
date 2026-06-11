@@ -75,6 +75,19 @@ function parseRole() {
   } catch { return 'broker' }
 }
 
+// Org от JWT (multi-tenant). Стар token без claim → org 1.
+function parseOrgId() {
+  try {
+    const token = localStorage.getItem('skyrent_token')
+    if (!token) return 1
+    const payload = JSON.parse(atob(token.split('.')[1]))
+    return Number(payload.organization_id) || 1
+  } catch { return 1 }
+}
+
+// Org-1-only табове: интеграции с лични env ключове (T212, Tuya, личен бюджет)
+const ORG1_ONLY_TABS = new Set(['investments', 'smart', 'personal'])
+
 export default function App() {
   const [activeTab, setActiveTab]       = useState('invoices')
   const [authenticated, setAuthenticated] = useState(!!localStorage.getItem('skyrent_token'))
@@ -90,6 +103,16 @@ export default function App() {
     window.addEventListener('skyrent:billing-required', h)
     return () => window.removeEventListener('skyrent:billing-required', h)
   }, [])
+
+  // White-label (Phase 4): бранд от org settings.issuer (име + опц. лого).
+  // Org 1 (Sky Capital) пада на вграденото лого; нови организации виждат своето.
+  const [brand, setBrand] = useState(null) // { name, logo? }
+  useEffect(() => {
+    if (!authenticated || role === 'tenant') return
+    apiFetch(`${API}/api/settings`).then(r => r.json())
+      .then(s => { if (s?.issuer?.name) setBrand({ name: s.issuer.name, logo: s.issuer.logo || null }) })
+      .catch(() => {})
+  }, [authenticated, role])
 
   const refreshLearningCount = () => {
     if (!authenticated || role === 'tenant') return
@@ -144,7 +167,8 @@ export default function App() {
     )
   }
 
-  const tabs = ALL_TABS.filter(t => t.roles.includes(role))
+  const orgId = parseOrgId()
+  const tabs = ALL_TABS.filter(t => t.roles.includes(role) && (orgId === 1 || !ORG1_ONLY_TABS.has(t.id)))
 
   // Ensure activeTab is valid for this role
   const validTab = tabs.find(t => t.id === activeTab) ? activeTab : tabs[0]?.id
@@ -155,7 +179,13 @@ export default function App() {
       <header className="shadow-lg" style={{ background: 'var(--shell-bg)' }}>
         <div className="max-w-7xl mx-auto px-4 py-2 flex items-center gap-5 flex-wrap">
           <div className="shrink-0" style={{ background: 'white', borderRadius: '7px', padding: '4px 10px', display: 'inline-flex', alignItems: 'center' }}>
-            <img src="/sky_capital_logo.png" alt="Sky Capital" style={{ height: '42px', display: 'block' }} />
+            {brand?.logo ? (
+              <img src={brand.logo} alt={brand.name} style={{ height: '42px', display: 'block' }} />
+            ) : brand && brand.name !== 'Sky Capital' ? (
+              <span style={{ fontWeight: 700, fontSize: '18px', color: '#0F1E18', padding: '8px 2px', display: 'block' }}>{brand.name}</span>
+            ) : (
+              <img src="/sky_capital_logo.png" alt="Sky Capital" style={{ height: '42px', display: 'block' }} />
+            )}
           </div>
           <nav className="flex gap-1 flex-wrap items-center">
             {tabs.map(tab => (
