@@ -13,17 +13,40 @@ const CHECK_LABEL = {
   period_gap: 'Липсващ месец', rent_vs_record: 'Наем ≠ запис', active_no_rent: 'Активен без наем',
 }
 
+const thisMonth = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` }
+
 export default function Integrity({ API = '' }) {
   const [data, setData] = useState(null)
   const [showAcked, setShowAcked] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [cashProps, setCashProps] = useState([])
+  const [sel, setSel] = useState({})            // {property_id: true}
+  const [cashMonth, setCashMonth] = useState(thisMonth())
+  const [cashMsg, setCashMsg] = useState(null)
+
+  const loadProps = () => apiFetch(`${API}/api/properties`).then(r => r.json())
+    .then(ps => setCashProps((ps || []).filter(p => p.rent_channel === 'cash')))
 
   const load = () => {
     setBusy(true)
-    apiFetch(`${API}/api/integrity${showAcked ? '?all=1' : ''}`)
-      .then(r => r.json()).then(setData).finally(() => setBusy(false))
+    Promise.all([
+      apiFetch(`${API}/api/integrity${showAcked ? '?all=1' : ''}`).then(r => r.json()).then(setData),
+      loadProps(),
+    ]).finally(() => setBusy(false))
   }
   useEffect(load, [showAcked])
+
+  const recordCash = () => {
+    const ids = Object.keys(sel).filter(k => sel[k]).map(Number)
+    if (!ids.length) { setCashMsg('Избери поне един имот'); return }
+    apiFetch(`${API}/api/import/cash-rent`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ property_ids: ids, месец: cashMonth }),
+    }).then(r => r.json()).then(d => {
+      setCashMsg(`✓ Записани: ${d.created?.length || 0} | Пропуснати: ${d.skipped?.length || 0}`)
+      setSel({}); load()
+    }).catch(e => setCashMsg('Грешка: ' + e.message))
+  }
 
   const ack = (signature, status) =>
     apiFetch(`${API}/api/integrity/ack`, {
@@ -65,6 +88,27 @@ export default function Integrity({ API = '' }) {
         ))}
         {!total && <div className="text-green-700 font-medium">✓ Няма активни проблеми</div>}
       </div>
+
+      {cashProps.length > 0 && (
+        <section className="mb-7 rounded-xl border border-amber-200 bg-amber-50/40 p-4">
+          <h2 className="iv-section-h">💵 Кеш наеми</h2>
+          <p className="text-sm text-gray-600 mb-3">Избери имотите, които са платили в брой, и месеца — записва наема наведнъж.</p>
+          <div className="flex flex-wrap gap-2 mb-3">
+            {cashProps.map(p => (
+              <label key={p.id} className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border cursor-pointer text-sm ${sel[p.id] ? 'border-amber-400 bg-amber-100' : 'border-gray-200 bg-white'}`}>
+                <input type="checkbox" checked={!!sel[p.id]} onChange={e => setSel(s => ({ ...s, [p.id]: e.target.checked }))} />
+                <span>{p['адрес']} <span className="text-gray-400">· {p['наемател']} · {p['наем']}€</span></span>
+              </label>
+            ))}
+          </div>
+          <div className="flex items-center gap-3 flex-wrap">
+            <input type="month" value={cashMonth} onChange={e => setCashMonth(e.target.value)} className="border border-gray-300 rounded px-2 py-1 text-sm bg-white" />
+            <button onClick={recordCash} className="px-4 py-1.5 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700">Запиши наем за избраните</button>
+            <button onClick={() => setSel(Object.fromEntries(cashProps.map(p => [p.id, true])))} className="text-sm text-amber-700 underline">избери всички</button>
+            {cashMsg && <span className="text-sm text-gray-700">{cashMsg}</span>}
+          </div>
+        </section>
+      )}
 
       {Object.entries(groups).map(([check, items]) => (
         <section key={check} className="mb-6">

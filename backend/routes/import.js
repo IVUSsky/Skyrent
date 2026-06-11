@@ -1221,5 +1221,38 @@ module.exports = function(db) {
     }
   });
 
+  // POST /cash-rent — bulk запис на получен КЕШ наем за избрани имоти за даден месец.
+  // За имоти с rent_channel='cash' наемът не минава по банка → записва се ръчно тук.
+  // За всеки имот: създава наем Кт транзакция (сума = наема на имота). Прескача,
+  // ако вече има наем за този имот+месец (без дубли).
+  // Body: { property_ids: [int], месец: 'YYYY-MM' }
+  router.post('/cash-rent', (req, res) => {
+    if (req.user?.role === 'tenant') return res.status(403).json({ error: 'Forbidden' });
+    try {
+      const { property_ids, месец } = req.body || {};
+      if (!Array.isArray(property_ids) || !property_ids.length) return res.status(400).json({ error: 'property_ids required' });
+      if (!/^\d{4}-\d{2}$/.test(месец || '')) return res.status(400).json({ error: 'месец трябва да е YYYY-MM' });
+
+      const ins = db.prepare(`INSERT INTO transactions
+        (session_id, дата, контрагент, основание, сума, operation, категория, property_id, месец, validated, currency, scope)
+        VALUES (NULL, ?, ?, ?, ?, 'Кт', 'наем', ?, ?, 1, ?, 'business')`);
+      const existsStmt = db.prepare("SELECT id FROM transactions WHERE property_id=? AND месец=? AND категория='наем' AND operation='Кт'");
+      const currency = месец >= '2026-01' ? 'EUR' : 'BGN';
+      const created = [], skipped = [];
+
+      for (const pid of property_ids) {
+        const p = db.prepare('SELECT id, наем, наемател FROM properties WHERE id=?').get(pid);
+        if (!p) { skipped.push({ property_id: pid, reason: 'няма имот' }); continue; }
+        if (existsStmt.get(pid, месец)) { skipped.push({ property_id: pid, reason: 'вече има наем за месеца' }); continue; }
+        const amount = Number(p.наем) || 0;
+        const r = ins.run(`${месец}-01`, p.наемател || '', `Кеш наем ${месец}`, amount, pid, месец, currency);
+        created.push({ property_id: pid, tx_id: r.lastInsertRowid, сума: amount, currency });
+      }
+      res.json({ ok: true, created, skipped });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   return router;
 };
