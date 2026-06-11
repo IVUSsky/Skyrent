@@ -29,6 +29,7 @@ const TenantApp      = lazy(() => import('./components/TenantApp'))
 const ChatLearning   = lazy(() => import('./components/ChatLearning'))
 const Integrity      = lazy(() => import('./components/Integrity'))
 const Billing        = lazy(() => import('./components/Billing'))
+const Platform       = lazy(() => import('./components/Platform'))
 
 const TabFallback = () => (
   <div className="flex items-center justify-center py-20 text-gray-400">
@@ -87,6 +88,55 @@ function parseOrgId() {
 
 // Org-1-only табове: интеграции с лични env ключове (T212, Tuya, личен бюджет)
 const ORG1_ONLY_TABS = new Set(['investments', 'smart', 'personal'])
+
+function parseIsSuper() {
+  try {
+    const token = localStorage.getItem('skyrent_token')
+    if (!token) return false
+    return !!JSON.parse(atob(token.split('.')[1])).is_superadmin
+  } catch { return false }
+}
+
+// Платформени оферти/новини банер (Phase 5) — за org admins.
+function AnnouncementBar({ API }) {
+  const [items, setItems] = useState([])
+  const [sent, setSent] = useState({})
+  useEffect(() => {
+    apiFetch(`${API}/api/announcements`).then(r => r.json())
+      .then(d => setItems(Array.isArray(d) ? d : [])).catch(() => {})
+  }, [])
+  const dismiss = (id) => {
+    setItems(prev => prev.filter(x => x.id !== id))
+    apiFetch(`${API}/api/announcements/${id}/dismiss`, { method: 'POST' }).catch(() => {})
+  }
+  const interest = (id) => {
+    setSent(s => ({ ...s, [id]: true }))
+    apiFetch(`${API}/api/announcements/${id}/interest`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}),
+    }).catch(() => {})
+  }
+  if (!items.length) return null
+  const ICON = { news: '📢', offer: '🎁', service: '🏠' }
+  return (
+    <div className="max-w-7xl mx-auto px-4 pt-3 space-y-2">
+      {items.map(a => (
+        <div key={a.id} className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 flex items-center justify-between gap-3 flex-wrap">
+          <div className="min-w-0">
+            <span className="font-medium text-amber-900">{ICON[a.type] || '📢'} {a.title}</span>
+            <span className="text-amber-800 text-sm ml-2">{a.body}</span>
+          </div>
+          <div className="flex gap-2 shrink-0 items-center">
+            {a.cta_label && (sent[a.id]
+              ? <span className="text-green-700 text-sm font-medium">✓ Ще се свържем с теб</span>
+              : <button onClick={() => interest(a.id)}
+                  className="px-3 py-1 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700">{a.cta_label}</button>)}
+            <button onClick={() => dismiss(a.id)} className="text-amber-400 hover:text-amber-600 px-1" title="Скрий">✕</button>
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
 
 export default function App() {
   const [activeTab, setActiveTab]       = useState('invoices')
@@ -168,7 +218,11 @@ export default function App() {
   }
 
   const orgId = parseOrgId()
-  const tabs = ALL_TABS.filter(t => t.roles.includes(role) && (orgId === 1 || !ORG1_ONLY_TABS.has(t.id)))
+  const isSuper = parseIsSuper()
+  const tabs = [
+    ...ALL_TABS.filter(t => t.roles.includes(role) && (orgId === 1 || !ORG1_ONLY_TABS.has(t.id))),
+    ...(isSuper ? [{ id: 'platform', label: '🛸 Платформа', roles: ['admin'] }] : []),
+  ]
 
   // Ensure activeTab is valid for this role
   const validTab = tabs.find(t => t.id === activeTab) ? activeTab : tabs[0]?.id
@@ -249,6 +303,8 @@ export default function App() {
         </Suspense>
       )}
 
+      <AnnouncementBar API={API} />
+
       <main className="max-w-7xl mx-auto px-4 py-6">
         <Suspense fallback={<TabFallback/>}>
           {validTab === 'dashboard' && <Dashboard API={API} />}
@@ -271,6 +327,7 @@ export default function App() {
           {validTab === 'personal'     && <PersonalBudget />}
           {validTab === 'integrity'    && <Integrity API={API} />}
           {validTab === 'billing'      && <Billing API={API} />}
+          {validTab === 'platform'     && <Platform API={API} />}
           {validTab === 'settings'     && <Settings API={API} />}
         </Suspense>
       </main>

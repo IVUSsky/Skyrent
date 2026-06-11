@@ -829,6 +829,33 @@ function runControlMigrations(db) {
   // Phase 3: Stripe SaaS billing
   try { db.exec("ALTER TABLE organizations ADD COLUMN stripe_customer_id TEXT");     console.log('Migration: added organizations.stripe_customer_id'); }     catch(_) {}
   try { db.exec("ALTER TABLE organizations ADD COLUMN stripe_subscription_id TEXT"); console.log('Migration: added organizations.stripe_subscription_id'); } catch(_) {}
+
+  // Phase 5: платформен команден център — broadcast оферти/новини + leads
+  db.exec(`CREATE TABLE IF NOT EXISTS announcements (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    type TEXT NOT NULL DEFAULT 'news',          -- news | offer | service
+    title TEXT NOT NULL,
+    body TEXT NOT NULL,
+    cta_label TEXT,                             -- напр. "Интересувам се"
+    active INTEGER DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+  db.exec(`CREATE TABLE IF NOT EXISTS announcement_leads (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    announcement_id INTEGER NOT NULL REFERENCES announcements(id),
+    organization_id INTEGER NOT NULL,
+    user_id INTEGER,
+    username TEXT, email TEXT, org_name TEXT,   -- денормализирано за лесен преглед
+    note TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+  db.exec(`CREATE TABLE IF NOT EXISTS announcement_dismissals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    announcement_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    UNIQUE(announcement_id, user_id)
+  )`);
+  console.log('platform announcements tables ready');
   // ВАЖНО: env-seed на първия admin е в server.js СЛЕД bootstrap() — иначе
   // изпреварва копието на реалните users от orgs/1.db и то се скипва.
   console.log('users table ready');
