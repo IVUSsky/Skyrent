@@ -820,6 +820,17 @@ function TenantInternet() {
 
   if (data === null) return <Card><p className="text-slate-500 text-sm">Зареждане...</p></Card>
 
+  if (data.has_router === false) {
+    return (
+      <Card title="Достъп до Wi-Fi">
+        <p className="text-slate-500 text-sm">
+          🌐 Интернет услугата все още не е налична за този имот.
+          Ако имате интерес, свържете се с нас през „Поддръжка“.
+        </p>
+      </Card>
+    )
+  }
+
   const acc = data.account
   const isActive = acc.status === 'active' && acc.valid_until && new Date(acc.valid_until) > new Date()
   const validUntil = acc.valid_until ? new Date(acc.valid_until + (acc.valid_until.endsWith('Z') ? '' : 'Z')) : null
