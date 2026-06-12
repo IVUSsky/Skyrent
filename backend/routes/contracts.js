@@ -64,17 +64,21 @@ function fillTemplate(template, fields) {
 function buildFields(contract, issuer) {
   const isCompany = contract.landlord_type === 'дружество';
 
-  // Landlord composite blocks — BG and EN depending on type
+  // Landlord composite blocks — BG and EN depending on type.
+  // ВАЖНО (multi-tenant): всичко идва от org issuer (Настройки → Данни на
+  // издателя) / контракта — НИКАКВИ hardcoded имена (PII leak в чужди org-и).
+  const coName = contract.landlord_name || issuer.name || '...';
+  const coMol  = issuer.mol || '...';
   const landlordDataBG = isCompany
-    ? `Скай Кепитъл ООД, ЕИК ${contract.landlord_egn || issuer.eik || '...'}, МОЛ: Иво Лазаров Лазаров, с адрес ${contract.landlord_address || issuer.address || ''}`
+    ? `${coName}, ЕИК ${contract.landlord_egn || issuer.eik || '...'}, МОЛ: ${coMol}, с адрес ${contract.landlord_address || issuer.address || ''}`
     : `${contract.landlord_name || issuer.name || ''}, ЕГН ${contract.landlord_egn || issuer.eik || ''}, ЛК № ${contract.landlord_lk || '...'}, издадена на ${contract.landlord_lk_date || '...'} год. с адрес ${contract.landlord_address || issuer.address || ''}`;
 
   const landlordDataEN = isCompany
-    ? `Sky Capital OOD, Company Registration No. ${contract.landlord_egn || issuer.eik || '...'}, Manager: Ivo Lazarov Lazarov, address ${contract.landlord_address || issuer.address || ''}`
-    : `Ivo Lazarov Lazarov, (the name as written in the Identity Card), Personal Identification No. ${contract.landlord_egn || issuer.eik || ''} Identity Card No. ${contract.landlord_lk || '...'}, issued on ${contract.landlord_lk_date || '...'}, address ${contract.landlord_address || issuer.address || ''}`;
+    ? `${coName}, Company Registration No. ${contract.landlord_egn || issuer.eik || '...'}, Manager: ${coMol}, address ${contract.landlord_address || issuer.address || ''}`
+    : `${contract.landlord_name || issuer.name || ''}, Personal Identification No. ${contract.landlord_egn || issuer.eik || ''} Identity Card No. ${contract.landlord_lk || '...'}, issued on ${contract.landlord_lk_date || '...'}, address ${contract.landlord_address || issuer.address || ''}`;
 
-  const landlordSignBG = isCompany ? 'Sky Capital OOD / Скай Кепитъл ООД\nМОЛ: Иво Лазаров Лазаров' : (contract.landlord_name || issuer.name || '');
-  const landlordSignEN = isCompany ? 'Sky Capital OOD\nManager: Ivo Lazarov Lazarov' : 'Ivo Lazarov Lazarov';
+  const landlordSignBG = isCompany ? `${coName}\nМОЛ: ${coMol}` : (contract.landlord_name || issuer.name || '');
+  const landlordSignEN = isCompany ? `${coName}\nManager: ${coMol}` : (contract.landlord_name || issuer.name || '');
 
   return {
     'ДОГОВОР_НОМЕР':          contract.contract_number || '',
@@ -124,7 +128,7 @@ function buildFields(contract, issuer) {
     // ─── Payment method (cash vs bank transfer) ────────────────────
     'НАЧИН_ПЛАЩАНЕ':          contract.payment_method === 'в брой'
                                 ? 'в брой'
-                                : (contract.payment_method === 'карта (Stripe)' ? 'с картово плащане през онлайн портала на Sky Capital' : `по банков път на IBAN: ${issuer.iban || ''}`),
+                                : (contract.payment_method === 'карта (Stripe)' ? 'с картово плащане през онлайн портала' : `по банков път на IBAN: ${issuer.iban || ''}`),
     // ─── Срок в месеци ─────────────────────────────────────────────
     'СРОК_МЕСЕЦИ':            (() => {
       if (!contract.start_date || !contract.end_date) return '12';
@@ -239,7 +243,7 @@ function generateContractPDF(contract, template, issuer, photos = [], opts = {})
       const infoX = W - MR - 210;
       const infoW = 210;
       const infoRows = [
-        { text: issuer.name || 'Sky Capital OOD', bold: true,  y: 12 },
+        { text: issuer.name || '', bold: true,  y: 12 },
         issuer.eik     ? { text: `ЕИК: ${issuer.eik}`,    bold: false, y: 24 } : null,
         issuer.address ? { text: issuer.address,           bold: false, y: 35 } : null,
         issuer.email   ? { text: issuer.email,             bold: false, y: 46 } : null,
@@ -264,7 +268,7 @@ function generateContractPDF(contract, template, issuer, photos = [], opts = {})
       doc.page.margins.bottom = 0;
       doc.moveTo(ML, fy).lineTo(W - MR, fy).lineWidth(0.4).strokeColor('#d1d5db').stroke();
       doc.font('R').fontSize(7).fillColor('#9ca3af');
-      doc.text(issuer.name || 'Sky Capital OOD', ML, fy + 6, { width: PW / 2, lineBreak: false });
+      doc.text(issuer.name || '', ML, fy + 6, { width: PW / 2, lineBreak: false });
       doc.text(`${pageNum}`, ML, fy + 6, { width: PW, align: 'right', lineBreak: false });
       doc.page.margins.bottom = savedBottom;
 
@@ -690,7 +694,7 @@ function generateAnnexPDF(annex, contract, issuer) {
       if (resolvedLogo) { try { doc.image(resolvedLogo, ML, 8, { height: 68, fit: [175, 68] }); } catch(_) {} }
       const infoX = W - MR - 210;
       [
-        { text: issuer.name || 'Sky Capital OOD', bold: true,  y: 12 },
+        { text: issuer.name || '', bold: true,  y: 12 },
         issuer.eik     ? { text: `ЕИК: ${issuer.eik}`,  bold: false, y: 24 } : null,
         issuer.address ? { text: issuer.address,         bold: false, y: 35 } : null,
         issuer.iban    ? { text: `IBAN: ${issuer.iban}`, bold: false, y: 57 } : null,
@@ -707,7 +711,7 @@ function generateAnnexPDF(annex, contract, issuer) {
       doc.page.margins.bottom = 0;
       doc.moveTo(ML, fy).lineTo(W - MR, fy).lineWidth(0.4).strokeColor('#d1d5db').stroke();
       doc.font('R').fontSize(7).fillColor('#9ca3af');
-      doc.text(issuer.name || 'Sky Capital OOD', ML, fy + 6, { width: PW / 2, lineBreak: false });
+      doc.text(issuer.name || '', ML, fy + 6, { width: PW / 2, lineBreak: false });
       doc.text(`${pageNum}`, ML, fy + 6, { width: PW, align: 'right', lineBreak: false });
       doc.page.margins.bottom = saved;
       doc.y = HEADER_H; doc.x = ML;
@@ -739,7 +743,7 @@ function generateAnnexPDF(annex, contract, issuer) {
     // Parties block
     const isCompany = contract.landlord_type === 'дружество';
     const landlordLabel = isCompany
-      ? `Скай Кепитъл ООД, ЕИК ${contract.landlord_egn || issuer.eik || ''}, МОЛ: Иво Лазаров Лазаров`
+      ? `${contract.landlord_name || issuer.name || '...'}, ЕИК ${contract.landlord_egn || issuer.eik || ''}, МОЛ: ${issuer.mol || '...'}`
       : `${contract.landlord_name || issuer.name || ''}, ЕГН ${contract.landlord_egn || issuer.eik || ''}`;
 
     [
@@ -1148,7 +1152,7 @@ module.exports = function(db) {
 
       const issuer = getIssuer(db);
       const fromEmail = process.env.RESEND_FROM_EMAIL || `info@${(issuer.email || 'skycapital.pro').split('@').slice(-1)[0]}`;
-      const fromName  = issuer.name || 'Sky Capital';
+      const fromName  = issuer.name || 'Skyrent';
 
       const emailHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"></head>
 <body style="margin:0;padding:0;background:#f0f2f8;font-family:Arial,sans-serif;">
