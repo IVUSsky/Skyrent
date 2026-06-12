@@ -117,7 +117,9 @@ function patchMarketVal(db) {
 
 function seedContractTemplate(db) {
   try {
-    const exists = db.prepare("SELECT id FROM contract_templates WHERE name = 'Стандартен договор за наем — Sky Capital'").get();
+    // multi-tenant: шаблонът е generic ({{НАЕМОДАТЕЛ_ДАННИ_BG}} от org issuer)
+    // — БЕЗ лични/фирмени данни на платформата (PII leak в чужди org-и).
+    const exists = db.prepare("SELECT id FROM contract_templates WHERE name IN ('Стандартен договор за наем', 'Стандартен договор за наем — Sky Capital')").get();
     if (exists) return;
   } catch { return; }
 
@@ -125,7 +127,7 @@ function seedContractTemplate(db) {
 
 Днес, {{ДАТА_ДНЕС}} г., в град София, на основание чл. 228-239 от ЗЗД се сключи настоящият договор за наем на недвижим имот между страните:
 
-**1. СКАЙ КЕПИТЪЛ ООД**, ЕИК: 207291184, със седалище адрес: БЪЛГАРИЯ, гр. София, р-н Младост, бл. 386, ет. 4, представлявано от Иво Лазаров Лазаров, в качеството си на управител, наричан за краткост **Наемодател**
+**1. {{НАЕМОДАТЕЛ_ДАННИ_BG}}**, наричан за краткост **Наемодател**
 
 и
 
@@ -281,7 +283,7 @@ IBAN: {{НАЕМОДАТЕЛ_IBAN}}
   db.prepare(`
     INSERT INTO contract_templates (name, content, is_default)
     VALUES (?, ?, 1)
-  `).run('Стандартен договор за наем — Sky Capital', template);
+  `).run('Стандартен договор за наем', template);
 }
 
 function seedBgContractTemplate(db) {

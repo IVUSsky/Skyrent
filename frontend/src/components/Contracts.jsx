@@ -637,7 +637,7 @@ export default function Contracts({ API }) {
                 <div className="mb-3">
                   <label className="block text-xs font-medium text-gray-600 mb-1">Страна по договора</label>
                   <div className="flex gap-3">
-                    {[['физическо','👤 Иво Лазаров (физическо лице)'],['дружество','🏢 Sky Capital OOD (дружество)']].map(([val,lbl]) => (
+                    {[['физическо','👤 Физическо лице'],['дружество','🏢 Дружество']].map(([val,lbl]) => (
                       <label key={val} className={`flex items-center gap-2 px-4 py-2 rounded-lg border cursor-pointer text-sm font-medium transition-colors ${newForm.landlord_type===val ? 'bg-blue-50 border-blue-500 text-blue-800' : 'bg-white border-gray-300 text-gray-700 hover:border-blue-300'}`}>
                         <input type="radio" name="landlord_type" value={val} checked={newForm.landlord_type===val}
                           onChange={e => setNewForm(f=>({...f,landlord_type:e.target.value}))} className="hidden" />
@@ -667,7 +667,7 @@ export default function Contracts({ API }) {
                 )}
                 {newForm.landlord_type === 'дружество' && (
                   <div className="mt-3 p-3 bg-green-50 rounded-lg text-xs text-green-700">
-                    Ще се използват данните на <strong>Sky Capital OOD</strong> от Настройки → Данни на издателя (ЕИК, адрес, МОЛ, IBAN)
+                    Ще се използват данните на дружеството от <strong>Настройки → Данни на издателя</strong> (име, ЕИК, адрес, МОЛ, IBAN)
                   </div>
                 )}
               </div>
