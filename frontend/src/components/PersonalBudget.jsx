@@ -511,6 +511,11 @@ export default function PersonalBudget() {
               {a.needs_baseline && (
                 <span className="text-amber-700 text-[10px]">⚠ няма базова стойност</span>
               )}
+              {a.days_stale > 7 && (
+                <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${a.days_stale > 21 ? 'bg-rose-50 text-rose-700' : 'bg-amber-50 text-amber-700'}`}>
+                  ⏳ данни на {a.days_stale} дни — качи ново извлечение
+                </span>
+              )}
               <button onClick={() => openBaseline(a)}
                       className="ml-auto text-xs px-2 py-0.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded">
                 ✎ Корекция

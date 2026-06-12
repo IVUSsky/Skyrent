@@ -166,13 +166,14 @@ module.exports = function(db) {
   // Категории Дт които НЕ са лични разходи а capital flows/loans/инвестиции:
   // изключват се от "Лични разходи" и се показват отделно в breakdown-а.
   const NOT_PERSONAL_EXPENSE = ['вноска', 'заем_sky', 'заем_антон', 'инвестиция', 'благородни метали',
-                                 'ремонт', 'ремонт д', 'нап_ддс'];
+                                 'ремонт', 'ремонт д', 'нап_ддс', 'вътрешен_превод'];
 
   // BALANCE-NEUTRAL: тези категории представляват pass-through loan движения
   // (банка/private lender дава кредит → user → Sky или обратно). НЕ са реален
   // outflow от собствените пари. Изключват се от "Излязох" формулата.
   // 'заем_антон' = заем от/към Антон (приятел) — round-trip, не expense.
-  const BALANCE_NEUTRAL = ['заем_sky', 'заем_антон', 'кредит_получен'];
+  // 'вътрешен_превод' = превод между собствени сметки — нито приход, нито разход.
+  const BALANCE_NEUTRAL = ['заем_sky', 'заем_антон', 'кредит_получен', 'вътрешен_превод'];
 
   // ── Period summary ────────────────────────────────────────────────────────
   // Връща: доходи (по тип), разходи (по категория), нетен cashflow, savings rate.
@@ -901,7 +902,14 @@ module.exports = function(db) {
         opSource = 'pdf_closing_fallback';
       }
 
-      let balance = opening;
+      // Всичко в EUR. Opening: manual baseline се въвежда в EUR; PDF opening е
+      // във валутата на сметката (BGN сметки от 2025 → конвертирай).
+      const RATE = 1.95583;
+      const sessCur = (latestSession.account_currency || 'EUR').toUpperCase();
+      let openingEur = opening;
+      if (opening !== null && opSource !== 'manual' && sessCur === 'BGN') openingEur = opening / RATE;
+
+      let balance = openingEur;
       let lastTxDate = asOfDate;
       let txCount = 0;
       if (opening !== null && opSource !== 'pdf_closing_fallback') {
@@ -912,30 +920,43 @@ module.exports = function(db) {
         // в baseline и не се броят втори път. За PDF opening (typically date на
         // statement start) използваме >= за да броим включително тази дата.
         const cmp = opSource === 'manual' ? '>' : '>=';
+        // ВАЖНО: per-транзакционна валутна конверсия (BGN÷1.95583)! Сметки,
+        // пресичащи BG→EUR прехода (2026-01), имат смесени валути — сурово
+        // сумиране на "сума" дава безсмислено салдо.
         const sumRow = db.prepare(`
           SELECT
-            COALESCE(SUM(CASE WHEN operation='Кт' THEN сума ELSE 0 END), 0) AS kt,
-            COALESCE(SUM(CASE WHEN operation='Дт' THEN сума ELSE 0 END), 0) AS dt,
+            COALESCE(SUM(CASE WHEN operation='Кт' THEN
+              (CASE WHEN UPPER(COALESCE(currency,'BGN'))='BGN' THEN сума/${RATE} ELSE сума END)
+              ELSE 0 END), 0) AS kt,
+            COALESCE(SUM(CASE WHEN operation='Дт' THEN
+              (CASE WHEN UPPER(COALESCE(currency,'BGN'))='BGN' THEN сума/${RATE} ELSE сума END)
+              ELSE 0 END), 0) AS dt,
             COUNT(*) AS cnt,
             MAX(дата) AS last_date
           FROM transactions
           WHERE session_id IN (${placeholders})
             AND дата ${cmp} ?
         `).get(...sessIds, asOfDate || '1970-01-01');
-        balance = opening + (Number(sumRow.kt) || 0) - (Number(sumRow.dt) || 0);
+        balance = openingEur + (Number(sumRow.kt) || 0) - (Number(sumRow.dt) || 0);
         lastTxDate = sumRow.last_date || asOfDate;
         txCount = sumRow.cnt;
       }
 
+      // Staleness: на колко дни са данните (тихо замръзнало салдо = главният
+      // източник на "парите не отговарят")
+      const lastD = lastTxDate || asOfDate;
+      const daysStale = lastD ? Math.max(0, Math.floor((Date.now() - new Date(String(lastD).slice(0, 10))) / 86400000)) : null;
+
       accounts.push({
         iban,
         scope: latestSession.account_scope,
-        currency: latestSession.account_currency || 'EUR',
+        currency: 'EUR', // салдата са нормализирани в EUR (вкл. BGN истории)
         balance: balance !== null ? Number(balance.toFixed(2)) : null,
         opening: opening !== null ? Number(opening.toFixed(2)) : null,
         opening_as_of: asOfDate,
         opening_source: opSource,
         as_of: lastTxDate,
+        days_stale: daysStale,
         tx_count: txCount,
         needs_baseline: opening === null,
         sessions_count: sessions.length,
@@ -974,6 +995,44 @@ module.exports = function(db) {
     map[ibanUp] = { opening: Number(opening), as_of: as_of || new Date().toISOString().slice(0, 10) };
     db.prepare(`INSERT OR REPLACE INTO settings (key, value) VALUES ('account_baseline', ?)`).run(JSON.stringify(map));
     res.json({ ok: true, iban: ibanUp, baseline: map[ibanUp] });
+  });
+
+  // POST /internal-transfers/detect (?dry=1) — намира преводи между СОБСТВЕНИ
+  // сметки и ги маркира 'вътрешен_превод' (balance-neutral, извън P&L).
+  // Критерии (консервативни — НЕ по 'захранване', наематели плащат така!):
+  //  - основанието/контрагентът съдържа някой от собствените IBAN-и, ИЛИ
+  //  - изрично 'между собствени сметки', ИЛИ контрагентът е собственото име.
+  router.post('/internal-transfers/detect', (req, res) => {
+    try {
+      const dry = req.query.dry === '1' || req.body?.dry === true;
+      const settingsRow = db.prepare("SELECT value FROM settings WHERE key='account_scope_map'").get();
+      let ownIbans = [];
+      if (settingsRow) { try { ownIbans = Object.keys(JSON.parse(settingsRow.value)); } catch {} }
+      const OWN_NAMES = /ИВО\s+ЛАЗАРОВ|IVO\s+LAZAROV/i;
+      const EXPLICIT = /МЕЖДУ СОБСТВЕНИ СМЕТКИ|OWN ACCOUNTS TRANSFER/i;
+
+      const all = db.prepare("SELECT id, дата, сума, currency, operation, категория, контрагент, основание FROM transactions WHERE категория != 'вътрешен_превод'").all();
+      const hits = all.filter(t => {
+        const blob = ((t.основание || '') + ' ' + (t.контрагент || '')).toUpperCase().replace(/\s+/g, '');
+        if (ownIbans.some(ib => blob.includes(ib))) return true;
+        if (EXPLICIT.test((t.основание || ''))) return true;
+        if (OWN_NAMES.test((t.контрагент || ''))) return true;
+        return false;
+      });
+
+      if (!dry) {
+        const upd = db.prepare("UPDATE transactions SET категория='вътрешен_превод' WHERE id=?");
+        const run = db.transaction(list => list.forEach(t => upd.run(t.id)));
+        run(hits);
+        // махни погрешно създадени personal_income от тези tx
+        const del = db.prepare('DELETE FROM personal_income WHERE bank_tx_id=?');
+        for (const t of hits) { try { del.run(t.id); } catch (_) {} }
+      }
+      res.json({
+        ok: true, dry, matched: hits.length,
+        preview: hits.slice(0, 30).map(t => ({ id: t.id, дата: t.дата, сума: t.сума, валута: t.currency, оп: t.operation, бивша: t.категория, контрагент: (t.контрагент || '').slice(0, 24), основание: (t.основание || '').slice(0, 40) })),
+      });
+    } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
   // GET /last-month → връща последния месец с personal_income или
