@@ -1,4 +1,5 @@
 // Property inventory CRUD — furniture, appliances, electronics with photos
+const { orgContext } = require('../db/db');
 // and user manuals. Admin manages; tenants view their own property's items
 // via /api/tenant/inventory (added in routes/tenant.js).
 
@@ -126,7 +127,7 @@ module.exports = function(db) {
   });
 
   // ── UPLOAD a file (photo / manual / receipt) ──────────────────────────────
-  router.post('/:id/files', upload.single('file'), (req, res) => {
+  router.post('/:id/files', upload.single('file'), orgContext, (req, res) => {
     const item = db.prepare('SELECT id FROM property_inventory WHERE id=?').get(req.params.id);
     if (!item) return res.status(404).json({ error: 'Not found' });
     if (!req.file) return res.status(400).json({ error: 'No file' });
@@ -166,7 +167,7 @@ module.exports = function(db) {
   // ── AI: parse a purchase invoice (PDF or image) into structured items ─────
   // Returns { supplier, invoice_number, invoice_date, items: [...] }. Admin then
   // assigns each item to a property in the UI and POSTs to /bulk-import.
-  router.post('/parse-invoice', upload.single('file'), async (req, res) => {
+  router.post('/parse-invoice', upload.single('file'), orgContext, async (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'Качете файл (PDF или снимка)' });
 
     const apiKey = process.env.ANTHROPIC_API_KEY;

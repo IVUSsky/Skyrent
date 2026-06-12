@@ -1,4 +1,5 @@
 const express = require('express');
+const { orgContext } = require('../db/db');
 const path    = require('path');
 const fs      = require('fs');
 const bcrypt  = require('bcryptjs');
@@ -332,7 +333,7 @@ module.exports = function(db) {
     res.json(t);
   });
 
-  router.post('/tickets', ticketUpload.array('files', 5), (req, res) => {
+  router.post('/tickets', ticketUpload.array('files', 5), orgContext, (req, res) => {
     try {
       const { title, description, category, priority } = req.body;
       if (!title || !title.trim()) return res.status(400).json({ error: 'Заглавието е задължително' });
@@ -402,7 +403,7 @@ module.exports = function(db) {
     }
   });
 
-  router.post('/tickets/:id/messages', ticketUpload.array('files', 5), (req, res) => {
+  router.post('/tickets/:id/messages', ticketUpload.array('files', 5), orgContext, (req, res) => {
     try {
       const ticket = db.prepare('SELECT * FROM support_tickets WHERE id=? AND user_id=?').get(req.params.id, req.user.id);
       if (!ticket) return res.status(404).json({ error: 'Не е намерен' });

@@ -1,4 +1,5 @@
 const express = require('express');
+const { orgContext } = require('../db/db');
 const multer  = require('multer');
 const path    = require('path');
 const fs      = require('fs');
@@ -126,7 +127,7 @@ module.exports = function(db) {
     }
   });
 
-  router.post('/:id/messages', upload.array('files', 5), (req, res) => {
+  router.post('/:id/messages', upload.array('files', 5), orgContext, (req, res) => {
     try {
       const ticket = db.prepare('SELECT * FROM support_tickets WHERE id=?').get(req.params.id);
       if (!ticket) return res.status(404).json({ error: 'Не е намерен' });
