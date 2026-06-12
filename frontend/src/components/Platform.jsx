@@ -40,6 +40,21 @@ export default function Platform({ API = '' }) {
       body: JSON.stringify({ active: !a.active }),
     }).then(load)
 
+  // Reset парола на owner (по email/username) — browser prompt е ок тук
+  // (superadmin вътрешен инструмент; Railway блокира confirm/alert, но prompt
+  // в нов Chromium работи — fallback: inline полета при null)
+  const [resetForm, setResetForm] = useState(null) // {ident, pass}
+  const doReset = () => {
+    if (!resetForm?.ident || !resetForm?.pass) return
+    apiFetch(`${API}/api/platform/users/reset-password`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username_or_email: resetForm.ident, new_password: resetForm.pass }),
+    }).then(r => r.json()).then(d => {
+      setMsg(d.ok ? `✓ Паролата на ${d.username} (org ${d.organization_id}) е сменена` : (d.error || 'Грешка'))
+      setResetForm(null)
+    })
+  }
+
   if (!stats) return <div className="p-8 text-gray-400">Зарежда…</div>
 
   return (
@@ -69,6 +84,23 @@ export default function Platform({ API = '' }) {
       </div>
 
       {tab === 'clients' && (
+        <>
+        <div className="mb-3 flex items-center gap-2 flex-wrap">
+          {resetForm ? (
+            <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 flex-wrap">
+              <input value={resetForm.ident} onChange={e => setResetForm(f => ({ ...f, ident: e.target.value }))}
+                placeholder="username или email" className="border border-gray-300 rounded px-2 py-1 text-sm" />
+              <input value={resetForm.pass} onChange={e => setResetForm(f => ({ ...f, pass: e.target.value }))}
+                placeholder="нова парола (8+)" className="border border-gray-300 rounded px-2 py-1 text-sm" />
+              <button onClick={doReset} className="px-3 py-1 bg-amber-600 text-white rounded text-sm font-medium">Смени</button>
+              <button onClick={() => setResetForm(null)} className="text-gray-500 text-sm">откажи</button>
+            </div>
+          ) : (
+            <button onClick={() => setResetForm({ ident: '', pass: '' })}
+              className="px-3 py-1.5 text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg">🔑 Reset парола на клиент</button>
+          )}
+          {msg && tab === 'clients' && <span className="text-sm text-gray-600">{msg}</span>}
+        </div>
         <div className="bg-white rounded-xl shadow overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200 text-sm">
             <thead className="bg-gray-50"><tr>
@@ -92,6 +124,7 @@ export default function Platform({ API = '' }) {
             </tbody>
           </table>
         </div>
+        </>
       )}
 
       {tab === 'offers' && (
