@@ -1,4 +1,5 @@
 const express = require('express');
+const { orgContext } = require('../db/db');
 const multer  = require('multer');
 const path    = require('path');
 const fs      = require('fs');
@@ -403,7 +404,7 @@ module.exports = function(db) {
   // ═══ EXPENSES ═══════════════════════════════════════════════
 
   // POST /upload?source=e-invoice (default 'manual')
-  expRouter.post('/upload', upload.array('files'), (req, res) => {
+  expRouter.post('/upload', upload.array('files'), orgContext, (req, res) => {
     if (!req.files?.length) return res.status(400).json({ error: 'No files' });
     const source = (req.query.source || req.body.source || 'manual').slice(0, 30);
     const now = new Date();
@@ -421,7 +422,7 @@ module.exports = function(db) {
 
   // POST /bulk-import — upload + immediately trigger AI extract (for Playwright/e-invoice automation)
   // Returns { uploaded: [...], extracted: [...] }
-  expRouter.post('/bulk-import', upload.array('files'), async (req, res) => {
+  expRouter.post('/bulk-import', upload.array('files'), orgContext, async (req, res) => {
     if (!req.files?.length) return res.status(400).json({ error: 'No files' });
     const source = (req.query.source || req.body.source || 'e-invoice').slice(0, 30);
     const now = new Date();

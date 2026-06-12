@@ -1,4 +1,5 @@
 const express = require('express');
+const { orgContext } = require('../db/db');
 const multer  = require('multer');
 const path    = require('path');
 const fs      = require('fs');
@@ -476,7 +477,7 @@ module.exports = function(db) {
     res.json(rows);
   });
 
-  router.post('/:id/photos', uploadPhoto.array('photos', 20), (req, res) => {
+  router.post('/:id/photos', uploadPhoto.array('photos', 20), orgContext, (req, res) => {
     if (!req.files || req.files.length === 0) return res.status(400).json({ error: 'Няма файлове' });
     const inserted = req.files.map(f => {
       const caption = req.body.caption || '';

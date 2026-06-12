@@ -1,4 +1,5 @@
 const express = require('express');
+const { orgContext } = require('../db/db');
 const multer = require('multer');
 const XLSX = require('xlsx');
 
@@ -318,7 +319,7 @@ module.exports = function(db) {
   }
 
   // ── POST /parse (single file: xlsx или pdf) ────────────────
-  router.post('/parse', upload.single('file'), async (req, res) => {
+  router.post('/parse', upload.single('file'), orgContext, async (req, res) => {
     try {
       if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
@@ -349,7 +350,7 @@ module.exports = function(db) {
   });
 
   // ── POST /parse-multi (xlsx + pdf смесено) ─────────────────
-  router.post('/parse-multi', upload.array('files', 24), async (req, res) => {
+  router.post('/parse-multi', upload.array('files', 24), orgContext, async (req, res) => {
     try {
       if (!req.files || !req.files.length) return res.status(400).json({ error: 'No files uploaded' });
 

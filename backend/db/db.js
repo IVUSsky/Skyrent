@@ -112,6 +112,16 @@ function runWithOrg(orgId, fn) {
   return als.run({ orgDb, orgId: Number(orgId) }, fn);
 }
 
+// Express middleware: re-establish org контекста СЛЕД multer/stream middleware.
+// Multer (busboy) завършва в socket-root async контекст → ALS store-ът от
+// authMiddleware се губи → 'No org context' при db.prepare. req.user винаги
+// оцелява → реконструираме store-а от него. No-op ако контекстът е жив.
+function orgContext(req, res, next) {
+  if (als.getStore()) return next();
+  const orgId = Number(req.user?.organization_id) || 1;
+  als.run({ orgDb: getOrgDb(orgId), orgId }, next);
+}
+
 // per-request resolver: authMiddleware прави als.run({orgDb, orgId}, next)
 function currentOrgDb() {
   const store = als.getStore();
@@ -183,6 +193,6 @@ async function initDb() {
 
 module.exports = {
   initDb, initControlDb, getOrgDb, setTenantMigrator, bootstrap,
-  dbProxy, runWithOrg, als,
+  dbProxy, runWithOrg, orgContext, als,
   DATA_DIR, ORGS_DIR, CONTROL_PATH, DB_PATH,
 };

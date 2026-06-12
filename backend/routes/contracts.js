@@ -1,4 +1,5 @@
 const express = require('express');
+const { orgContext } = require('../db/db');
 const PDFDocument = require('pdfkit');
 const path = require('path');
 const fs = require('fs');
@@ -834,7 +835,7 @@ module.exports = function(db) {
     res.json(db.prepare('SELECT * FROM contract_templates ORDER BY id').all());
   });
 
-  router.post('/templates', upload.single('logo'), (req, res) => {
+  router.post('/templates', upload.single('logo'), orgContext, (req, res) => {
     try {
       const { name, content, is_default } = req.body;
       if (!name || !content) return res.status(400).json({ error: 'name и content са задължителни' });
@@ -847,7 +848,7 @@ module.exports = function(db) {
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
 
-  router.put('/templates/:id', upload.single('logo'), (req, res) => {
+  router.put('/templates/:id', upload.single('logo'), orgContext, (req, res) => {
     try {
       const { name, content, is_default } = req.body;
       const curr = db.prepare('SELECT * FROM contract_templates WHERE id=?').get(req.params.id);
@@ -866,7 +867,7 @@ module.exports = function(db) {
   });
 
   // Logo upload (standalone)
-  router.post('/templates/:id/logo', upload.single('logo'), (req, res) => {
+  router.post('/templates/:id/logo', upload.single('logo'), orgContext, (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'Няма файл' });
     db.prepare('UPDATE contract_templates SET logo_path=? WHERE id=?').run(req.file.filename, req.params.id);
     res.json({ ok: true, logo_path: req.file.filename });
