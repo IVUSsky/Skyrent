@@ -112,6 +112,41 @@ module.exports = function (controlDb, getOrgDb) {
     } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
   });
 
+  // POST /api/platform/users/reset-password — superadmin reset на парола на
+  // потребител от КОЯТО И ДА Е организация (по username или email).
+  // Употреба: клиент си е забравил паролата / тестови акаунти.
+  router.post('/users/reset-password', (req, res) => {
+    try {
+      const bcrypt = require('bcryptjs');
+      const { username_or_email, new_password } = req.body || {};
+      if (!username_or_email || !new_password) return res.status(400).json({ error: 'username_or_email и new_password са задължителни' });
+      if (String(new_password).length < 8) return res.status(400).json({ error: 'Паролата трябва да е поне 8 знака' });
+      const ident = String(username_or_email).trim();
+      const users = controlDb.prepare(
+        'SELECT id, username, email, role, organization_id FROM users WHERE username=? OR (email != \'\' AND LOWER(email)=LOWER(?))'
+      ).all(ident, ident);
+      if (!users.length) return res.status(404).json({ error: 'Няма потребител с този username/email' });
+      if (users.length > 1) {
+        return res.status(409).json({ error: 'Няколко потребители с този email — ползвай username', candidates: users.map(u => ({ username: u.username, organization_id: u.organization_id })) });
+      }
+      const u = users[0];
+      controlDb.prepare("UPDATE users SET password_hash=?, must_change_password=0, totp_enabled=0, totp_secret=NULL, totp_backup_codes=NULL WHERE id=?")
+        .run(bcrypt.hashSync(new_password, 10), u.id);
+      res.json({ ok: true, username: u.username, organization_id: u.organization_id, note: '2FA е нулирано (ако е имало)' });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // GET /api/platform/users?org=N — потребителите на организация (за lookup)
+  router.get('/users', (req, res) => {
+    try {
+      const org = Number(req.query.org);
+      const rows = org
+        ? controlDb.prepare('SELECT id, username, email, role, organization_id, last_login_at FROM users WHERE organization_id=? ORDER BY id').all(org)
+        : controlDb.prepare('SELECT id, username, email, role, organization_id, last_login_at FROM users ORDER BY organization_id, id').all();
+      res.json(rows);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
   // PATCH /api/platform/orgs/:id — статус (active|suspended)
   router.patch('/orgs/:id', (req, res) => {
     try {
