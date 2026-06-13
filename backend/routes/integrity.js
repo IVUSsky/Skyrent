@@ -64,7 +64,7 @@ module.exports = (db) => {
           detail: `${r.дата} ${r.сума} ${r.operation} ${(r.контрагент || '').slice(0, 24)}`, tx_ids: [r.id], fix: null });
       }
       const byRow = {};
-      for (const f of findings) for (const id of f.tx_ids) (byRow[id] = byRow[id] || []).push({ check: f.check, severity: f.severity, title: f.title });
+      for (const f of findings) for (const id of f.tx_ids) (byRow[id] = byRow[id] || []).push({ check: f.check, severity: f.severity, title: f.title, fix: f.fix || null });
       res.json({ ok: true, byRow });
     } catch (e) { res.status(500).json({ error: e.message }); }
   });

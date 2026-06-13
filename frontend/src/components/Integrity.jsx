@@ -11,6 +11,7 @@ const CHECK_LABEL = {
   duplicate: 'Дубликати', rent_no_property: 'Наем без имот', uncategorized: 'Без категория',
   doubled_month: 'Удвоен месец', spike: 'Висока сума', deposit_mix: 'Наем+депозит',
   period_gap: 'Липсващ месец', rent_vs_record: 'Наем ≠ запис', active_no_rent: 'Активен без наем',
+  unassigned_rent: 'Неприсвоени плащания',
 }
 
 const thisMonth = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` }
@@ -59,6 +60,15 @@ export default function Integrity({ API = '' }) {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ rent_channel }),
     }).then(load)
+
+  // Присвои неприсвоено плащане към имот (категория наем + property_id)
+  const assignRent = (tx_id, property_id) => {
+    if (!property_id) return
+    apiFetch(`${API}/api/import/transactions/${tx_id}/category`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ категория: 'наем', property_id: Number(property_id) }),
+    }).then(load)
+  }
 
   if (!data) return <div className="p-8 text-gray-400">Зарежда…</div>
 
@@ -133,6 +143,26 @@ export default function Integrity({ API = '' }) {
                         <option value="other">друга сметка</option>
                         <option value="cash">кеш</option>
                       </select>
+                    </div>
+                  )}
+                  {f.fix?.type === 'assign' && (
+                    <div className="mt-1.5 text-xs flex items-center gap-1 flex-wrap">
+                      Присвои наем към:
+                      {f.fix.property_id && f.fix.candidates?.length === 1 ? (
+                        <button onClick={() => assignRent(f.fix.tx_id, f.fix.property_id)}
+                          className="px-2 py-0.5 bg-amber-600 text-white rounded font-medium hover:bg-amber-700">
+                          {f.fix.candidates[0].адрес} (ID{f.fix.property_id})
+                        </button>
+                      ) : (
+                        <select className="border border-gray-300 rounded px-1 py-0.5 bg-white text-gray-700"
+                          defaultValue=""
+                          onChange={e => e.target.value && assignRent(f.fix.tx_id, e.target.value)}>
+                          <option value="">— избери имот —</option>
+                          {f.fix.candidates?.map(c => (
+                            <option key={c.id} value={c.id}>{c.адрес} (наем {c.наем}€)</option>
+                          ))}
+                        </select>
+                      )}
                     </div>
                   )}
                 </div>

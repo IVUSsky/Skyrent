@@ -1312,6 +1312,26 @@ function ImportTab({ API, onSaved }) {
                           <input type="number" value={tx.property_id||''} placeholder="—"
                             onChange={e => setTx(prev => prev.map((t,i) => i===realIdx?{...t,property_id:Number(e.target.value)||null}:t))}
                             className="w-14 border border-gray-200 rounded px-1 py-0.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"/>
+                          {!tx.property_id && (() => {
+                            const sug = (batchWarn['new'+realIdx]||[]).find(w => w.check==='unassigned_rent' && w.fix)
+                            if (!sug) return null
+                            const cands = sug.fix.candidates || []
+                            if (sug.fix.property_id && cands.length === 1) return (
+                              <button title="Присвои като наем"
+                                onClick={() => setTx(prev => prev.map((t,i) => i===realIdx?{...t,property_id:sug.fix.property_id,категория:'наем'}:t))}
+                                className="mt-0.5 block text-[10px] text-amber-700 underline whitespace-nowrap">
+                                → наем: {cands[0].адрес} (ID{sug.fix.property_id})
+                              </button>
+                            )
+                            if (cands.length > 1) return (
+                              <select defaultValue="" className="mt-0.5 block text-[10px] border border-amber-200 rounded px-0.5 bg-amber-50 max-w-[120px]"
+                                onChange={e => e.target.value && setTx(prev => prev.map((t,i) => i===realIdx?{...t,property_id:Number(e.target.value),категория:'наем'}:t))}>
+                                <option value="">наем към…</option>
+                                {cands.map(c => <option key={c.id} value={c.id}>{c.адрес} ({c.наем}€)</option>)}
+                              </select>
+                            )
+                            return null
+                          })()}
                         </td>
                         <td className="px-3 py-2 text-center whitespace-nowrap">
                           {tx.is_duplicate

@@ -35,6 +35,47 @@ function runChecks({ transactions = [], properties = [], expenses = [], acks = [
       title: 'Наем без имот', detail: `${t.дата} ${Math.round(eur(t))}€ ${(t.основание || '').slice(0, 28)}`,
       tx_ids: [t.id], fix: { type: 'category', tx_id: t.id } });
 
+  // unassigned_rent — „приход_друг" Кт без имот, който наподобява наем
+  // (платецът съвпада с наемател по име, или сумата = наема на имот).
+  // Предлага имот за присвояване. Не пипа явно ненаемни преводи.
+  const NONRENT = /покупк|дивидент|връщан|данъчн|погасяван|заплат|заем|комисион|лихва|abonament|такса/i;
+  const STOP = new Set(['еоод', 'оод', 'ад', 'ет', 'ltd', 'llc', 'invest', 'инвест', 'ивиси', 'адвокат', 'превод', 'наем', 'захранване', 'сметка']);
+  const toks = s => new Set(String(s || '').toUpperCase().replace(/[^A-ZА-Я0-9 ]/g, ' ').split(/\s+/).filter(w => w.length >= 4 && !STOP.has(w.toLowerCase())));
+  const activeProps = properties.filter(p => Number(p.наем) > 0);
+  for (const t of transactions) {
+    if (t.operation !== 'Кт' || t.property_id) continue;
+    if (t.категория !== 'приход_друг') continue;
+    if (NONRENT.test((t.основание || '') + ' ' + (t.контрагент || ''))) continue;
+    const e = eur(t);
+    if (!(e >= 30 && e < 2000)) continue;
+
+    const hay = toks((t.контрагент || '') + ' ' + (t.основание || ''));
+    // name-match изисква И близка сума (иначе обща фамилия лъже — напр. „Муса")
+    let nameMatch = null;
+    for (const p of activeProps) {
+      if (Math.abs(Number(p.наем) - e) > Math.max(8, Number(p.наем) * 0.15)) continue;
+      const pt = toks(p.наемател); for (const w of pt) if (hay.has(w)) { nameMatch = p; break; }
+      if (nameMatch) break;
+    }
+    const amtCands = activeProps.filter(p => Math.abs(Number(p.наем) - e) <= Math.max(5, Number(p.наем) * 0.03));
+
+    let best = null, sev = 'med', candidates = [];
+    if (nameMatch) { best = nameMatch; sev = 'high'; }
+    else if (amtCands.length === 1) { best = amtCands[0]; }
+    else if (amtCands.length > 1) { candidates = amtCands; }
+    else continue;
+
+    push({
+      check: 'unassigned_rent', severity: sev, property_id: null, месец: period(t),
+      signature: sig('unassigned_rent', t.id, period(t)),
+      title: 'Възможен неприсвоен наем',
+      detail: `${t.дата} ${Math.round(e)}€ — ${(t.контрагент || t.основание || '').slice(0, 26)}` + (best ? ` → ${best.адрес}` : ` → ${candidates.length} възможни`),
+      tx_ids: [t.id],
+      fix: { type: 'assign', tx_id: t.id, property_id: best ? best.id : null,
+             candidates: (best ? [best] : candidates).map(p => ({ id: p.id, адрес: p.адрес, наем: p.наем })) },
+    });
+  }
+
   // per-property rent grouping
   const byProp = {};
   for (const t of transactions) if (t.operation === 'Кт' && t.категория === 'наем' && t.property_id)
