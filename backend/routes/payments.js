@@ -2,6 +2,7 @@ const express = require('express');
 const { applyPurchase } = require('../lib/internetService');
 const { getRouterProvider } = require('../lib/routerProvider');
 const { notifyTenant } = require('../lib/notify');
+const { createSimpleInvoice } = require('./invoices');
 
 // Stripe SDK is lazy-loaded — only initialized if STRIPE_SECRET_KEY is set,
 // so the app still boots in environments without Stripe configured.
@@ -346,6 +347,27 @@ function webhookHandler(db) {
                 body: `Платихте ${fmtMoney(purchase.amount)} EUR за пакет "${purchase.plan_name}"`,
                 link: 'internet', ref_type: 'internet_purchase', ref_id: purchaseId,
               });
+
+              // Автоматична фактура за плащането + запис за месеца
+              try {
+                if (!purchase.invoice_id) {
+                  const user = db.prepare('SELECT name FROM users WHERE id=?').get(acc.user_id);
+                  const prop = db.prepare('SELECT адрес, наемател FROM properties WHERE id=?').get(acc.property_id);
+                  const month = (purchase.paid_at || new Date().toISOString()).slice(0, 7);
+                  const recip = user?.name || prop?.['наемател'] || '';
+                  const inv = await createSimpleInvoice(db, {
+                    property_id: acc.property_id, month,
+                    gross: purchase.amount, payment_type: 'карта',
+                    tenant_name: recip, recipient_name: recip,
+                    notes: `Интернет услуга — ${purchase.plan_name}` +
+                           (prop?.['адрес'] ? ` (${prop['адрес']})` : ''),
+                  });
+                  db.prepare('UPDATE internet_purchases SET invoice_id=? WHERE id=?').run(inv.id, purchaseId);
+                  console.log(`Stripe: internet invoice ${inv.invoice_number} created for purchase ${purchaseId}`);
+                }
+              } catch (e) {
+                console.error('internet auto-invoice failed:', e.message);
+              }
               console.log(`Stripe: internet purchase ${purchaseId} applied to account ${acc.id}`);
             } catch (err) {
               console.error('applyPurchase failed:', err.message);

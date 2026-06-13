@@ -592,6 +592,8 @@ function runTenantMigrations(db) {
     valid_until DATETIME,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`);
+  // Връзка към авто-генерираната фактура при плащане
+  try { db.exec("ALTER TABLE internet_purchases ADD COLUMN invoice_id INTEGER REFERENCES rent_invoices(id)"); } catch(_) {}
   try { db.exec("CREATE INDEX IF NOT EXISTS idx_inet_accounts_status ON internet_accounts(status, valid_until)"); } catch(_) {}
   // Seed plans only if empty
   const planCount = db.prepare('SELECT COUNT(*) as cnt FROM internet_plans').get();

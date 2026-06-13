@@ -112,7 +112,9 @@ function generatePDF(inv, issuer) {
     y += 14;
     if (issuer.place) doc.text(`Място на издаване: ${issuer.place}`, 50, y);
     if (inv.payment_type) {
-      const ptLabel = inv.payment_type === 'брой' ? 'в брой' : 'банков превод';
+      const ptLabel = inv.payment_type === 'брой' ? 'в брой'
+        : inv.payment_type === 'карта' ? 'карта (Stripe)'
+        : 'банков превод';
       doc.text(`Начин на плащане: ${ptLabel}`, issuer.place ? 220 : 50, y);
     }
     if (isCreditNote && inv.related_invoice_number) {
@@ -275,6 +277,47 @@ const CSV_HEADER = [
   'Описание','ДДС ставка %','Данъчна основа','ДДС сума','Обща сума',
   'Начин плащане','Към фактура №','Към фактура дата','Основание КИ','Бележки'
 ].map(h => `"${h}"`).join(',');
+
+// Reusable invoice creation за плащане с фиксирана БРУТНА сума (вкл. ДДС) —
+// ползва се от webhook-а за автоматична фактура при интернет плащане.
+// Не минава през invoice_enabled/наем логиката (тя е наем-специфична).
+async function createSimpleInvoice(db, {
+  property_id, month, gross, payment_type = 'банков превод',
+  tenant_name = '', recipient_name = '', recipient_address = '',
+  recipient_eik = '', recipient_mol = '', notes = null,
+}) {
+  const issuer = getIssuer(db);
+  const invoice_number = nextInvoiceNumber(db);
+  const vat_rate   = issuer.vat_rate ? Number(issuer.vat_rate) : 0;
+  const grossN     = Math.round(Number(gross || 0) * 100) / 100;
+  const net        = vat_rate > 0 ? Math.round(grossN / (1 + vat_rate / 100) * 100) / 100 : grossN;
+  const vat_amount = Math.round((grossN - net) * 100) / 100;
+  const issued_at  = new Date().toISOString().slice(0, 10);
+
+  const inv = {
+    invoice_number, type: 'invoice', property_id, month,
+    tenant_name, recipient_name: recipient_name || tenant_name,
+    recipient_address, recipient_eik, recipient_mol,
+    amount: net, vat_rate, vat_amount, total: grossN,
+    payment_type, tax_event_date: issued_at, due_date: null, issued_at, notes,
+  };
+  const { filename } = await generatePDF(inv, issuer);
+
+  const r = db.prepare(`
+    INSERT INTO rent_invoices
+      (invoice_number, type, property_id, month, tenant_name, recipient_name,
+       recipient_address, recipient_eik, recipient_mol, amount, vat_rate, vat_amount,
+       total, payment_type, tax_event_date, due_date, issued_at, pdf_path, notes,
+       addons_total, addons_json)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+  `).run(
+    invoice_number, 'invoice', property_id, month, inv.tenant_name,
+    inv.recipient_name, inv.recipient_address, inv.recipient_eik, inv.recipient_mol,
+    net, vat_rate, vat_amount, grossN,
+    payment_type, issued_at, null, issued_at, filename, notes, 0, null
+  );
+  return { id: r.lastInsertRowid, invoice_number, filename, net, vat_amount, total: grossN };
+}
 
 // ─── Router ────────────────────────────────────────────────────────────────
 module.exports = function(db) {
@@ -762,3 +805,6 @@ module.exports = function(db) {
 
   return router;
 };
+
+// Експорт за преизползване от други модули (напр. интернет webhook)
+module.exports.createSimpleInvoice = createSimpleInvoice;
