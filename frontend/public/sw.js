@@ -3,7 +3,7 @@
 // cache-first for static assets (CSS, JS, images, fonts).
 // API calls are always network — never cache /api/.
 
-const CACHE_NAME = 'skyrent-v1';
+const CACHE_NAME = 'skyrent-v2';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
