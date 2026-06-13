@@ -67,6 +67,12 @@ class DB {
 function openDb(filePath, orgId = null) {
   const bdb = new Database(filePath);
   bdb.pragma('journal_mode = WAL');
+  // Org базите местят users → control.db (TEMP VIEW + RENAME на legacy таблицата).
+  // SQLite пренасочва FK-овете към users към users_legacy при RENAME → tenant
+  // user-ите (в control.db) не минават проверката. Cross-db FK не е enforce-able
+  // тук, а интегритетът се пази в кода (ръчни cascade-и) → изключваме FK enforcement
+  // за org връзките. Control.db (orgId=null) запазва FK включен.
+  if (orgId != null) bdb.pragma('foreign_keys = OFF');
   return new DB(bdb, filePath, orgId);
 }
 
