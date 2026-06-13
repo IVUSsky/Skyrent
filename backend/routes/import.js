@@ -7,6 +7,20 @@ module.exports = function(db) {
   const router = express.Router();
   const upload = multer({ storage: multer.memoryStorage() });
 
+  // Дедупликацията сравнява в евро-еквивалент, за да хваща едно и също
+  // плащане независимо дали е заведено в BGN или EUR (BG→EUR преходът
+  // прави едни и същи преводи да идват в различна валута между извлеченията).
+  const DEDUP_RATE = 1.95583;
+  const toEur = (amt, cur) =>
+    (String(cur || 'BGN').toUpperCase() === 'BGN' ? Number(amt || 0) / DEDUP_RATE : Number(amt || 0));
+  const DEDUP_SQL =
+    `SELECT id FROM transactions
+       WHERE дата=? AND operation=? AND контрагент=?
+         AND ABS((CASE WHEN UPPER(COALESCE(currency,'BGN'))='BGN'
+                       THEN сума/${DEDUP_RATE} ELSE сума END) - ?) < 0.05`;
+  const isDup = (stmt, tx) =>
+    !!(tx.дата && stmt.get(tx.дата, tx.operation || '', tx.контрагент || '', toEur(tx.сума, tx.currency)));
+
   // ── Helper: load rules from DB ─────────────────────────────
   function loadRules() {
     try { return db.prepare('SELECT * FROM tx_rules ORDER BY id ASC').all(); }
@@ -332,12 +346,10 @@ module.exports = function(db) {
       const parsed = await parseFile(req.file, normMap, rules);
       let { transactions, unknownTenants, accountIban, accountScope, accountKnown,
             openingBalance, closingBalance, accountCurrency } = parsed;
-      const dupCheck = db.prepare(
-        'SELECT id FROM transactions WHERE дата=? AND ROUND(сума,2)=ROUND(?,2) AND operation=? AND контрагент=?'
-      );
+      const dupCheck = db.prepare(DEDUP_SQL);
       transactions = transactions.map(tx => ({
         ...tx,
-        is_duplicate: !!(tx.дата && dupCheck.get(tx.дата, tx.сума || 0, tx.operation || '', tx.контрагент || ''))
+        is_duplicate: isDup(dupCheck, tx)
       }));
       const dupCount = transactions.filter(t => t.is_duplicate).length;
       res.json({ transactions, unknownTenants, dupCount,
@@ -382,12 +394,10 @@ module.exports = function(db) {
 
       allTx.sort((a, b) => (a.дата || '').localeCompare(b.дата || ''));
 
-      const dupCheck = db.prepare(
-        'SELECT id FROM transactions WHERE дата=? AND ROUND(сума,2)=ROUND(?,2) AND operation=? AND контрагент=?'
-      );
+      const dupCheck = db.prepare(DEDUP_SQL);
       allTx = allTx.map(tx => ({
         ...tx,
-        is_duplicate: !!(tx.дата && dupCheck.get(tx.дата, tx.сума || 0, tx.operation || '', tx.контрагент || ''))
+        is_duplicate: isDup(dupCheck, tx)
       }));
 
       const dupCount = allTx.filter(t => t.is_duplicate).length;
@@ -420,10 +430,8 @@ module.exports = function(db) {
         VALUES (@session_id, @дата, @контрагент, @основание, @сума, @operation, @категория, @property_id, @месец, @validated, @rule_id, @currency, @scope)
       `);
 
-      // Check for duplicate
-      const dupCheck = db.prepare(
-        'SELECT id FROM transactions WHERE дата=? AND ROUND(сума,2)=ROUND(?,2) AND operation=? AND контрагент=?'
-      );
+      // Check for duplicate (валутно-осъзнато — виж DEDUP_SQL горе)
+      const dupCheck = db.prepare(DEDUP_SQL);
 
       const upsertCP = db.prepare(`
         INSERT INTO counterparties (name, iban, bic, currency)
@@ -472,7 +480,7 @@ module.exports = function(db) {
 
         for (const tx of transactions) {
           // Deduplication check
-          if (tx.дата && dupCheck.get(tx.дата, tx.сума || 0, tx.operation || '', tx.контрагент || '')) {
+          if (isDup(dupCheck, tx)) {
             skipped++;
             continue;
           }
