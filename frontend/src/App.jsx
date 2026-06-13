@@ -3,6 +3,7 @@ import Login from './components/Login'
 import NotificationBell from './components/NotificationBell'
 import { ThemeProvider } from './components/ThemeProvider'
 import ThemePicker from './components/ThemePicker'
+import ErrorBoundary from './components/ErrorBoundary'
 import { apiFetch } from './api'
 
 // Lazy-loaded tabs — намалява initial bundle (само избраното се сваля)
@@ -211,9 +212,11 @@ export default function App() {
 
   if (role === 'tenant') {
     return (
-      <Suspense fallback={<TabFallback/>}>
-        <TenantApp userName={userName} onLogout={handleLogout} mustChangePassword={mustChangePwd} />
-      </Suspense>
+      <ErrorBoundary resetKey="tenant">
+        <Suspense fallback={<TabFallback/>}>
+          <TenantApp userName={userName} onLogout={handleLogout} mustChangePassword={mustChangePwd} />
+        </Suspense>
+      </ErrorBoundary>
     )
   }
 
@@ -306,6 +309,7 @@ export default function App() {
       <AnnouncementBar API={API} />
 
       <main className="max-w-7xl mx-auto px-4 py-6">
+        <ErrorBoundary resetKey={validTab}>
         <Suspense fallback={<TabFallback/>}>
           {validTab === 'dashboard' && <Dashboard API={API} />}
           {validTab === 'investor'  && <InvestorView API={API} />}
@@ -330,6 +334,7 @@ export default function App() {
           {validTab === 'platform'     && <Platform API={API} />}
           {validTab === 'settings'     && <Settings API={API} />}
         </Suspense>
+        </ErrorBoundary>
       </main>
     </div>
     </ThemeProvider>
