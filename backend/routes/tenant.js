@@ -470,7 +470,10 @@ module.exports = function(db) {
   router.get('/internet', (req, res) => {
     const propId = tenantPropertyId(req.user.id);
     const account = getOrCreateAccount(db, req.user.id, propId);
-    const plans = db.prepare(`
+    // Плановете се предлагат само ако имотът има инсталиран рутер —
+    // иначе наемателят би платил за услуга, която няма как да получи
+    const hasRouter = !!(propId && db.prepare('SELECT id FROM routers WHERE property_id=?').get(propId));
+    const plans = !hasRouter ? [] : db.prepare(`
       SELECT id, name, description, duration_days, price, speed_down_mbps, speed_up_mbps, currency
       FROM internet_plans WHERE active = 1
       ORDER BY sort_order ASC, id ASC
@@ -488,6 +491,7 @@ module.exports = function(db) {
         valid_from: account.valid_from, valid_until: account.valid_until,
         total_paid: account.total_paid,
       },
+      has_router: hasRouter,
       plans,
       purchases,
     });
@@ -513,6 +517,9 @@ module.exports = function(db) {
       if (!plan) return res.status(404).json({ error: 'Планът не е намерен или е неактивен' });
 
       const propId = tenantPropertyId(req.user.id);
+      if (!propId || !db.prepare('SELECT id FROM routers WHERE property_id=?').get(propId)) {
+        return res.status(400).json({ error: 'Интернет услугата не е налична за този имот' });
+      }
       const account = getOrCreateAccount(db, req.user.id, propId);
       const user = db.prepare('SELECT email FROM users WHERE id=?').get(req.user.id);
       const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
