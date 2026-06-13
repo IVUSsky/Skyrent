@@ -442,6 +442,8 @@ export default function Invoices({ API, role }) {
                           ? <span className="inline-block bg-purple-100 text-purple-700 text-xs font-semibold px-2 py-0.5 rounded-full">КИ</span>
                           : <span className="inline-block bg-blue-100 text-blue-700 text-xs font-semibold px-2 py-0.5 rounded-full">Фактура</span>
                         }
+                        {inv.product === 'интернет' &&
+                          <span className="inline-block ml-1 bg-teal-100 text-teal-700 text-xs font-semibold px-2 py-0.5 rounded-full">🌐 Интернет</span>}
                       </td>
                       <td className="px-3 py-2 text-xs text-gray-600 whitespace-nowrap">{fmtDate(inv.issued_at)}</td>
                       <td className="px-3 py-2 text-xs text-gray-800 max-w-[130px] truncate" title={inv.recipient_name}>

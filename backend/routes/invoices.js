@@ -175,7 +175,7 @@ function generatePDF(inv, issuer) {
     const rowH = 22;
     doc.rect(50, y, PW, rowH).fill('#f9fafb');
     doc.font('R').fontSize(9).fillColor('#111827');
-    const desc = `Наем за ${monthLabel(inv.month)}${inv.property_address ? ' — ' + inv.property_address : ''}`;
+    const desc = inv.line_description || `Наем за ${monthLabel(inv.month)}${inv.property_address ? ' — ' + inv.property_address : ''}`;
     doc.text(desc, cols.desc + 4, y + 7, { width: 270 });
     doc.text('1', cols.qty, y + 7, { width: 35, align: 'center' });
     doc.text(`${fmtMoney(sign * inv.amount)} EUR`, cols.unit, y + 7, { width: 55, align: 'right' });
@@ -257,7 +257,7 @@ function toCSVRow(inv, issuer, relatedInv) {
     inv.recipient_name || inv.tenant_name,
     inv.recipient_eik || '',
     inv.recipient_address || '',
-    `Наем за ${monthLabel(inv.month)}${inv.property_address ? ' — ' + inv.property_address : ''}`,
+    inv.line_description || `Наем за ${monthLabel(inv.month)}${inv.property_address ? ' — ' + inv.property_address : ''}`,
     String(inv.vat_rate || 0),
     fmtMoney(sign * inv.amount).replace(/\s/g, ''),
     fmtMoney(sign * inv.vat_amount).replace(/\s/g, ''),
@@ -285,6 +285,7 @@ async function createSimpleInvoice(db, {
   property_id, month, gross, payment_type = 'банков превод',
   tenant_name = '', recipient_name = '', recipient_address = '',
   recipient_eik = '', recipient_mol = '', notes = null,
+  product = 'наем', line_description = null,
 }) {
   const issuer = getIssuer(db);
   const invoice_number = nextInvoiceNumber(db);
@@ -300,18 +301,19 @@ async function createSimpleInvoice(db, {
     recipient_address, recipient_eik, recipient_mol,
     amount: net, vat_rate, vat_amount, total: grossN,
     payment_type, tax_event_date: issued_at, due_date: null, issued_at, notes,
+    product, line_description,
   };
   const { filename } = await generatePDF(inv, issuer);
 
   const r = db.prepare(`
     INSERT INTO rent_invoices
-      (invoice_number, type, property_id, month, tenant_name, recipient_name,
+      (invoice_number, type, product, property_id, month, tenant_name, recipient_name,
        recipient_address, recipient_eik, recipient_mol, amount, vat_rate, vat_amount,
        total, payment_type, tax_event_date, due_date, issued_at, pdf_path, notes,
        addons_total, addons_json)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
   `).run(
-    invoice_number, 'invoice', property_id, month, inv.tenant_name,
+    invoice_number, 'invoice', product, property_id, month, inv.tenant_name,
     inv.recipient_name, inv.recipient_address, inv.recipient_eik, inv.recipient_mol,
     net, vat_rate, vat_amount, grossN,
     payment_type, issued_at, null, issued_at, filename, notes, 0, null

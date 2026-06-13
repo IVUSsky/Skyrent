@@ -393,6 +393,8 @@ function runTenantMigrations(db) {
   )`);
   // Migrate existing invoices table columns
   try { db.exec("ALTER TABLE rent_invoices ADD COLUMN type TEXT DEFAULT 'invoice'"); } catch(_) {}
+  // Продукт/група на фактурата: 'наем' (по подразбиране) | 'интернет' | ...
+  try { db.exec("ALTER TABLE rent_invoices ADD COLUMN product TEXT DEFAULT 'наем'"); } catch(_) {}
   try { db.exec("ALTER TABLE rent_invoices ADD COLUMN related_invoice_id INTEGER"); } catch(_) {}
   try { db.exec("ALTER TABLE rent_invoices ADD COLUMN credit_note_reason TEXT"); } catch(_) {}
   try { db.exec("ALTER TABLE rent_invoices ADD COLUMN recipient_mol TEXT"); } catch(_) {}

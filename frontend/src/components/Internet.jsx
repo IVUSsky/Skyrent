@@ -84,8 +84,30 @@ function AccountsTab({ API, showToast }) {
 
   if (loading) return <div className="py-12 text-center text-gray-400">Зарежда...</div>
 
+  // Статус-обобщение (интернет като отделен продукт)
+  const now = Date.now()
+  const isValid = a => a.valid_until && new Date(a.valid_until + (a.valid_until.endsWith('Z') ? '' : 'Z')).getTime() > now
+  const working = accounts.filter(a => a.status === 'active' && isValid(a)).length
+  const expired = accounts.filter(a => a.status === 'expired' || (a.status === 'active' && a.valid_until && !isValid(a))).length
+  const waiting = accounts.filter(a => a.status === 'inactive' || !a.valid_until).length
+  const KPIS = [
+    { label: '🟢 Работят', value: working, cls: 'text-green-700' },
+    { label: '⏳ Изчакват', value: waiting, cls: 'text-amber-600' },
+    { label: '⏰ Изтекли', value: expired, cls: 'text-red-600' },
+    { label: 'Σ Общо пуснати', value: accounts.length, cls: 'text-gray-800' },
+  ]
+
   return (
     <div>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+        {KPIS.map(k => (
+          <div key={k.label} className="bg-white rounded-xl shadow border border-gray-100 p-3">
+            <div className="text-xs text-gray-500">{k.label}</div>
+            <div className={`text-2xl font-bold ${k.cls}`}>{k.value}</div>
+          </div>
+        ))}
+      </div>
+
       <div className="mb-4 flex justify-end">
         <button onClick={syncAll} disabled={syncing}
           className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg">

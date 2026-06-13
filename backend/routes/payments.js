@@ -359,6 +359,9 @@ function webhookHandler(db) {
                     property_id: acc.property_id, month,
                     gross: purchase.amount, payment_type: 'карта',
                     tenant_name: recip, recipient_name: recip,
+                    product: 'интернет',
+                    line_description: `Интернет услуга за ${monthLabel(month)}` +
+                                      (prop?.['адрес'] ? ` — ${prop['адрес']}` : ''),
                     notes: `Интернет услуга — ${purchase.plan_name}` +
                            (prop?.['адрес'] ? ` (${prop['адрес']})` : ''),
                   });
