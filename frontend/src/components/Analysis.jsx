@@ -1,6 +1,13 @@
 import { apiFetch } from '../api'
 import React, { useState, useEffect } from 'react'
 
+// INSIGHTS по-долу са хардкоднати за портфейла на Sky Capital (org 1) →
+// показват се само за org 1, иначе биха изтекли към чужди организации.
+function isOrg1() {
+  try { return (Number(JSON.parse(atob(localStorage.getItem('skyrent_token').split('.')[1])).organization_id) || 1) === 1 }
+  catch { return true }
+}
+
 const fmt = (n, d = 0) => n != null && !isNaN(n)
   ? Number(n).toLocaleString('bg-BG', { minimumFractionDigits: d, maximumFractionDigits: d })
   : '—'
@@ -439,18 +446,20 @@ export default function Analysis({ API }) {
         </div>
       )}
 
-      {/* Recommendations */}
-      <div>
-        <h3 className="text-lg font-bold text-gray-700 mb-3">Препоръки и наблюдения</h3>
-        <div className="space-y-3">
-          {INSIGHTS.map((ins, i) => (
-            <div key={i} className={`border rounded-xl px-4 py-3 flex gap-3 items-start ${ins.color}`}>
-              <span className="text-xl flex-shrink-0">{ins.icon}</span>
-              <p className="text-sm leading-relaxed">{ins.text}</p>
-            </div>
-          ))}
+      {/* Recommendations — хардкоднати за Sky Capital, само за org 1 */}
+      {isOrg1() && (
+        <div>
+          <h3 className="text-lg font-bold text-gray-700 mb-3">Препоръки и наблюдения</h3>
+          <div className="space-y-3">
+            {INSIGHTS.map((ins, i) => (
+              <div key={i} className={`border rounded-xl px-4 py-3 flex gap-3 items-start ${ins.color}`}>
+                <span className="text-xl flex-shrink-0">{ins.icon}</span>
+                <p className="text-sm leading-relaxed">{ins.text}</p>
+              </div>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   )
 }
