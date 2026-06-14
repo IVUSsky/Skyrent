@@ -16,6 +16,7 @@ export default function Settings({ API }) {
   const [testingSmtp, setTestingSmtp] = useState(false)
   const [issuer, setIssuer] = useState({ name: '', address: '', eik: '', mol: '', vat_number: '', iban: '', bic: '', place: '', vat_rate: '0' })
   const [kontrolisiEmail, setKontrolisiEmail] = useState('')
+  const [kontrolisiAuto, setKontrolisiAuto] = useState(false)
   const [counter, setCounter] = useState(null)
   const [nextSeq, setNextSeq] = useState('')
   const [savingCounter, setSavingCounter] = useState(false)
@@ -52,6 +53,7 @@ export default function Settings({ API }) {
         if (data.smtp) setSmtp(data.smtp)
         if (data.issuer) setIssuer(data.issuer)
         if (data.kontrolisi_email) setKontrolisiEmail(data.kontrolisi_email)
+        setKontrolisiAuto(data.kontrolisi_auto === true || data.kontrolisi_auto === 'true' || data.kontrolisi_auto === 1)
         try { setHiddenMenus(Array.isArray(data.menu_hidden) ? data.menu_hidden : JSON.parse(data.menu_hidden || '[]')) } catch { setHiddenMenus([]) }
         setLoading(false)
       })
@@ -95,7 +97,7 @@ export default function Settings({ API }) {
     apiFetch(`${API}/api/settings`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tenant_map, expense_cats: expenseCats, smtp, issuer, kontrolisi_email: kontrolisiEmail }),
+      body: JSON.stringify({ tenant_map, expense_cats: expenseCats, smtp, issuer, kontrolisi_email: kontrolisiEmail, kontrolisi_auto: kontrolisiAuto }),
     })
       .then(r => r.json())
       .then(data => {
@@ -259,8 +261,16 @@ export default function Settings({ API }) {
         <label className="block text-xs font-medium text-gray-600 mb-1">Имейл адрес на Kontrolisi</label>
         <input type="email" value={kontrolisiEmail} onChange={e => setKontrolisiEmail(e.target.value)}
           placeholder="import@kontrolisi.bg"
-          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 mb-2" />
-        <p className="text-xs text-gray-400">Запишете и след това бутонът 📊 ще се появи до всяка фактура.</p>
+          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 mb-3" />
+
+        <label className={`flex items-center gap-2 rounded-lg border p-3 cursor-pointer ${kontrolisiAuto ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-200'}`}>
+          <input type="checkbox" checked={kontrolisiAuto} onChange={e => setKontrolisiAuto(e.target.checked)} className="w-4 h-4" />
+          <span className="text-sm text-gray-700">
+            <strong>Автоматично изпращане</strong> — всяка нова фактура отива сама към Контролиси
+            {!kontrolisiEmail && <span className="text-amber-600"> (първо въведи имейл)</span>}
+          </span>
+        </label>
+        <p className="text-xs text-gray-400 mt-2">Запиши настройките. Бутонът 📊 за ръчно изпращане остава до всяка фактура.</p>
       </div>
 
       {/* Backup */}

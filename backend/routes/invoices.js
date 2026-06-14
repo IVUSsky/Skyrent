@@ -81,6 +81,44 @@ function getSmtp(db) {
   try { return JSON.parse(row.value); } catch { return null; }
 }
 
+// Включено ли е авто-изпращане към Kontrolisi (settings.kontrolisi_auto)
+function kontrolisiAutoOn(db) {
+  const row = db.prepare("SELECT value FROM settings WHERE key='kontrolisi_auto'").get();
+  if (!row) return false;
+  return row.value === 'true' || row.value === '1' || row.value === true;
+}
+
+// Изпраща PDF на фактура/КИ към счетоводния (Kontrolisi) имейл. Best-effort —
+// ползва се и от ръчния бутон, и от авто-изпращането при генериране.
+async function sendInvoiceToKontrolisi(db, inv) {
+  const row = db.prepare("SELECT value FROM settings WHERE key='kontrolisi_email'").get();
+  const toEmail = row?.value;
+  if (!toEmail) return { ok: false, reason: 'no_email' };
+  const resendKey = process.env.RESEND_API_KEY;
+  if (!resendKey) return { ok: false, reason: 'no_resend' };
+  const filepath = inv.pdf_path ? path.join(PDF_DIR, inv.pdf_path) : null;
+  if (!filepath || !fs.existsSync(filepath)) return { ok: false, reason: 'no_pdf' };
+  const issuer = getIssuer(db);
+  const fromEmail = process.env.RESEND_FROM_EMAIL || 'info@skycapital.pro';
+  const isCN = inv.type === 'credit_note';
+  const docLabel = isCN ? `Кредитно известие № ${inv.invoice_number}` : `Фактура № ${inv.invoice_number}`;
+  const pdfBase64 = fs.readFileSync(filepath).toString('base64');
+  const response = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      from: `${issuer.name || 'Sky Capital'} <${fromEmail}>`,
+      to: [toEmail],
+      subject: `${docLabel} — ${inv.recipient_name || inv.tenant_name || ''}`,
+      html: `<p>${docLabel} от ${issuer.name || 'Sky Capital'} е приложена.</p>`,
+      attachments: [{ filename: `${docLabel.replace(/\s/g, '_')}.pdf`, content: pdfBase64 }],
+    }),
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) return { ok: false, reason: result.message || 'send_error' };
+  return { ok: true };
+}
+
 // ─── PDF Generator ─────────────────────────────────────────────────────────
 function generatePDF(inv, issuer) {
   return new Promise((resolve, reject) => {
@@ -318,6 +356,12 @@ async function createSimpleInvoice(db, {
     net, vat_rate, vat_amount, grossN,
     payment_type, issued_at, null, issued_at, filename, notes, 0, null
   );
+  // Авто-изпращане към счетоводител (Kontrolisi), ако е включено — best-effort
+  if (kontrolisiAutoOn(db)) {
+    const fresh = db.prepare('SELECT * FROM rent_invoices WHERE id=?').get(r.lastInsertRowid);
+    sendInvoiceToKontrolisi(db, fresh).catch(e => console.warn('kontrolisi auto-send failed:', e.message));
+  }
+
   return { id: r.lastInsertRowid, invoice_number, filename, net, vat_amount, total: grossN };
 }
 
@@ -478,6 +522,12 @@ module.exports = function(db) {
           body: `${total.toLocaleString('bg-BG', { minimumFractionDigits: 2 })} EUR за ${month}`,
           link: 'invoices', ref_type: 'invoice', ref_id: r.lastInsertRowid,
         });
+      }
+
+      // Авто-изпращане към счетоводител (Kontrolisi), ако е включено — best-effort
+      if (kontrolisiAutoOn(db)) {
+        const freshInv = db.prepare('SELECT * FROM rent_invoices WHERE id=?').get(r.lastInsertRowid);
+        sendInvoiceToKontrolisi(db, freshInv).catch(e => console.warn('kontrolisi auto-send failed:', e.message));
       }
 
       res.json({ ok: true, id: r.lastInsertRowid, invoice_number, filename, addons_total });
@@ -764,31 +814,12 @@ module.exports = function(db) {
     try {
       const inv = db.prepare('SELECT * FROM rent_invoices WHERE id=?').get(req.params.id);
       if (!inv) return res.status(404).json({ error: 'Not found' });
-      const settingsRow = db.prepare("SELECT value FROM settings WHERE key='kontrolisi_email'").get();
-      const toEmail = settingsRow?.value;
-      if (!toEmail) return res.status(400).json({ error: 'Kontrolisi email не е зададен в Настройки' });
-      const resendKey = process.env.RESEND_API_KEY;
-      if (!resendKey) return res.status(400).json({ error: 'RESEND_API_KEY не е конфигуриран' });
-      const filepath = path.join(PDF_DIR, inv.pdf_path);
-      if (!fs.existsSync(filepath)) return res.status(404).json({ error: 'PDF не е намерен' });
-      const issuer    = getIssuer(db);
-      const fromEmail = process.env.RESEND_FROM_EMAIL || `info@skycapital.pro`;
-      const isCN      = inv.type === 'credit_note';
-      const docLabel  = isCN ? `Кредитно известие № ${inv.invoice_number}` : `Фактура № ${inv.invoice_number}`;
-      const pdfBase64 = fs.readFileSync(filepath).toString('base64');
-      const response  = await fetch('https://api.resend.com/emails', {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          from: `${issuer.name || 'Sky Capital'} <${fromEmail}>`,
-          to: [toEmail],
-          subject: `${docLabel} — ${inv.recipient_name || inv.tenant_name || ''}`,
-          html: `<p>${docLabel} от ${issuer.name || 'Sky Capital'} е приложена.</p>`,
-          attachments: [{ filename: `${docLabel.replace(/\s/g,'_')}.pdf`, content: pdfBase64 }],
-        }),
-      });
-      const result = await response.json();
-      if (!response.ok) return res.status(500).json({ error: result.message || 'Грешка при изпращане' });
+      const r = await sendInvoiceToKontrolisi(db, inv);
+      if (!r.ok) {
+        const map = { no_email: 'Kontrolisi email не е зададен в Настройки',
+          no_resend: 'RESEND_API_KEY не е конфигуриран', no_pdf: 'PDF не е намерен' };
+        return res.status(400).json({ error: map[r.reason] || r.reason || 'Грешка при изпращане' });
+      }
       res.json({ ok: true });
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
