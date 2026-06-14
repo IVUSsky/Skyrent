@@ -137,6 +137,18 @@ html[data-mode="dark"] .fin-surface .border-amber-300{border-color:rgba(230,180,
 .fin-surface .divide-gray-100 > * + * { border-color: var(--surface-border) !important; }
 .fin-surface .bg-blue-50          { background: color-mix(in srgb, var(--accent) 12%, var(--surface)) !important; }
 
+/* Форм-полета адаптират се към темата — иначе под тъмни теми остават с
+   браузърен бял фон + наследен светъл текст = нечетимо (бял select). */
+.fin-surface select,
+.fin-surface textarea,
+.fin-surface input:not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="range"]):not([type="file"]) {
+  background-color: var(--surface) !important;
+  color: var(--page-fg) !important;
+  border-color: var(--surface-border) !important;
+}
+.fin-surface select option { background: var(--surface); color: var(--page-fg); }
+.fin-surface ::placeholder { color: var(--muted) !important; opacity: 1; }
+
 /* Дисплей шрифт за големите KPI стойности когато темата го дефинира */
 .fin-surface [data-fin] { font-variant-numeric: tabular-nums; }
 
