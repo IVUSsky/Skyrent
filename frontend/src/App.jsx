@@ -170,6 +170,13 @@ export default function App() {
     return () => window.removeEventListener('skyrent:menus-changed', h)
   }, [])
 
+  // Навигация между табове от вътрешни компоненти (onboarding карти и др.)
+  useEffect(() => {
+    const h = (e) => { if (e.detail) setActiveTab(e.detail) }
+    window.addEventListener('skyrent:navigate', h)
+    return () => window.removeEventListener('skyrent:navigate', h)
+  }, [])
+
   const refreshLearningCount = () => {
     if (!authenticated || role === 'tenant') return
     apiFetch(`${API}/api/chat-learning/pending-count`)
