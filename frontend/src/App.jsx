@@ -44,28 +44,29 @@ const TabFallback = () => (
 
 const API = import.meta.env.VITE_API_URL || ''
 
+// tier: 'core' (винаги, Лесен режим) | 'standard' | 'advanced' | 'system' (винаги)
 const ALL_TABS = [
-  { id: 'dashboard', label: 'Dashboard',      roles: ['admin'] },
-  { id: 'investor',  label: '📊 Инвеститор',  roles: ['admin'] },
-  { id: 'portfolio', label: 'Портфолио',      roles: ['admin'] },
-  { id: 'list',      label: 'Списък',         roles: ['admin'] },
-  { id: 'history',   label: '📈 История',     roles: ['admin'] },
-  { id: 'tenants',   label: '👥 Наематели',   roles: ['admin'] },
-  { id: 'invoices',  label: '🧾 Фактури',     roles: ['admin', 'broker'] },
-  { id: 'contracts', label: '📋 Договори',    roles: ['admin', 'broker'] },
-  { id: 'addons',    label: '🛍️ Услуги',     roles: ['admin'] },
-  { id: 'internet',  label: '🌐 Интернет',    roles: ['admin'] },
-  { id: 'support',   label: '🛟 Поддръжка',   roles: ['admin'] },
-  { id: 'loans',     label: 'Кредити',        roles: ['admin'] },
-  { id: 'analysis',  label: 'Анализ',         roles: ['admin'] },
-  { id: 'expenses',    label: '💸 Разходи',     roles: ['admin'] },
-  { id: 'import',      label: '📥 Банка',       roles: ['admin'] },
-  { id: 'investments', label: '📈 Инвестиции',  roles: ['admin'] },
-  { id: 'personal',    label: '💰 Личен бюджет', roles: ['admin'] },
-  { id: 'smart',       label: '⚡ Смарт',       roles: ['admin'] },
-  { id: 'integrity',   label: '🩺 Интегритет', roles: ['admin'] },
-  { id: 'billing',     label: '💳 Абонамент',  roles: ['admin'] },
-  { id: 'settings',    label: '⚙️ Настройки',  roles: ['admin'] },
+  { id: 'dashboard', label: '🏠 Табло',       roles: ['admin'],            tier: 'core' },
+  { id: 'tenants',   label: '👥 Наематели',   roles: ['admin'],            tier: 'core' },
+  { id: 'invoices',  label: '🧾 Фактури',     roles: ['admin', 'broker'],  tier: 'core' },
+  { id: 'contracts', label: '📋 Договори',    roles: ['admin', 'broker'],  tier: 'core' },
+  { id: 'expenses',  label: '💸 Разходи',     roles: ['admin'],            tier: 'core' },
+  { id: 'portfolio', label: '🏢 Имоти',       roles: ['admin'],            tier: 'standard' },
+  { id: 'list',      label: 'Таблица',        roles: ['admin'],            tier: 'standard' },
+  { id: 'addons',    label: '🛍️ Услуги',      roles: ['admin'],            tier: 'standard' },
+  { id: 'internet',  label: '🌐 Интернет',    roles: ['admin'],            tier: 'standard' },
+  { id: 'support',   label: '🛟 Поддръжка',   roles: ['admin'],            tier: 'standard' },
+  { id: 'import',    label: '📥 Банка',       roles: ['admin'],            tier: 'standard' },
+  { id: 'investor',  label: '📊 Инвеститор',  roles: ['admin'],            tier: 'advanced' },
+  { id: 'history',   label: '📈 История',     roles: ['admin'],            tier: 'advanced' },
+  { id: 'analysis',  label: 'Анализ',         roles: ['admin'],            tier: 'advanced' },
+  { id: 'loans',     label: 'Кредити',        roles: ['admin'],            tier: 'advanced' },
+  { id: 'integrity', label: '🩺 Интегритет',  roles: ['admin'],            tier: 'advanced' },
+  { id: 'investments', label: '📈 Инвестиции',   roles: ['admin'],         tier: 'advanced' },
+  { id: 'personal',    label: '💰 Личен бюджет', roles: ['admin'],         tier: 'advanced' },
+  { id: 'smart',       label: '⚡ Смарт',        roles: ['admin'],         tier: 'advanced' },
+  { id: 'billing',     label: '💳 Абонамент',  roles: ['admin'],           tier: 'system' },
+  { id: 'settings',    label: '⚙️ Настройки',  roles: ['admin'],           tier: 'system' },
 ]
 
 function parseRole() {
@@ -89,6 +90,14 @@ function parseOrgId() {
 
 // Org-1-only табове: интеграции с лични env ключове (T212, Tuya, личен бюджет)
 const ORG1_ONLY_TABS = new Set(['investments', 'smart', 'personal'])
+
+// Лесен режим показва само 'core' + 'system'. Разширен показва всичко.
+const SIMPLE_TIERS = new Set(['core', 'system'])
+function getInitialUiMode() {
+  const saved = localStorage.getItem('skyrent_ui_mode')
+  if (saved === 'simple' || saved === 'advanced') return saved
+  return parseOrgId() === 1 ? 'advanced' : 'simple' // org 1 (моят акаунт) → пълно меню
+}
 
 function parseIsSuper() {
   try {
@@ -147,6 +156,12 @@ export default function App() {
   const [mustChangePwd, setMustChangePwd] = useState(localStorage.getItem('skyrent_must_change_pwd') === '1')
   const [learningCount, setLearningCount] = useState(0)
   const [showLearning, setShowLearning]   = useState(false)
+  const [uiMode, setUiMode]               = useState(getInitialUiMode)
+  const toggleUiMode = () => setUiMode(m => {
+    const next = m === 'simple' ? 'advanced' : 'simple'
+    localStorage.setItem('skyrent_ui_mode', next)
+    return next
+  })
 
   // 402 (изтекъл trial / спрян абонамент) → отвори таб Абонамент
   useEffect(() => {
@@ -223,8 +238,10 @@ export default function App() {
   const orgId = parseOrgId()
   const isSuper = parseIsSuper()
   const tabs = [
-    ...ALL_TABS.filter(t => t.roles.includes(role) && (orgId === 1 || !ORG1_ONLY_TABS.has(t.id))),
-    ...(isSuper ? [{ id: 'platform', label: '🛸 Платформа', roles: ['admin'] }] : []),
+    ...ALL_TABS.filter(t => t.roles.includes(role)
+      && (orgId === 1 || !ORG1_ONLY_TABS.has(t.id))
+      && (uiMode === 'advanced' || SIMPLE_TIERS.has(t.tier))),
+    ...(isSuper ? [{ id: 'platform', label: '🛸 Платформа', roles: ['admin'], tier: 'system' }] : []),
   ]
 
   // Ensure activeTab is valid for this role
@@ -261,6 +278,15 @@ export default function App() {
             ))}
           </nav>
           <div className="ml-auto flex items-center gap-3">
+            <button
+              onClick={toggleUiMode}
+              title={uiMode === 'simple'
+                ? 'Лесен изглед — само основните менюта. Натисни за всички.'
+                : 'Разширен изглед — всички менюта. Натисни за опростен.'}
+              className="text-xs px-2.5 py-1 rounded-full border border-white/20 text-slate-300 hover:text-white hover:bg-white/10 transition-colors whitespace-nowrap"
+            >
+              {uiMode === 'simple' ? '🔓 Разширен изглед' : '✨ Лесен изглед'}
+            </button>
             <ThemePicker />
             <NotificationBell
               API={API}
