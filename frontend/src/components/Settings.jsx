@@ -1,5 +1,6 @@
 import { apiFetch } from '../api'
 import React, { useState, useEffect } from 'react'
+import { HIDEABLE } from '../menuTabs'
 import TwoFactorSetup from './TwoFactorSetup'
 
 export default function Settings({ API }) {
@@ -23,6 +24,8 @@ export default function Settings({ API }) {
   const [users, setUsers] = useState([])
   const [newUser, setNewUser] = useState({ username: '', password: '', role: 'broker', name: '', email: '' })
   const [savingUser, setSavingUser] = useState(false)
+  const [hiddenMenus, setHiddenMenus] = useState([])
+  const [savingMenus, setSavingMenus] = useState(false)
 
   const showToast = (msg, type = 'success') => {
     setToast({ msg, type })
@@ -49,6 +52,7 @@ export default function Settings({ API }) {
         if (data.smtp) setSmtp(data.smtp)
         if (data.issuer) setIssuer(data.issuer)
         if (data.kontrolisi_email) setKontrolisiEmail(data.kontrolisi_email)
+        try { setHiddenMenus(Array.isArray(data.menu_hidden) ? data.menu_hidden : JSON.parse(data.menu_hidden || '[]')) } catch { setHiddenMenus([]) }
         setLoading(false)
       })
       .catch(e => { setError(e.message); setLoading(false) })
@@ -102,12 +106,52 @@ export default function Settings({ API }) {
       .catch(e => { setSaving(false); showToast('Грешка: ' + e.message, 'error') })
   }
 
+  const toggleMenu = (id) => {
+    setHiddenMenus(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
+  }
+  const saveMenus = () => {
+    setSavingMenus(true)
+    apiFetch(`${API}/api/settings`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ menu_hidden: hiddenMenus }),
+    }).then(r => r.json()).then(d => {
+      setSavingMenus(false)
+      if (d.ok) {
+        showToast('Менютата са запазени!')
+        window.dispatchEvent(new CustomEvent('skyrent:menus-changed', { detail: hiddenMenus }))
+      } else showToast('Грешка: ' + (d.error || ''), 'error')
+    }).catch(e => { setSavingMenus(false); showToast('Грешка: ' + e.message, 'error') })
+  }
+
   if (loading) return <div className="flex justify-center py-16 text-gray-500 text-lg">Зарежда...</div>
   if (error) return <div className="bg-red-50 text-red-700 p-4 rounded-lg">Грешка: {error}</div>
 
   return (
     <div className="max-w-3xl fin-surface">
       <h2 className="text-2xl font-bold text-gray-800 mb-6">Настройки</h2>
+
+      <section className="bg-white rounded-xl shadow p-5 mb-6">
+        <h3 className="text-lg font-semibold text-gray-800 mb-1">🧭 Менюта в приложението</h3>
+        <p className="text-sm text-gray-500 mb-3">
+          Изключи менютата, които не ползваш — ще изчезнат от лентата горе. (Системните остават винаги.)
+        </p>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-4">
+          {HIDEABLE.map(t => {
+            const on = !hiddenMenus.includes(t.id)
+            return (
+              <label key={t.id}
+                className={`flex items-center gap-2 px-3 py-2 rounded-lg border cursor-pointer text-sm ${on ? 'bg-blue-50 border-blue-200 text-gray-800' : 'bg-gray-50 border-gray-200 text-gray-400'}`}>
+                <input type="checkbox" checked={on} onChange={() => toggleMenu(t.id)} className="w-4 h-4" />
+                <span className="truncate">{t.label}</span>
+              </label>
+            )
+          })}
+        </div>
+        <button onClick={saveMenus} disabled={savingMenus}
+          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg text-sm font-medium">
+          {savingMenus ? 'Запазва...' : 'Запази менютата'}
+        </button>
+      </section>
 
       {/* Toast */}
       {toast && (
