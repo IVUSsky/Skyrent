@@ -4,6 +4,7 @@ import NotificationBell from './components/NotificationBell'
 import { ThemeProvider } from './components/ThemeProvider'
 import ThemePicker from './components/ThemePicker'
 import ErrorBoundary from './components/ErrorBoundary'
+import { ALL_TABS, ORG1_ONLY_TABS, SIMPLE_TIERS, planAllowsTier } from './menuTabs'
 import { apiFetch } from './api'
 
 // Lazy-loaded tabs — намалява initial bundle (само избраното се сваля)
@@ -44,31 +45,6 @@ const TabFallback = () => (
 
 const API = import.meta.env.VITE_API_URL || ''
 
-// tier: 'core' (винаги, Лесен режим) | 'standard' | 'advanced' | 'system' (винаги)
-const ALL_TABS = [
-  { id: 'dashboard', label: '🏠 Табло',       roles: ['admin'],            tier: 'core' },
-  { id: 'tenants',   label: '👥 Наематели',   roles: ['admin'],            tier: 'core' },
-  { id: 'invoices',  label: '🧾 Фактури',     roles: ['admin', 'broker'],  tier: 'core' },
-  { id: 'contracts', label: '📋 Договори',    roles: ['admin', 'broker'],  tier: 'core' },
-  { id: 'expenses',  label: '💸 Разходи',     roles: ['admin'],            tier: 'core' },
-  { id: 'portfolio', label: '🏢 Имоти',       roles: ['admin'],            tier: 'standard' },
-  { id: 'list',      label: 'Таблица',        roles: ['admin'],            tier: 'standard' },
-  { id: 'addons',    label: '🛍️ Услуги',      roles: ['admin'],            tier: 'standard' },
-  { id: 'internet',  label: '🌐 Интернет',    roles: ['admin'],            tier: 'standard' },
-  { id: 'support',   label: '🛟 Поддръжка',   roles: ['admin'],            tier: 'standard' },
-  { id: 'import',    label: '📥 Банка',       roles: ['admin'],            tier: 'standard' },
-  { id: 'investor',  label: '📊 Инвеститор',  roles: ['admin'],            tier: 'advanced' },
-  { id: 'history',   label: '📈 История',     roles: ['admin'],            tier: 'advanced' },
-  { id: 'analysis',  label: 'Анализ',         roles: ['admin'],            tier: 'advanced' },
-  { id: 'loans',     label: 'Кредити',        roles: ['admin'],            tier: 'advanced' },
-  { id: 'integrity', label: '🩺 Интегритет',  roles: ['admin'],            tier: 'advanced' },
-  { id: 'investments', label: '📈 Инвестиции',   roles: ['admin'],         tier: 'advanced' },
-  { id: 'personal',    label: '💰 Личен бюджет', roles: ['admin'],         tier: 'advanced' },
-  { id: 'smart',       label: '⚡ Смарт',        roles: ['admin'],         tier: 'advanced' },
-  { id: 'billing',     label: '💳 Абонамент',  roles: ['admin'],           tier: 'system' },
-  { id: 'settings',    label: '⚙️ Настройки',  roles: ['admin'],           tier: 'system' },
-]
-
 function parseRole() {
   try {
     const token = localStorage.getItem('skyrent_token')
@@ -88,11 +64,6 @@ function parseOrgId() {
   } catch { return 1 }
 }
 
-// Org-1-only табове: интеграции с лични env ключове (T212, Tuya, личен бюджет)
-const ORG1_ONLY_TABS = new Set(['investments', 'smart', 'personal'])
-
-// Лесен режим показва само 'core' + 'system'. Разширен показва всичко.
-const SIMPLE_TIERS = new Set(['core', 'system'])
 function getInitialUiMode() {
   const saved = localStorage.getItem('skyrent_ui_mode')
   if (saved === 'simple' || saved === 'advanced') return saved
@@ -157,6 +128,9 @@ export default function App() {
   const [learningCount, setLearningCount] = useState(0)
   const [showLearning, setShowLearning]   = useState(false)
   const [uiMode, setUiMode]               = useState(getInitialUiMode)
+  const [orgPlan, setOrgPlan]             = useState(null)   // план на org-а (за gating)
+  const [orgPlatform, setOrgPlatform]     = useState(false)  // org 1 → без gating
+  const [hiddenMenus, setHiddenMenus]     = useState([])     // собственик-скрити менюта (settings.menu_hidden)
   const toggleUiMode = () => setUiMode(m => {
     const next = m === 'simple' ? 'advanced' : 'simple'
     localStorage.setItem('skyrent_ui_mode', next)
@@ -176,9 +150,25 @@ export default function App() {
   useEffect(() => {
     if (!authenticated || role === 'tenant') return
     apiFetch(`${API}/api/settings`).then(r => r.json())
-      .then(s => { if (s?.issuer?.name) setBrand({ name: s.issuer.name, logo: s.issuer.logo || null }) })
+      .then(s => {
+        if (s?.issuer?.name) setBrand({ name: s.issuer.name, logo: s.issuer.logo || null })
+        // менюта, скрити от собственика (JSON масив от tab id-та)
+        try { setHiddenMenus(Array.isArray(s?.menu_hidden) ? s.menu_hidden : JSON.parse(s?.menu_hidden || '[]')) }
+        catch { setHiddenMenus([]) }
+      })
+      .catch(() => {})
+    // план на org-а → план-гейтинг на менютата
+    apiFetch(`${API}/api/billing`).then(r => r.json())
+      .then(b => { setOrgPlan(b?.plan || null); setOrgPlatform(!!b?.platform) })
       .catch(() => {})
   }, [authenticated, role])
+
+  // Слушай за промени в скритите менюта от Settings (без презареждане)
+  useEffect(() => {
+    const h = (e) => setHiddenMenus(Array.isArray(e.detail) ? e.detail : [])
+    window.addEventListener('skyrent:menus-changed', h)
+    return () => window.removeEventListener('skyrent:menus-changed', h)
+  }, [])
 
   const refreshLearningCount = () => {
     if (!authenticated || role === 'tenant') return
@@ -239,8 +229,10 @@ export default function App() {
   const isSuper = parseIsSuper()
   const tabs = [
     ...ALL_TABS.filter(t => t.roles.includes(role)
-      && (orgId === 1 || !ORG1_ONLY_TABS.has(t.id))
-      && (uiMode === 'advanced' || SIMPLE_TIERS.has(t.tier))),
+      && (orgId === 1 || !ORG1_ONLY_TABS.has(t.id))         // org-1-only интеграции
+      && planAllowsTier(orgPlan, orgPlatform, t.tier)        // план-гейтинг (starter без advanced)
+      && (t.tier === 'system' || !hiddenMenus.includes(t.id)) // собственик-скрити (без системните)
+      && (uiMode === 'advanced' || SIMPLE_TIERS.has(t.tier))), // Лесен/Разширен
     ...(isSuper ? [{ id: 'platform', label: '🛸 Платформа', roles: ['admin'], tier: 'system' }] : []),
   ]
 
