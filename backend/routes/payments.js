@@ -181,16 +181,32 @@ function tenantPaymentsRouter(db) {
     if (!user || !user.email) return res.status(400).json({ error: 'Профилът няма email — admin трябва да го добави' });
 
     try {
+      // SEPA дебиторът трябва да има държава/адрес. Подсигуряваме BG + адреса
+      // на имота (наемателят е в България) — иначе Stripe може да отхвърли IBAN-а.
+      const address = { country: 'BG' };
+      try {
+        const prop = db.prepare(`
+          SELECT p.адрес FROM contracts c JOIN properties p ON p.id=c.property_id
+          WHERE c.tenant_user_id=? AND c.status='active' AND c.property_id IS NOT NULL
+          ORDER BY c.created_at DESC LIMIT 1
+        `).get(user.id);
+        if (prop && prop['адрес']) { address.line1 = String(prop['адрес']).slice(0, 200); address.city = 'София'; }
+      } catch (_) {}
+
       // Lazy: create Stripe Customer if user doesn't have one yet
       let customerId = user.stripe_customer_id;
       if (!customerId) {
         const customer = await s.customers.create({
           email: user.email,
           name: user.name || user.username,
+          address,
           metadata: { skyrent_user_id: String(user.id) },
         });
         customerId = customer.id;
         db.control.prepare('UPDATE users SET stripe_customer_id=? WHERE id=?').run(customerId, user.id);
+      } else {
+        // Подсигури адрес/държава и на съществуващ customer (за re-test)
+        try { await s.customers.update(customerId, { address }); } catch (e) { console.warn('customer address update failed:', e.message); }
       }
 
       // Stripe Checkout in setup mode collects the SEPA mandate without charging.
