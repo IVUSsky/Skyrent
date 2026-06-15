@@ -251,9 +251,10 @@ export default function App() {
       <header className="shadow-lg" style={{ background: 'var(--shell-bg)' }}>
         <div className="max-w-7xl mx-auto px-4 py-2 flex items-center gap-5 flex-wrap">
           <div className="shrink-0" style={{ background: 'white', borderRadius: '7px', padding: '4px 10px', display: 'inline-flex', alignItems: 'center' }}>
-            {brand?.logo ? (
+            {/* org 1 (Sky Capital) → винаги PNG логото; чужди org-и → тяхно лого, иначе име */}
+            {orgId !== 1 && brand?.logo ? (
               <img src={brand.logo} alt={brand.name} style={{ height: '42px', display: 'block' }} />
-            ) : brand && brand.name !== 'Sky Capital' ? (
+            ) : orgId !== 1 && brand?.name ? (
               <span style={{ fontWeight: 700, fontSize: '18px', color: '#0F1E18', padding: '8px 2px', display: 'block' }}>{brand.name}</span>
             ) : (
               <img src="/sky_capital_logo.png" alt="Sky Capital" style={{ height: '42px', display: 'block' }} />
