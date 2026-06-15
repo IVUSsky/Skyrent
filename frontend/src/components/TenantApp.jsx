@@ -3,6 +3,7 @@ import { apiFetch, authUrl } from '../api'
 import UtilityHistoryChart from './UtilityHistoryChart'
 import NotificationBell from './NotificationBell'
 import { TicketDetail } from './Support'
+import { useTenantI18n } from '../tenantI18n'
 
 const API = import.meta.env.VITE_API_URL || ''
 
@@ -20,6 +21,7 @@ const TABS = [
 ]
 
 export default function TenantApp({ userName, onLogout, mustChangePassword }) {
+  const { lang, t: tr, toggle: toggleLang } = useTenantI18n()
   const [tab, setTab] = useState('home')
   const [me, setMe] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -192,11 +194,16 @@ export default function TenantApp({ userName, onLogout, mustChangePassword }) {
               <img src="/sky_capital_logo.png" alt="Sky Capital" style={{ height: '32px' }} />
             </div>
             <div>
-              <div className="ten-hello">Здравей,</div>
-              <div className="ten-name">{userName || me?.user?.name || 'наемател'}</div>
+              <div className="ten-hello">{tr('common.hello')}</div>
+              <div className="ten-name">{userName || me?.user?.name || tr('common.tenant')}</div>
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <button onClick={toggleLang}
+              title={lang === 'bg' ? 'Switch to English' : 'Превключи на български'}
+              className="text-xs font-semibold text-slate-300 hover:text-white px-2 py-1 rounded hover:bg-white/10 border border-white/20">
+              {lang === 'bg' ? 'EN' : 'BG'}
+            </button>
             <NotificationBell
               API={API}
               basePath="/api/tenant/notifications"
@@ -208,7 +215,7 @@ export default function TenantApp({ userName, onLogout, mustChangePassword }) {
               }}
             />
             <button onClick={onLogout} className="text-xs text-slate-300 hover:text-white px-2 py-1 rounded hover:bg-white/10">
-              Изход
+              {tr('common.logout')}
             </button>
           </div>
         </div>
@@ -244,7 +251,7 @@ export default function TenantApp({ userName, onLogout, mustChangePassword }) {
               }}
             >
               <span className="text-lg leading-none">{t.icon}</span>
-              <span className="mt-1">{t.label}</span>
+              <span className="mt-1">{tr('tab.' + t.id, t.label)}</span>
             </button>
           ))}
         </div>
