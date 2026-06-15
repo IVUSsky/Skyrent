@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react'
 import { createPortal } from 'react-dom'
+import ConcentrationRisk from './ConcentrationRisk'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell,
   PieChart, Pie, Legend
@@ -652,8 +653,8 @@ export default function InvestorView({ API }) {
     <div className="space-y-6 fin-surface">
       <header className="iv-mast">
         <div>
-          <div className="iv-mast-eyebrow">Портфолио · отчет</div>
-          <h2 className="iv-mast-title">Инвеститорско view</h2>
+          <div className="iv-mast-eyebrow">Портфолио · анализ</div>
+          <h2 className="iv-mast-title">Анализ</h2>
         </div>
         <div className="iv-mast-meta">
           <span>към {data.asof}</span>
@@ -663,6 +664,9 @@ export default function InvestorView({ API }) {
           <span>{data.currency}</span>
         </div>
       </header>
+
+      {/* Концентрационен риск (слято от стария таб Анализ) */}
+      <ConcentrationRisk API={API} />
 
       {/* Warning banners */}
       {hasNoOpex && (
