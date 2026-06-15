@@ -48,6 +48,9 @@ function AccountsTab({ API, showToast }) {
   const [accounts, setAccounts] = useState([])
   const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
+  const [busyId, setBusyId] = useState(null)
+  const [confirmId, setConfirmId] = useState(null)
+  const [revealId, setRevealId] = useState(null)
 
   const load = () => {
     setLoading(true)
@@ -64,22 +67,28 @@ function AccountsTab({ API, showToast }) {
       .finally(() => setSyncing(false))
   }
 
-  const extend = (acc) => {
-    const days = Number(prompt(`Удължи акаунта на ${acc.user_name || acc.user_username} с колко дни?`, '30'))
-    if (!days || days <= 0) return
+  // Удължава/подарява достъп с N дни (24ч = 1) и веднага синхронизира рутера,
+  // за да тръгне нетът без да чакаме 5-мин. крон. Без prompt() (блокиран на Railway).
+  const doExtend = (acc, days, label) => {
+    setBusyId(acc.id)
     apiFetch(`${API}/api/internet/accounts/${acc.id}/extend`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ days }),
     }).then(r => r.json()).then(d => {
-      if (d.error) showToast(d.error, 'error')
-      else { showToast(`Удължен до ${(d.valid_until || '').slice(0, 16).replace('T', ' ')}`); load() }
-    })
+      if (d.error) { showToast(d.error, 'error'); return null }
+      showToast(`${label} → активен до ${(d.valid_until || '').slice(0, 16).replace('T', ' ')}. Синхронизирам рутера...`)
+      return apiFetch(`${API}/api/internet/sync-all`, { method: 'POST' }).then(r => r.json())
+    }).then(s => { if (s && s.stats) showToast(`Готово ✅ — ${s.stats.activated} активирани`); load() })
+      .catch(() => showToast('Грешка при удължаване', 'error'))
+      .finally(() => setBusyId(null))
   }
 
   const disable = (acc) => {
-    if (!confirm(`Деактивирай интернета на ${acc.user_name || acc.user_username}?`)) return
+    setBusyId(acc.id); setConfirmId(null)
     apiFetch(`${API}/api/internet/accounts/${acc.id}/disable`, { method: 'POST' })
       .then(r => r.json()).then(() => { showToast('Деактивиран'); load() })
+      .catch(() => showToast('Грешка', 'error'))
+      .finally(() => setBusyId(null))
   }
 
   if (loading) return <div className="py-12 text-center text-gray-400">Зарежда...</div>
@@ -119,7 +128,7 @@ function AccountsTab({ API, showToast }) {
         <table className="min-w-full divide-y divide-gray-100 text-sm">
           <thead className="bg-gray-50">
             <tr>
-              {['Наемател', 'Имот', 'Username', 'MAC', 'Статус', 'Валиден до', 'Платено', 'Действия'].map(h => (
+              {['Наемател', 'Имот', 'Username / Парола', 'MAC', 'Статус', 'Валиден до', 'Платено', 'Действия'].map(h => (
                 <th key={h} className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">{h}</th>
               ))}
             </tr>
@@ -134,14 +143,38 @@ function AccountsTab({ API, showToast }) {
                     {a.user_email && <div className="text-xs text-gray-500">{a.user_email}</div>}
                   </td>
                   <td className="px-3 py-2 text-xs text-gray-600 max-w-[180px] truncate">{a.property_address || '—'}</td>
-                  <td className="px-3 py-2 font-mono text-xs">{a.username}</td>
+                  <td className="px-3 py-2 font-mono text-xs">
+                    <div>{a.username}</div>
+                    {revealId === a.id ? (
+                      <div className="flex items-center gap-1 mt-0.5">
+                        <span className="text-blue-700">{a.password || '—'}</span>
+                        <button onClick={() => setRevealId(null)} className="text-[10px] text-gray-400 hover:text-gray-600">скрий</button>
+                      </div>
+                    ) : (
+                      <button onClick={() => setRevealId(a.id)} className="text-[10px] text-gray-400 hover:text-blue-600 mt-0.5">👁 покажи парола</button>
+                    )}
+                  </td>
                   <td className="px-3 py-2 font-mono text-[10px]">{a.mac_address || <span className="text-gray-300">—</span>}</td>
                   <td className="px-3 py-2"><span className={`text-xs px-2 py-0.5 rounded-full border ${st.cls}`}>{st.text}</span></td>
                   <td className="px-3 py-2 text-xs whitespace-nowrap">{a.valid_until ? a.valid_until.slice(0, 16).replace('T', ' ') : '—'}</td>
                   <td className="px-3 py-2 text-right font-medium text-green-700 whitespace-nowrap">{fmt(a.total_paid)} €</td>
-                  <td className="px-3 py-2">
-                    <button onClick={() => extend(a)} className="text-xs px-2 py-1 bg-green-50 hover:bg-green-100 text-green-700 rounded border border-green-200 mr-1">+ Удължи</button>
-                    <button onClick={() => disable(a)} className="text-xs px-2 py-1 bg-red-50 hover:bg-red-100 text-red-700 rounded border border-red-200">⏸</button>
+                  <td className="px-3 py-2 whitespace-nowrap">
+                    <button disabled={busyId === a.id} onClick={() => doExtend(a, 1, '🎁 24ч безплатно')}
+                      title="Подари 24 часа безплатен интернет"
+                      className="text-xs px-2 py-1 bg-amber-50 hover:bg-amber-100 text-amber-700 rounded border border-amber-200 mr-1 disabled:opacity-50">🎁 24ч</button>
+                    <button disabled={busyId === a.id} onClick={() => doExtend(a, 7, '+7 дни')}
+                      className="text-xs px-2 py-1 bg-green-50 hover:bg-green-100 text-green-700 rounded border border-green-200 mr-1 disabled:opacity-50">+7д</button>
+                    <button disabled={busyId === a.id} onClick={() => doExtend(a, 30, '+30 дни')}
+                      className="text-xs px-2 py-1 bg-green-50 hover:bg-green-100 text-green-700 rounded border border-green-200 mr-1 disabled:opacity-50">+30д</button>
+                    {confirmId === a.id ? (
+                      <span className="inline-flex items-center gap-1">
+                        <button onClick={() => disable(a)} className="text-xs px-2 py-1 bg-red-600 text-white rounded">Спри</button>
+                        <button onClick={() => setConfirmId(null)} className="text-xs px-2 py-1 bg-gray-100 text-gray-700 rounded border">Не</button>
+                      </span>
+                    ) : (
+                      <button disabled={busyId === a.id} onClick={() => setConfirmId(a.id)}
+                        title="Деактивирай" className="text-xs px-2 py-1 bg-red-50 hover:bg-red-100 text-red-700 rounded border border-red-200 disabled:opacity-50">⏸</button>
+                    )}
                   </td>
                 </tr>
               )
