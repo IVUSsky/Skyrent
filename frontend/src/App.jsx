@@ -13,7 +13,6 @@ const List           = lazy(() => import('./components/List'))
 const Dashboard      = lazy(() => import('./components/Dashboard'))
 const InvestorView   = lazy(() => import('./components/InvestorView'))
 const Loans          = lazy(() => import('./components/Loans'))
-const Analysis       = lazy(() => import('./components/Analysis'))
 const History        = lazy(() => import('./components/History'))
 const Import         = lazy(() => import('./components/Import'))
 const Tenants        = lazy(() => import('./components/Tenants'))
@@ -348,7 +347,6 @@ export default function App() {
           {validTab === 'support'   && <Support API={API} />}
           {validTab === 'loans'     && <Loans API={API} />}
           {validTab === 'history'   && <History API={API} />}
-          {validTab === 'analysis'  && <Analysis API={API} />}
           {validTab === 'expenses'  && <Expenses API={API} />}
           {validTab === 'import'    && <Import API={API} />}
           {validTab === 'smart'        && <Smart API={API} />}
