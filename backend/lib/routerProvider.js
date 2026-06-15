@@ -42,6 +42,13 @@ class MockProvider {
     if (!r) return { ok: false, message: 'Рутерът не е намерен' };
     return { ok: true, provider: 'mock', message: `Mock OK — host=${r.host}; реална връзка все още не е активирана (Фаза 2)` };
   }
+
+  async setPropertyAccess(db, routerId, allow) {
+    const r = db.prepare('SELECT * FROM routers WHERE id=?').get(routerId);
+    if (!r) throw new Error('Рутерът не е намерен');
+    console.log(`[router:mock] setPropertyAccess host=${r.host} allow=${allow}`);
+    return { ok: true, provider: 'mock', access: allow ? 'enabled' : 'disabled' };
+  }
 }
 
 // MikroTik provider — RouterOS API (TCP 8728 plain, 8729 SSL).
@@ -73,9 +80,51 @@ class MikrotikProvider {
     return `skyrent:${acc.username}`;
   }
 
+  // Flat mode: пуска (allow=true) или спира (allow=false) целия интернет за имота
+  // чрез едно firewall drop правило (LAN→всичко). Без captive portal / per-device логин.
+  async _setFlatAccess(r, allow) {
+    const conn = await this._connect(r);
+    try {
+      const lanIf = r.lan_interface || 'bridge';
+      const comment = 'skyrent-flat-cutoff';
+      // Увери се, че hotspot е изключен (flat не ползва captive portal)
+      try {
+        const servers = await conn.write('/ip/hotspot/print');
+        for (const s of servers) {
+          if (s.disabled !== 'true') await conn.write('/ip/hotspot/set', ['=.id=' + s['.id'], '=disabled=yes']);
+        }
+      } catch (_) {}
+      // Cutoff правилото: enabled=спрян нет, disabled=пуснат нет
+      const existing = await conn.write('/ip/firewall/filter/print', ['?comment=' + comment]);
+      if (existing.length) {
+        await conn.write('/ip/firewall/filter/set', ['=.id=' + existing[0]['.id'], '=disabled=' + (allow ? 'yes' : 'no')]);
+      } else {
+        await conn.write('/ip/firewall/filter/add', [
+          '=chain=forward', '=in-interface=' + lanIf, '=action=drop',
+          '=comment=' + comment, '=disabled=' + (allow ? 'yes' : 'no'),
+        ]);
+        // Премести преди първото НЕ-dynamic forward правило (изпреварва fasttrack/
+        // established-accept → спирането реже и текущите връзки). НЕ преди builtin
+        // dynamic правило (move fail-ва с "cannot move builtin").
+        try {
+          const added = (await conn.write('/ip/firewall/filter/print', ['?comment=' + comment]))[0];
+          const fwd = (await conn.write('/ip/firewall/filter/print'))
+            .filter(x => x.chain === 'forward' && x.dynamic !== 'true' && x.comment !== comment);
+          if (added && fwd[0] && added['.id'] !== fwd[0]['.id']) {
+            await conn.write('/ip/firewall/filter/move', ['=.id=' + added['.id'], '=destination=' + fwd[0]['.id']]);
+          }
+        } catch (_) {}
+      }
+      return { ok: true, provider: 'mikrotik', mode: 'flat', access: allow ? 'enabled' : 'disabled', router_id: r.id };
+    } finally {
+      try { conn.close(); } catch (_) {}
+    }
+  }
+
   async ensureUser(db, acc) {
     const r = getRouterForAccount(db, acc);
     if (!r) throw new Error(`Няма конфигуриран рутер за имот ${acc.property_id}`);
+    if (r.mode === 'flat') return this._setFlatAccess(r, true);
     const conn = await this._connect(r);
     try {
       const comment = this._markComment(acc);
@@ -122,6 +171,7 @@ class MikrotikProvider {
   async disableUser(db, acc) {
     const r = getRouterForAccount(db, acc);
     if (!r) return { ok: true, message: 'Няма рутер' };
+    if (r.mode === 'flat') return this._setFlatAccess(r, false);
     const conn = await this._connect(r);
     try {
       // Премахни ip-binding ако има MAC
@@ -166,6 +216,13 @@ class MikrotikProvider {
     } catch (err) {
       return { ok: false, provider: 'mikrotik', message: `Грешка: ${err.message}` };
     }
+  }
+
+  // Ръчно пускане/спиране на целия интернет за имота (flat mode).
+  async setPropertyAccess(db, routerId, allow) {
+    const r = db.prepare('SELECT * FROM routers WHERE id=?').get(routerId);
+    if (!r) throw new Error('Рутерът не е намерен');
+    return this._setFlatAccess(r, allow);
   }
 }
 

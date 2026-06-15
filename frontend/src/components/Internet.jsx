@@ -300,13 +300,15 @@ function PlansTab({ API, showToast }) {
   )
 }
 
-const ROUTER_EMPTY = { property_id: '', name: '', model: 'MikroTik hAP ax²', host: '', api_port: 8728, api_user: 'admin', api_pass: '', use_tls: 0, notes: '' }
+const ROUTER_EMPTY = { property_id: '', name: '', model: 'MikroTik hAP ax²', host: '', api_port: 8728, api_user: 'admin', api_pass: '', use_tls: 0, notes: '', mode: 'hotspot', lan_interface: 'bridge' }
 
 function RoutersTab({ API, showToast }) {
   const [routers, setRouters] = useState([])
   const [properties, setProperties] = useState([])
   const [editing, setEditing] = useState(null)
   const [form, setForm] = useState(ROUTER_EMPTY)
+  const [confirmDel, setConfirmDel] = useState(null)
+  const [busyId, setBusyId] = useState(null)
 
   const load = () => {
     apiFetch(`${API}/api/internet/routers`).then(r => r.json()).then(setRouters)
@@ -330,7 +332,7 @@ function RoutersTab({ API, showToast }) {
     setEditing(null); load(); showToast('Запазено')
   }
   const remove = async (r) => {
-    if (!confirm(`Изтрий рутера ${r.host}?`)) return
+    setConfirmDel(null)
     await apiFetch(`${API}/api/internet/routers/${r.id}`, { method: 'DELETE' })
     showToast('Изтрит'); load()
   }
@@ -340,6 +342,19 @@ function RoutersTab({ API, showToast }) {
     showToast(data.message || (data.ok ? 'OK' : 'Грешка'), data.ok ? 'success' : 'error')
     load()
   }
+  // Flat mode: ръчно пускане/спиране на целия интернет за имота
+  const setAccess = async (r, allow) => {
+    setBusyId(r.id)
+    try {
+      const res = await apiFetch(`${API}/api/internet/routers/${r.id}/access`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ allow }),
+      })
+      const data = await res.json()
+      if (!res.ok) { showToast(data.error || 'Грешка', 'error'); return }
+      showToast(allow ? '▶ Интернетът е пуснат' : '⏸ Интернетът е спрян')
+      load()
+    } finally { setBusyId(null) }
+  }
 
   // Properties без рутер — кандидати за нов
   const usedPropIds = new Set(routers.map(r => r.property_id))
@@ -347,9 +362,9 @@ function RoutersTab({ API, showToast }) {
 
   return (
     <div className="space-y-4">
-      <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-sm text-blue-900">
-        <strong>💡 Фаза 1 (сега)</strong> — само записваме рутерите в базата. Командите към тях ще се пращат реално след закупуване и активиране на провайдъра MikroTik (Фаза 2).
-        Препоръчвам <strong>MikroTik hAP ax lite/ax²</strong> за всеки имот (~€80-100).
+      <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-sm text-blue-900 space-y-1">
+        <div><strong>🏠 Flat режим</strong> — 1 наемател, фиксирана такса. Без логин: наемателят само въвежда WiFi паролата. Skyrent пуска/спира целия интернет (при плащане/изтичане или ръчно от бутоните долу).</div>
+        <div><strong>👥 Hotspot режим</strong> — няколко платещи наематели на 1 рутер. Всеки получава отделен достъп през captive portal (login).</div>
       </div>
 
       <button onClick={startNew} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg">➕ Добави рутер</button>
@@ -396,6 +411,19 @@ function RoutersTab({ API, showToast }) {
                 Използвай TLS
               </label>
             </div>
+            <div>
+              <label className="text-xs text-gray-500 font-medium">Режим</label>
+              <select value={form.mode || 'hotspot'} onChange={e => setForm({ ...form, mode: e.target.value })} className="w-full border rounded px-3 py-1.5">
+                <option value="hotspot">👥 Hotspot (няколко наематели, login)</option>
+                <option value="flat">🏠 Flat (1 наемател, без login)</option>
+              </select>
+            </div>
+            {form.mode === 'flat' && (
+              <div>
+                <label className="text-xs text-gray-500 font-medium">LAN интерфейс (за спиране)</label>
+                <input value={form.lan_interface || 'bridge'} onChange={e => setForm({ ...form, lan_interface: e.target.value })} placeholder="bridge" className="w-full border rounded px-3 py-1.5" />
+              </div>
+            )}
             <div className="md:col-span-3">
               <label className="text-xs text-gray-500 font-medium">Бележки</label>
               <input value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} className="w-full border rounded px-3 py-1.5" />
@@ -411,7 +439,7 @@ function RoutersTab({ API, showToast }) {
       <div className="bg-white rounded-xl shadow border border-gray-100 overflow-x-auto">
         <table className="min-w-full divide-y divide-gray-100 text-sm">
           <thead className="bg-gray-50">
-            <tr>{['Имот', 'Име', 'Модел', 'Host:Port', 'Last seen', 'Статус', 'Действия'].map(h => <th key={h} className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">{h}</th>)}</tr>
+            <tr>{['Имот', 'Име', 'Режим', 'Host:Port', 'Last seen', 'Статус', 'Действия'].map(h => <th key={h} className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">{h}</th>)}</tr>
           </thead>
           <tbody className="divide-y divide-gray-50">
             {routers.map(r => {
@@ -420,14 +448,31 @@ function RoutersTab({ API, showToast }) {
                 <tr key={r.id} className="hover:bg-gray-50">
                   <td className="px-3 py-2 text-xs max-w-[200px] truncate">{r.property_address || '—'}</td>
                   <td className="px-3 py-2 text-sm">{r.name || '—'}</td>
-                  <td className="px-3 py-2 text-xs">{r.model || '—'}</td>
+                  <td className="px-3 py-2 text-xs">
+                    {r.mode === 'flat'
+                      ? <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">🏠 Flat</span>
+                      : <span className="px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200">👥 Hotspot</span>}
+                  </td>
                   <td className="px-3 py-2 font-mono text-xs">{r.host}:{r.api_port}{r.use_tls ? ' (TLS)' : ''}</td>
                   <td className="px-3 py-2 text-xs text-gray-500">{r.last_seen_at ? r.last_seen_at.slice(0, 16).replace('T', ' ') : '—'}</td>
                   <td className="px-3 py-2"><span className={`text-xs ${st.cls}`} title={r.last_error || ''}>{st.text}</span></td>
-                  <td className="px-3 py-2">
+                  <td className="px-3 py-2 whitespace-nowrap">
+                    {r.mode === 'flat' && (
+                      <>
+                        <button disabled={busyId === r.id} onClick={() => setAccess(r, true)} className="text-xs px-2 py-1 bg-green-50 hover:bg-green-100 text-green-700 rounded border border-green-200 mr-1 disabled:opacity-50">▶ Пусни</button>
+                        <button disabled={busyId === r.id} onClick={() => setAccess(r, false)} className="text-xs px-2 py-1 bg-amber-50 hover:bg-amber-100 text-amber-700 rounded border border-amber-200 mr-1 disabled:opacity-50">⏸ Спри</button>
+                      </>
+                    )}
                     <button onClick={() => test(r)} className="text-xs px-2 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded border border-blue-200 mr-1">📡 Test</button>
                     <button onClick={() => startEdit(r)} className="text-xs px-2 py-1 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded border mr-1">✏️</button>
-                    <button onClick={() => remove(r)} className="text-xs px-2 py-1 bg-red-50 hover:bg-red-100 text-red-700 rounded border border-red-200">🗑</button>
+                    {confirmDel === r.id ? (
+                      <span className="inline-flex items-center gap-1">
+                        <button onClick={() => remove(r)} className="text-xs px-2 py-1 bg-red-600 text-white rounded">Изтрий</button>
+                        <button onClick={() => setConfirmDel(null)} className="text-xs px-2 py-1 bg-gray-100 text-gray-700 rounded border">Не</button>
+                      </span>
+                    ) : (
+                      <button onClick={() => setConfirmDel(r.id)} className="text-xs px-2 py-1 bg-red-50 hover:bg-red-100 text-red-700 rounded border border-red-200">🗑</button>
+                    )}
                   </td>
                 </tr>
               )
