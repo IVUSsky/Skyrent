@@ -50,6 +50,7 @@ function AccountsTab({ API, showToast }) {
   const [syncing, setSyncing] = useState(false)
   const [busyId, setBusyId] = useState(null)
   const [confirmId, setConfirmId] = useState(null)
+  const [revealId, setRevealId] = useState(null)
 
   const load = () => {
     setLoading(true)
@@ -127,7 +128,7 @@ function AccountsTab({ API, showToast }) {
         <table className="min-w-full divide-y divide-gray-100 text-sm">
           <thead className="bg-gray-50">
             <tr>
-              {['Наемател', 'Имот', 'Username', 'MAC', 'Статус', 'Валиден до', 'Платено', 'Действия'].map(h => (
+              {['Наемател', 'Имот', 'Username / Парола', 'MAC', 'Статус', 'Валиден до', 'Платено', 'Действия'].map(h => (
                 <th key={h} className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">{h}</th>
               ))}
             </tr>
@@ -142,7 +143,17 @@ function AccountsTab({ API, showToast }) {
                     {a.user_email && <div className="text-xs text-gray-500">{a.user_email}</div>}
                   </td>
                   <td className="px-3 py-2 text-xs text-gray-600 max-w-[180px] truncate">{a.property_address || '—'}</td>
-                  <td className="px-3 py-2 font-mono text-xs">{a.username}</td>
+                  <td className="px-3 py-2 font-mono text-xs">
+                    <div>{a.username}</div>
+                    {revealId === a.id ? (
+                      <div className="flex items-center gap-1 mt-0.5">
+                        <span className="text-blue-700">{a.password || '—'}</span>
+                        <button onClick={() => setRevealId(null)} className="text-[10px] text-gray-400 hover:text-gray-600">скрий</button>
+                      </div>
+                    ) : (
+                      <button onClick={() => setRevealId(a.id)} className="text-[10px] text-gray-400 hover:text-blue-600 mt-0.5">👁 покажи парола</button>
+                    )}
+                  </td>
                   <td className="px-3 py-2 font-mono text-[10px]">{a.mac_address || <span className="text-gray-300">—</span>}</td>
                   <td className="px-3 py-2"><span className={`text-xs px-2 py-0.5 rounded-full border ${st.cls}`}>{st.text}</span></td>
                   <td className="px-3 py-2 text-xs whitespace-nowrap">{a.valid_until ? a.valid_until.slice(0, 16).replace('T', ' ') : '—'}</td>
