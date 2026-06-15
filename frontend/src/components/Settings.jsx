@@ -17,6 +17,7 @@ export default function Settings({ API }) {
   const [issuer, setIssuer] = useState({ name: '', address: '', eik: '', mol: '', vat_number: '', iban: '', bic: '', place: '', vat_rate: '0' })
   const [kontrolisiEmail, setKontrolisiEmail] = useState('')
   const [kontrolisiAuto, setKontrolisiAuto] = useState(false)
+  const [autoInvoiceActivate, setAutoInvoiceActivate] = useState(false)
   const [counter, setCounter] = useState(null)
   const [nextSeq, setNextSeq] = useState('')
   const [savingCounter, setSavingCounter] = useState(false)
@@ -54,6 +55,7 @@ export default function Settings({ API }) {
         if (data.issuer) setIssuer(data.issuer)
         if (data.kontrolisi_email) setKontrolisiEmail(data.kontrolisi_email)
         setKontrolisiAuto(data.kontrolisi_auto === true || data.kontrolisi_auto === 'true' || data.kontrolisi_auto === 1)
+        setAutoInvoiceActivate(data.auto_invoice_on_activate === true || data.auto_invoice_on_activate === 'true' || data.auto_invoice_on_activate === 1)
         try { setHiddenMenus(Array.isArray(data.menu_hidden) ? data.menu_hidden : JSON.parse(data.menu_hidden || '[]')) } catch { setHiddenMenus([]) }
         setLoading(false)
       })
@@ -97,7 +99,7 @@ export default function Settings({ API }) {
     apiFetch(`${API}/api/settings`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tenant_map, expense_cats: expenseCats, smtp, issuer, kontrolisi_email: kontrolisiEmail, kontrolisi_auto: kontrolisiAuto }),
+      body: JSON.stringify({ tenant_map, expense_cats: expenseCats, smtp, issuer, kontrolisi_email: kontrolisiEmail, kontrolisi_auto: kontrolisiAuto, auto_invoice_on_activate: autoInvoiceActivate }),
     })
       .then(r => r.json())
       .then(data => {
@@ -458,6 +460,23 @@ export default function Settings({ API }) {
             <pre className="text-xs text-gray-800 overflow-x-auto">{JSON.stringify(autopayResult, null, 2)}</pre>
           </div>
         )}
+      </div>
+
+      {/* Auto-invoice on contract activation */}
+      <div className="bg-white rounded-xl shadow border border-gray-100 p-5 mb-6">
+        <h3 className="text-base font-bold text-gray-800 mb-1">🧾 Автоматична фактура при активиране на договор</h3>
+        <p className="text-sm text-gray-500 mb-3">
+          Когато активираш договор (след като наемателят го е подписал), системата може сама да издаде първата фактура.
+        </p>
+        <label className={`flex items-center gap-2 rounded-lg border p-3 cursor-pointer ${autoInvoiceActivate ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-200'}`}>
+          <input type="checkbox" checked={autoInvoiceActivate} onChange={e => setAutoInvoiceActivate(e.target.checked)} className="w-4 h-4" />
+          <span className="text-sm text-gray-700">
+            <strong>Генерирай фактура автоматично</strong> при активиране на договор
+          </span>
+        </label>
+        <p className="text-xs text-gray-400 mt-2">
+          Изисква фактурирането да е включено за имота. Изключено ли е — издаваш фактурата ръчно от таб Фактури. Запиши настройките.
+        </p>
       </div>
 
       {/* Invoice number counter */}

@@ -88,6 +88,13 @@ function kontrolisiAutoOn(db) {
   return row.value === 'true' || row.value === '1' || row.value === true;
 }
 
+// Включено ли е авто-генериране на фактура при активиране на договор
+function autoInvoiceOnActivateOn(db) {
+  const row = db.prepare("SELECT value FROM settings WHERE key='auto_invoice_on_activate'").get();
+  if (!row) return false;
+  return row.value === 'true' || row.value === '1' || row.value === true;
+}
+
 // Изпраща PDF на фактура/КИ към счетоводния (Kontrolisi) имейл. Best-effort —
 // ползва се и от ръчния бутон, и от авто-изпращането при генериране.
 async function sendInvoiceToKontrolisi(db, inv) {
@@ -365,6 +372,94 @@ async function createSimpleInvoice(db, {
   return { id: r.lastInsertRowid, invoice_number, filename, net, vat_amount, total: grossN };
 }
 
+// Генерира наемна фактура за имот+месец (rent + ДДС + addons + депозити).
+// Ползва се от route POST /generate И от авто-генерирането при активиране на
+// договор. Връща { ok:false, reason } за бизнес-случаи (без имот / без
+// фактуриране / дубликат); хвърля само при неочаквана грешка.
+async function generateRentInvoice(db, { property_id, month, payment_type, notes, tax_event_date, due_date }) {
+  const prop = db.prepare('SELECT * FROM properties WHERE id = ?').get(property_id);
+  if (!prop) return { ok: false, reason: 'no_property' };
+  if (!prop.invoice_enabled) return { ok: false, reason: 'not_enabled' };
+  const existing = db.prepare("SELECT id FROM rent_invoices WHERE property_id=? AND month=? AND type='invoice'").get(property_id, month);
+  if (existing) return { ok: false, reason: 'duplicate', id: existing.id };
+
+  let recipient = {};
+  try { recipient = JSON.parse(prop.invoice_recipient || '{}'); } catch {}
+
+  const issuer = getIssuer(db);
+  const invoice_number = nextInvoiceNumber(db);
+  const vat_rate  = prop.vat_exempt ? 0 : (issuer.vat_rate ? Number(issuer.vat_rate) : 0);
+  const rent      = Number(prop['наем'] || 0);
+  const rent_net  = vat_rate > 0 ? Math.round(rent / (1 + vat_rate / 100) * 100) / 100 : rent;
+  const vat_amount = Math.round((rent - rent_net) * 100) / 100;
+  const issued_at = new Date().toISOString().slice(0, 10);
+
+  const addons = getAddonChargesForProperty(db, property_id, month);
+  const addons_total = addons.total;
+  const total        = Math.round((rent + addons_total) * 100) / 100;
+  const amount       = rent_net;
+  const addonsNote   = addons.items.length
+    ? 'Включва: ' + addons.items.map(i => `${i.name} ${i.amount} EUR${i.kind === 'deposit' ? ' (депозит)' : '/мес'}`).join(', ')
+    : null;
+
+  const inv = {
+    invoice_number, type: 'invoice',
+    property_id, property_address: prop['адрес'], month,
+    tenant_name:       prop['наемател'] || '',
+    recipient_name:    recipient.name    || prop['наемател'] || '',
+    recipient_address: recipient.address || '',
+    recipient_eik:     recipient.eik     || '',
+    recipient_mol:     recipient.mol     || '',
+    amount, vat_rate, vat_amount, total,
+    payment_type: payment_type || 'банков превод',
+    tax_event_date: tax_event_date || issued_at,
+    due_date:       due_date       || null,
+    issued_at,
+    notes: [notes, addonsNote].filter(Boolean).join(' | ') || null,
+  };
+
+  const { filename } = await generatePDF(inv, issuer);
+
+  const r = db.prepare(`
+    INSERT INTO rent_invoices
+      (invoice_number, type, property_id, month, tenant_name, recipient_name,
+       recipient_address, recipient_eik, recipient_mol, amount, vat_rate, vat_amount,
+       total, payment_type, tax_event_date, due_date, issued_at, pdf_path, notes,
+       addons_total, addons_json)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+  `).run(
+    invoice_number, 'invoice', property_id, month, inv.tenant_name,
+    inv.recipient_name, inv.recipient_address, inv.recipient_eik, inv.recipient_mol,
+    amount, vat_rate, vat_amount, total,
+    inv.payment_type, inv.tax_event_date, inv.due_date,
+    issued_at, filename, inv.notes,
+    addons_total, addons.items.length ? JSON.stringify(addons.items) : null
+  );
+
+  markDepositsCharged(db, r.lastInsertRowid, addons.items);
+
+  const tenantUser = db.prepare(`
+    SELECT tenant_user_id FROM contracts
+    WHERE property_id=? AND status='active' AND tenant_user_id IS NOT NULL
+    ORDER BY created_at DESC LIMIT 1
+  `).get(property_id);
+  if (tenantUser?.tenant_user_id) {
+    notifyTenant(db, tenantUser.tenant_user_id, {
+      kind: 'invoice_new',
+      title: `Нова фактура № ${invoice_number}`,
+      body: `${total.toLocaleString('bg-BG', { minimumFractionDigits: 2 })} EUR за ${month}`,
+      link: 'invoices', ref_type: 'invoice', ref_id: r.lastInsertRowid,
+    });
+  }
+
+  if (kontrolisiAutoOn(db)) {
+    const freshInv = db.prepare('SELECT * FROM rent_invoices WHERE id=?').get(r.lastInsertRowid);
+    sendInvoiceToKontrolisi(db, freshInv).catch(e => console.warn('kontrolisi auto-send failed:', e.message));
+  }
+
+  return { ok: true, id: r.lastInsertRowid, invoice_number, filename, addons_total };
+}
+
 // ─── Router ────────────────────────────────────────────────────────────────
 module.exports = function(db) {
   const router = express.Router();
@@ -441,96 +536,17 @@ module.exports = function(db) {
     try {
       const { property_id, month, payment_type, notes, tax_event_date, due_date } = req.body;
       if (!property_id || !month) return res.status(400).json({ error: 'property_id и month са задължителни' });
-
-      const prop = db.prepare('SELECT * FROM properties WHERE id = ?').get(property_id);
-      if (!prop) return res.status(404).json({ error: 'Имотът не е намерен' });
-      if (!prop.invoice_enabled) return res.status(400).json({ error: 'Фактурирането не е включено за този имот' });
-
-      // Check for duplicate
-      const existing = db.prepare("SELECT id FROM rent_invoices WHERE property_id=? AND month=? AND type='invoice'").get(property_id, month);
-      if (existing) return res.status(400).json({ error: 'Вече съществува фактура за този имот и месец' });
-
-      let recipient = {};
-      try { recipient = JSON.parse(prop.invoice_recipient || '{}'); } catch {}
-
-      const issuer = getIssuer(db);
-      const invoice_number = nextInvoiceNumber(db);
-      // Per-property vat_exempt overrides issuer's VAT rate (e.g. residential
-      // rentals are exempt under чл. 45 ЗДДС even if issuer is VAT-registered).
-      const vat_rate  = prop.vat_exempt ? 0 : (issuer.vat_rate ? Number(issuer.vat_rate) : 0);
-      const rent      = Number(prop['наем'] || 0);
-      const rent_net  = vat_rate > 0 ? Math.round(rent / (1 + vat_rate / 100) * 100) / 100 : rent;
-      const vat_amount = Math.round((rent - rent_net) * 100) / 100;
-      const issued_at = new Date().toISOString().slice(0, 10);
-
-      // Addon charges за активни абонаменти на наемателя
-      const addons = getAddonChargesForProperty(db, property_id, month);
-      const addons_total = addons.total;
-      const total        = Math.round((rent + addons_total) * 100) / 100;
-      const amount       = rent_net;
-      const addonsNote   = addons.items.length
-        ? 'Включва: ' + addons.items.map(i => `${i.name} ${i.amount} EUR${i.kind === 'deposit' ? ' (депозит)' : '/мес'}`).join(', ')
-        : null;
-
-      const inv = {
-        invoice_number, type: 'invoice',
-        property_id, property_address: prop['адрес'], month,
-        tenant_name:       prop['наемател'] || '',
-        recipient_name:    recipient.name    || prop['наемател'] || '',
-        recipient_address: recipient.address || '',
-        recipient_eik:     recipient.eik     || '',
-        recipient_mol:     recipient.mol     || '',
-        amount, vat_rate, vat_amount, total,
-        payment_type: payment_type || 'банков превод',
-        tax_event_date: tax_event_date || issued_at,
-        due_date:       due_date       || null,
-        issued_at,
-        notes: [notes, addonsNote].filter(Boolean).join(' | ') || null,
-      };
-
-      const { filepath, filename } = await generatePDF(inv, issuer);
-
-      const r = db.prepare(`
-        INSERT INTO rent_invoices
-          (invoice_number, type, property_id, month, tenant_name, recipient_name,
-           recipient_address, recipient_eik, recipient_mol, amount, vat_rate, vat_amount,
-           total, payment_type, tax_event_date, due_date, issued_at, pdf_path, notes,
-           addons_total, addons_json)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-      `).run(
-        invoice_number, 'invoice', property_id, month, inv.tenant_name,
-        inv.recipient_name, inv.recipient_address, inv.recipient_eik, inv.recipient_mol,
-        amount, vat_rate, vat_amount, total,
-        inv.payment_type, inv.tax_event_date, inv.due_date,
-        issued_at, filename, inv.notes,
-        addons_total, addons.items.length ? JSON.stringify(addons.items) : null
-      );
-
-      // Маркирай удържаните депозити
-      markDepositsCharged(db, r.lastInsertRowid, addons.items);
-
-      // Известие към наемателя за нова фактура
-      const tenantUser = db.prepare(`
-        SELECT tenant_user_id FROM contracts
-        WHERE property_id=? AND status='active' AND tenant_user_id IS NOT NULL
-        ORDER BY created_at DESC LIMIT 1
-      `).get(property_id);
-      if (tenantUser?.tenant_user_id) {
-        notifyTenant(db, tenantUser.tenant_user_id, {
-          kind: 'invoice_new',
-          title: `Нова фактура № ${invoice_number}`,
-          body: `${total.toLocaleString('bg-BG', { minimumFractionDigits: 2 })} EUR за ${month}`,
-          link: 'invoices', ref_type: 'invoice', ref_id: r.lastInsertRowid,
-        });
+      const r = await generateRentInvoice(db, { property_id, month, payment_type, notes, tax_event_date, due_date });
+      if (!r.ok) {
+        const map = {
+          no_property: ['Имотът не е намерен', 404],
+          not_enabled: ['Фактурирането не е включено за този имот', 400],
+          duplicate:   ['Вече съществува фактура за този имот и месец', 400],
+        };
+        const [msg, code] = map[r.reason] || ['Грешка при генериране', 500];
+        return res.status(code).json({ error: msg });
       }
-
-      // Авто-изпращане към счетоводител (Kontrolisi), ако е включено — best-effort
-      if (kontrolisiAutoOn(db)) {
-        const freshInv = db.prepare('SELECT * FROM rent_invoices WHERE id=?').get(r.lastInsertRowid);
-        sendInvoiceToKontrolisi(db, freshInv).catch(e => console.warn('kontrolisi auto-send failed:', e.message));
-      }
-
-      res.json({ ok: true, id: r.lastInsertRowid, invoice_number, filename, addons_total });
+      res.json({ ok: true, id: r.id, invoice_number: r.invoice_number, filename: r.filename, addons_total: r.addons_total });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -841,3 +857,5 @@ module.exports = function(db) {
 
 // Експорт за преизползване от други модули (напр. интернет webhook)
 module.exports.createSimpleInvoice = createSimpleInvoice;
+module.exports.generateRentInvoice = generateRentInvoice;
+module.exports.autoInvoiceOnActivateOn = autoInvoiceOnActivateOn;
