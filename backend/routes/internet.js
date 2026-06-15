@@ -162,13 +162,14 @@ module.exports = function(db) {
       const b = req.body;
       if (!b.property_id || !b.host) return res.status(400).json({ error: 'property_id и host са задължителни' });
       const r = db.prepare(`
-        INSERT INTO routers (property_id, name, model, host, api_port, api_user, api_pass, use_tls, notes)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO routers (property_id, name, model, host, api_port, api_user, api_pass, use_tls, notes, mode, lan_interface)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         Number(b.property_id), b.name || '', b.model || 'MikroTik',
         b.host, Number(b.api_port) || 8728,
         b.api_user || 'admin', b.api_pass || '',
-        b.use_tls ? 1 : 0, b.notes || ''
+        b.use_tls ? 1 : 0, b.notes || '',
+        b.mode === 'flat' ? 'flat' : 'hotspot', b.lan_interface || 'bridge'
       );
       res.json({ ok: true, id: r.lastInsertRowid });
     } catch (err) {
@@ -186,7 +187,7 @@ module.exports = function(db) {
       const b = req.body;
       db.prepare(`
         UPDATE routers SET
-          name=?, model=?, host=?, api_port=?, api_user=?, api_pass=?, use_tls=?, notes=?
+          name=?, model=?, host=?, api_port=?, api_user=?, api_pass=?, use_tls=?, notes=?, mode=?, lan_interface=?
         WHERE id=?
       `).run(
         b.name !== undefined ? b.name : cur.name,
@@ -197,6 +198,8 @@ module.exports = function(db) {
         b.api_pass !== undefined ? b.api_pass : cur.api_pass,
         b.use_tls !== undefined ? (b.use_tls ? 1 : 0) : cur.use_tls,
         b.notes !== undefined ? b.notes : cur.notes,
+        b.mode !== undefined ? (b.mode === 'flat' ? 'flat' : 'hotspot') : (cur.mode || 'hotspot'),
+        b.lan_interface !== undefined ? (b.lan_interface || 'bridge') : (cur.lan_interface || 'bridge'),
         req.params.id
       );
       res.json({ ok: true });
@@ -206,6 +209,15 @@ module.exports = function(db) {
   router.delete('/routers/:id', (req, res) => {
     try { db.prepare('DELETE FROM routers WHERE id=?').run(req.params.id); res.json({ ok: true }); }
     catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  // Ръчно пускане/спиране на интернета за имота (flat mode)
+  router.post('/routers/:id/access', async (req, res) => {
+    try {
+      const allow = !!req.body.allow;
+      const result = await getRouterProvider().setPropertyAccess(db, Number(req.params.id), allow);
+      res.json({ ok: true, ...result });
+    } catch (err) { res.status(500).json({ error: err.message }); }
   });
 
   router.post('/routers/:id/test', async (req, res) => {

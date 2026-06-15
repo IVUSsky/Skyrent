@@ -3,6 +3,10 @@ node_modules/
 .env.local
 .env.*.local
 *.db
+*.db-wal
+*.db-shm
+*.db-journal
+backend/db/orgs/
 storage/
 dist/
 .DS_Store
@@ -10,3 +14,8 @@ dist/
 # Uploaded/generated files
 backend/data/contracts/
 backend/data/invoices/
+
+# Untracked one-off scripts/dumps с hardcoded токени и лични данни — НИКОГА в git
+backend/scripts/_*
+*_token.txt
+backend/scripts/*_backup_*.json

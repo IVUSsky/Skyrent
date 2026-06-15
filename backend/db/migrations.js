@@ -546,6 +546,10 @@ function runTenantMigrations(db) {
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(property_id)
   )`);
+  // Router mode: 'hotspot' (per-tenant captive portal, default) | 'flat' (1 наемател, фикс. такса —
+  // без логин; Skyrent пуска/спира целия интернет през firewall cutoff правило)
+  try { db.exec("ALTER TABLE routers ADD COLUMN mode TEXT DEFAULT 'hotspot'"); console.log('Migration: added routers.mode'); } catch(_) {}
+  try { db.exec("ALTER TABLE routers ADD COLUMN lan_interface TEXT DEFAULT 'bridge'"); console.log('Migration: added routers.lan_interface'); } catch(_) {}
 
   db.exec(`CREATE TABLE IF NOT EXISTS internet_plans (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
