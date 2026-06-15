@@ -6,6 +6,7 @@ const fs = require('fs');
 const multer = require('multer');
 const nodemailer = require('nodemailer');
 const { ensureTenantUser, sendWelcomeEmail } = require('../lib/tenantOnboarding');
+const { generateRentInvoice, autoInvoiceOnActivateOn } = require('./invoices');
 
 const FONT_REGULAR = path.join(__dirname, '../fonts/arial.ttf');
 const FONT_BOLD    = path.join(__dirname, '../fonts/arialbd.ttf');
@@ -1088,11 +1089,25 @@ module.exports = function(db) {
         console.error('Tenant provisioning failed:', e.message);
       }
 
+      // Авто-генериране на първа фактура при активиране (ако е включено в Настройки)
+      let invoice = null;
+      try {
+        if (contract.property_id && autoInvoiceOnActivateOn(db)) {
+          const month = (contract.start_date || new Date().toISOString()).slice(0, 7);
+          const r = await generateRentInvoice(db, { property_id: contract.property_id, month });
+          if (r.ok) invoice = { id: r.id, invoice_number: r.invoice_number };
+          else invoice = { skipped: r.reason }; // напр. not_enabled / duplicate
+        }
+      } catch (e) {
+        console.error('Auto-invoice on activate failed:', e.message);
+      }
+
       res.json({
         ok: true,
         tenant_account: tenantInfo.user
           ? { id: tenantInfo.user.id, username: tenantInfo.user.username, email: tenantInfo.user.email, created: tenantInfo.isNew, email_sent: emailResult.sent }
           : null,
+        invoice,
       });
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
