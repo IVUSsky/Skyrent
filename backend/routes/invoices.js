@@ -95,12 +95,27 @@ function autoInvoiceOnActivateOn(db) {
   return row.value === 'true' || row.value === '1' || row.value === true;
 }
 
+// Почиства входния стринг до масив от валидни имейли. Поддържа няколко адреса,
+// разделени с , или ; ; trim-ва интервали/нови редове. Хвърля Error с ясно
+// съобщение ако някой адрес е невалиден (за да не гръмне Resend със суров 422).
+const EMAIL_RE = /^(?:[^<>\s@]+@[^<>\s@]+\.[^<>\s@]+|.+<[^<>\s@]+@[^<>\s@]+\.[^<>\s@]+>)$/;
+function parseRecipients(raw) {
+  const parts = String(raw || '').split(/[;,\n]/).map(s => s.trim()).filter(Boolean);
+  if (parts.length === 0) throw new Error('Няма валиден имейл адрес');
+  const bad = parts.filter(p => !EMAIL_RE.test(p));
+  if (bad.length) throw new Error(`Невалиден имейл: "${bad.join('", "')}". Формат: email@example.com`);
+  return parts;
+}
+
 // Изпраща PDF на фактура/КИ към счетоводния (Kontrolisi) имейл. Best-effort —
 // ползва се и от ръчния бутон, и от авто-изпращането при генериране.
 async function sendInvoiceToKontrolisi(db, inv) {
   const row = db.prepare("SELECT value FROM settings WHERE key='kontrolisi_email'").get();
   const toEmail = row?.value;
   if (!toEmail) return { ok: false, reason: 'no_email' };
+  let recipients;
+  try { recipients = parseRecipients(toEmail); }
+  catch (e) { return { ok: false, reason: e.message }; }
   const resendKey = process.env.RESEND_API_KEY;
   if (!resendKey) return { ok: false, reason: 'no_resend' };
   const filepath = inv.pdf_path ? path.join(PDF_DIR, inv.pdf_path) : null;
@@ -115,7 +130,7 @@ async function sendInvoiceToKontrolisi(db, inv) {
     headers: { 'Authorization': `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       from: `${issuer.name || 'Sky Capital'} <${fromEmail}>`,
-      to: [toEmail],
+      to: recipients,
       subject: `${docLabel} — ${inv.recipient_name || inv.tenant_name || ''}`,
       html: `<p>${docLabel} от ${issuer.name || 'Sky Capital'} е приложена.</p>`,
       attachments: [{ filename: `${docLabel.replace(/\s/g, '_')}.pdf`, content: pdfBase64 }],
@@ -745,6 +760,9 @@ module.exports = function(db) {
     const prop = db.prepare('SELECT email FROM properties WHERE id = ?').get(inv.property_id);
     const toEmail = req.body.email || prop?.email;
     if (!toEmail) return res.status(400).json({ error: 'Няма email адрес' });
+    let recipients;
+    try { recipients = parseRecipients(toEmail); }
+    catch (e) { return res.status(400).json({ error: e.message }); }
 
     const resendKey = process.env.RESEND_API_KEY;
     if (!resendKey) return res.status(400).json({ error: 'RESEND_API_KEY не е конфигуриран' });
@@ -772,7 +790,7 @@ module.exports = function(db) {
         headers: { 'Authorization': `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           from: `${issuer.name || 'Sky Capital'} <${fromEmail}>`,
-          to: [toEmail],
+          to: recipients,
           subject: `${docLabel} — наем ${monthLabel(inv.month)}`,
           html: buildEmailHtml(bodyHtml, issuer.name),
           attachments: [
