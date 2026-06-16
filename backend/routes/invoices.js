@@ -6,6 +6,7 @@ const nodemailer = require('nodemailer');
 const { getAddonChargesForProperty, markDepositsCharged } = require('../lib/addonCharges');
 const { notifyTenant } = require('../lib/notify');
 const { nextInvoiceNumber, peekNextInvoiceNumber, counterKey } = require('../lib/invoiceNumber');
+const { parseRecipients } = require('../lib/email');
 
 const FONT_REGULAR = path.join(__dirname, '../fonts/arial.ttf');
 const FONT_BOLD    = path.join(__dirname, '../fonts/arialbd.ttf');
@@ -85,18 +86,6 @@ function autoInvoiceOnActivateOn(db) {
   const row = db.prepare("SELECT value FROM settings WHERE key='auto_invoice_on_activate'").get();
   if (!row) return false;
   return row.value === 'true' || row.value === '1' || row.value === true;
-}
-
-// Почиства входния стринг до масив от валидни имейли. Поддържа няколко адреса,
-// разделени с , или ; ; trim-ва интервали/нови редове. Хвърля Error с ясно
-// съобщение ако някой адрес е невалиден (за да не гръмне Resend със суров 422).
-const EMAIL_RE = /^(?:[^<>\s@]+@[^<>\s@]+\.[^<>\s@]+|.+<[^<>\s@]+@[^<>\s@]+\.[^<>\s@]+>)$/;
-function parseRecipients(raw) {
-  const parts = String(raw || '').split(/[;,\n]/).map(s => s.trim()).filter(Boolean);
-  if (parts.length === 0) throw new Error('Няма валиден имейл адрес');
-  const bad = parts.filter(p => !EMAIL_RE.test(p));
-  if (bad.length) throw new Error(`Невалиден имейл: "${bad.join('", "')}". Формат: email@example.com`);
-  return parts;
 }
 
 // Изпраща PDF на фактура/КИ към счетоводния (Kontrolisi) имейл. Best-effort —

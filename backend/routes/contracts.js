@@ -7,6 +7,7 @@ const multer = require('multer');
 const nodemailer = require('nodemailer');
 const { ensureTenantUser, sendWelcomeEmail } = require('../lib/tenantOnboarding');
 const { generateRentInvoice, autoInvoiceOnActivateOn } = require('./invoices');
+const { parseRecipients } = require('../lib/email');
 
 const FONT_REGULAR = path.join(__dirname, '../fonts/arial.ttf');
 const FONT_BOLD    = path.join(__dirname, '../fonts/arialbd.ttf');
@@ -1158,6 +1159,9 @@ module.exports = function(db) {
       if (!contract) return res.status(404).json({ error: 'Not found' });
       const toEmail = req.body.email || contract.tenant_email;
       if (!toEmail) return res.status(400).json({ error: 'Няма email адрес' });
+      let recipients;
+      try { recipients = parseRecipients(toEmail); }
+      catch (e) { return res.status(400).json({ error: e.message }); }
 
       const resendKey = process.env.RESEND_API_KEY;
       if (!resendKey) return res.status(400).json({ error: 'RESEND_API_KEY не е конфигуриран' });
@@ -1196,7 +1200,7 @@ module.exports = function(db) {
         headers: { 'Authorization': `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           from: `${fromName} <${fromEmail}>`,
-          to: [toEmail],
+          to: recipients,
           subject: `Договор за наем № ${contract.contract_number}`,
           html: emailHtml,
           attachments: [{ filename: `Договор_${contract.contract_number}.pdf`, content: pdfBase64 }],
