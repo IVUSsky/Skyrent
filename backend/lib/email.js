@@ -9,12 +9,17 @@ const EMAIL_RE = /^[^<>\s@]+@[^<>\s@]+\.[^<>\s@]+$/;
 const ANGLE_RE = /<\s*([^<>\s@]+@[^<>\s@]+\.[^<>\s@]+)\s*>/;
 
 function parseRecipients(raw) {
-  const parts = String(raw || '').split(/[;,\n]/).map(s => s.trim()).filter(Boolean);
+  // settings стойностите се пазят JSON-кодирани (JSON.stringify) → цялата
+  // стойност може да е обвита в кавички: "mail@x.bg". Маха се преди парсване.
+  let s = String(raw || '').trim();
+  if (s.length >= 2 && s.startsWith('"') && s.endsWith('"')) s = s.slice(1, -1);
+  const parts = s.split(/[;,\n]/).map(x => x.trim()).filter(Boolean);
   if (parts.length === 0) throw new Error('Няма валиден имейл адрес');
   const out = [];
   for (const p of parts) {
-    const m = p.match(ANGLE_RE);
-    const email = m ? m[1] : p;
+    const cleaned = p.replace(/^["']+|["']+$/g, '').trim(); // и per-адрес кавички
+    const m = cleaned.match(ANGLE_RE);
+    const email = m ? m[1] : cleaned;
     if (!EMAIL_RE.test(email)) {
       throw new Error(`Невалиден имейл: "${p}". Формат: email@example.com`);
     }
