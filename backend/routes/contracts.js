@@ -14,9 +14,10 @@ const FONT_BOLD    = path.join(__dirname, '../fonts/arialbd.ttf');
 const DATA_DIR     = process.env.DATA_DIR || path.join(__dirname, '../data');
 const PDF_DIR      = path.join(DATA_DIR, 'contracts');
 const LOGO_DIR     = path.join(DATA_DIR, 'logos');
+const ID_DIR       = path.join(DATA_DIR, 'id_cards'); // снимки на лични карти (чувствителни!)
 const USER_DEFAULT_LOGO = path.join(LOGO_DIR, 'sky_capital_logo.png'); // uploaded via Settings
 const BUNDLED_LOGO      = path.join(__dirname, '../lib/sky_capital_logo.png'); // shipped with code
-[PDF_DIR, LOGO_DIR].forEach(d => { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); });
+[PDF_DIR, LOGO_DIR, ID_DIR].forEach(d => { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); });
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
@@ -27,6 +28,13 @@ const storage = multer.diskStorage({
   },
 });
 const upload = multer({ storage, limits: { fileSize: 5 * 1024 * 1024 } });
+
+// Отделен multer за снимки на лична карта (по-голям лимит за телефонни снимки)
+const idStorage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, ID_DIR),
+  filename: (req, file, cb) => cb(null, `${Date.now()}_${file.fieldname}_${file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_')}`),
+});
+const idUpload = multer({ storage: idStorage, limits: { fileSize: 10 * 1024 * 1024 } });
 
 function fmtDate(d) {
   if (!d) return '..................';
@@ -835,6 +843,80 @@ function generateAnnexPDF(annex, contract, issuer) {
 module.exports = function(db) {
   const router = express.Router();
 
+  // ── Извличане на данни от лична карта (Claude Vision) ───────────────────
+  // Качват се лице (front) + по желание гръб (back); връща структурирани данни
+  // за преглед и автоматично попълване на договора. Снимките се пазят в ID_DIR.
+  router.post('/extract-id', idUpload.fields([{ name: 'front', maxCount: 1 }, { name: 'back', maxCount: 1 }]), orgContext, async (req, res) => {
+    try {
+      const apiKey = process.env.ANTHROPIC_API_KEY;
+      if (!apiKey) return res.status(400).json({ error: 'ANTHROPIC_API_KEY не е конфигуриран' });
+      const front = req.files?.front?.[0];
+      const back  = req.files?.back?.[0];
+      if (!front) return res.status(400).json({ error: 'Качи поне лицевата страна на личната карта' });
+
+      let Anthropic;
+      try { Anthropic = require('@anthropic-ai/sdk'); }
+      catch (e) { return res.status(500).json({ error: '@anthropic-ai/sdk липсва: ' + e.message }); }
+      const client = new Anthropic.default({ apiKey });
+
+      const imgBlock = (f) => ({
+        type: 'image',
+        source: {
+          type: 'base64',
+          media_type: f.originalname.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg',
+          data: fs.readFileSync(f.path).toString('base64'),
+        },
+      });
+      const content = [imgBlock(front)];
+      if (back) content.push(imgBlock(back));
+      content.push({ type: 'text', text: `Това са снимки на българска лична карта (лице и евентуално гръб). Извлечи данните на притежателя. Върни САМО JSON обект, без markdown, без обяснения:
+{
+  "tenant_name": "Пълно име на кирилица: Име Презиме Фамилия",
+  "egn": "ЕГН - точно 10 цифри",
+  "id_number": "Номер на документа (личната карта)",
+  "id_issued_by": "Издаден от (напр. МВР)",
+  "id_issued_date": "Дата на издаване във формат ГГГГ-ММ-ДД",
+  "id_valid_until": "Валидна до във формат ГГГГ-ММ-ДД",
+  "birth_date": "Дата на раждане ГГГГ-ММ-ДД",
+  "permanent_address": "Постоянен адрес от гърба (град, ж.к./улица, номер)"
+}
+ПРАВИЛА:
+- ЕГН е ТОЧНО 10 цифри — препиши цифра по цифра, провери внимателно (чести грешки: 0/O, 1/I, 5/6, 8/3)
+- Имената върни на кирилица
+- Ако дадено поле липсва или е нечетимо → празен низ ""
+- Не измисляй данни` });
+
+      const response = await client.messages.create({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 1000,
+        messages: [{ role: 'user', content }],
+      });
+      const raw = response.content.map(c => c.text || '').join('').trim();
+      const s = raw.indexOf('{'), e = raw.lastIndexOf('}');
+      let data;
+      try { data = JSON.parse(raw.slice(s, e + 1)); }
+      catch (_) { return res.status(422).json({ error: 'Не успях да разчета данните — опитай с по-ясна/добре осветена снимка' }); }
+
+      res.json({
+        ok: true,
+        data,
+        id_front_path: path.basename(front.path),
+        id_back_path: back ? path.basename(back.path) : null,
+      });
+    } catch (err) {
+      console.error('extract-id failed:', err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Сервиране на снимка на ЛК (само за админ — router-ът е зад auth). Guard срещу traversal.
+  router.get('/id-image/:file', (req, res) => {
+    const safe = path.basename(req.params.file);
+    const fp = path.join(ID_DIR, safe);
+    if (!fp.startsWith(ID_DIR) || !fs.existsSync(fp)) return res.status(404).json({ error: 'Не е намерена' });
+    res.sendFile(fp);
+  });
+
   // ── Templates ──────────────────────────────────────────────────────────
 
   router.get('/templates', (req, res) => {
@@ -932,6 +1014,8 @@ module.exports = function(db) {
         tenant_doc_date:     fields.tenant_doc_date     || '',
         tenant_doc_country:  fields.tenant_doc_country  || '',
         tenant_dob:          fields.tenant_dob          || '',
+        id_front_path:       fields.id_front_path       || null,
+        id_back_path:        fields.id_back_path        || null,
         property_address:     fields.property_address     || prop?.['адрес'] || '',
         property_description: fields.property_description || '',
         property_area:        fields.property_area        || prop?.['площ']  || null,
@@ -988,8 +1072,8 @@ module.exports = function(db) {
           monthly_rent, currency, deposit, payment_day,
           start_date, end_date, delivery_date, conditions, notes,
           абонат_ток, абонат_вода, абонат_тец, абонат_вход,
-          pdf_path, protocol_pdf_path)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+          pdf_path, protocol_pdf_path, id_front_path, id_back_path)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       `).run(
         contract.template_id, contract.property_id, contract.contract_number, contract.status,
         contract.landlord_type, contract.landlord_name, contract.landlord_address, contract.landlord_egn,
@@ -1000,7 +1084,7 @@ module.exports = function(db) {
         contract.monthly_rent, contract.currency, contract.deposit, contract.payment_day,
         contract.start_date, contract.end_date, contract.delivery_date, contract.conditions, contract.notes,
         contract.абонат_ток, contract.абонат_вода, contract.абонат_тец, contract.абонат_вход,
-        filename, protocolFilename
+        filename, protocolFilename, contract.id_front_path, contract.id_back_path
       );
 
       res.status(201).json({ ok: true, id: r.lastInsertRowid, contract_number, filename, protocol_filename: protocolFilename });

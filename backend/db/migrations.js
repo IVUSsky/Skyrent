@@ -357,7 +357,9 @@ function runTenantMigrations(db) {
    'keys_chip INTEGER DEFAULT 1',
    'property_state TEXT',
    'inventory TEXT',
-   'protocol_pdf_path TEXT'
+   'protocol_pdf_path TEXT',
+   'id_front_path TEXT',
+   'id_back_path TEXT'
   ].forEach(col => { try { db.exec(`ALTER TABLE contracts ADD COLUMN ${col}`); } catch(_) {} });
   console.log('contracts tables ready');
   seedContractTemplate(db);
