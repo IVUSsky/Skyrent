@@ -5,6 +5,7 @@ const fs = require('fs');
 const nodemailer = require('nodemailer');
 const { getAddonChargesForProperty, markDepositsCharged } = require('../lib/addonCharges');
 const { notifyTenant } = require('../lib/notify');
+const { nextInvoiceNumber, peekNextInvoiceNumber, counterKey } = require('../lib/invoiceNumber');
 
 const FONT_REGULAR = path.join(__dirname, '../fonts/arial.ttf');
 const FONT_BOLD    = path.join(__dirname, '../fonts/arialbd.ttf');
@@ -61,15 +62,6 @@ const EUR_BGN_RATE = 1.95583;
 const eurToBgn = (eur) => Math.round(Number(eur || 0) * EUR_BGN_RATE * 100) / 100;
 
 // Invoice number: 10-digit sequential per year, e.g. 2026000001
-function nextInvoiceNumber(db) {
-  const year = new Date().getFullYear();
-  const counterKey = `invoice_counter_${year}`;
-  const row = db.prepare("SELECT value FROM settings WHERE key=?").get(counterKey);
-  const next = row ? (parseInt(row.value) + 1) : 1;
-  db.prepare("INSERT OR REPLACE INTO settings (key,value) VALUES (?,?)").run(counterKey, String(next));
-  return `${year}${String(next).padStart(6,'0')}`;
-}
-
 function getIssuer(db) {
   const row = db.prepare("SELECT value FROM settings WHERE key='issuer'").get();
   if (!row) return {};
@@ -333,7 +325,7 @@ async function createSimpleInvoice(db, {
   product = 'наем', line_description = null,
 }) {
   const issuer = getIssuer(db);
-  const invoice_number = nextInvoiceNumber(db);
+  const invoice_number = nextInvoiceNumber(db, { rent: product === 'наем' });
   const vat_rate   = issuer.vat_rate ? Number(issuer.vat_rate) : 0;
   const grossN     = Math.round(Number(gross || 0) * 100) / 100;
   const net        = vat_rate > 0 ? Math.round(grossN / (1 + vat_rate / 100) * 100) / 100 : grossN;
@@ -387,7 +379,7 @@ async function generateRentInvoice(db, { property_id, month, payment_type, notes
   try { recipient = JSON.parse(prop.invoice_recipient || '{}'); } catch {}
 
   const issuer = getIssuer(db);
-  const invoice_number = nextInvoiceNumber(db);
+  const invoice_number = nextInvoiceNumber(db, { rent: true });
   const vat_rate  = prop.vat_exempt ? 0 : (issuer.vat_rate ? Number(issuer.vat_rate) : 0);
   const rent      = Number(prop['наем'] || 0);
   const rent_net  = vat_rate > 0 ? Math.round(rent / (1 + vat_rate / 100) * 100) / 100 : rent;
@@ -464,51 +456,37 @@ async function generateRentInvoice(db, { property_id, month, payment_type, notes
 module.exports = function(db) {
   const router = express.Router();
 
-  // GET /api/invoices/counter — preview the next invoice number that will be issued
+  // GET /api/invoices/counter — преглед на следващия номер за двете серии
+  //   main — не-наемни фактури (1-серия, напр. 1000000062)
+  //   rent — наемни фактури (нула-серия, напр. 0000000123)
   router.get('/counter', (req, res) => {
-    const year = Number(req.query.year) || new Date().getFullYear();
-    const key  = `invoice_counter_${year}`;
-    const row  = db.prepare('SELECT value FROM settings WHERE key=?').get(key);
-    const current = row ? parseInt(String(row.value).replace(/"/g, '')) : 0;
-    const next    = current + 1;
     res.json({
-      year,
-      counter: current,
-      next_number: `${year}${String(next).padStart(6, '0')}`,
-      next_sequential: next,
+      main: peekNextInvoiceNumber(db, false),
+      rent: peekNextInvoiceNumber(db, true),
     });
   });
 
-  // PUT /api/invoices/counter — set the counter so the NEXT invoice gets a specific number
-  // body: { year?: number, next_sequential: number }
+  // PUT /api/invoices/counter — задава брояча, така че СЛЕДВАЩАТА фактура от серията
+  // да получи зададения номер. body: { series: 'main'|'rent', next_sequential: number }
   router.put('/counter', (req, res) => {
-    const year = Number(req.body.year) || new Date().getFullYear();
+    const isRent = req.body.series === 'rent';
     const next = Number(req.body.next_sequential);
     if (!Number.isInteger(next) || next < 1) {
       return res.status(400).json({ error: 'next_sequential трябва да е положително цяло число' });
     }
-    if (next > 999999) {
-      return res.status(400).json({ error: 'Максимум 6 цифри (до 999999)' });
+    if (next > 9999999999) {
+      return res.status(400).json({ error: 'Максимум 10 цифри' });
     }
-
-    // Refuse if existing invoices in this year already have a higher number — would create a duplicate
-    const maxRow = db.prepare(
-      "SELECT MAX(CAST(SUBSTR(invoice_number, 5) AS INTEGER)) AS max_seq FROM rent_invoices WHERE SUBSTR(invoice_number,1,4)=?"
-    ).get(String(year));
-    const maxExisting = maxRow?.max_seq || 0;
-    if (next <= maxExisting) {
-      return res.status(400).json({
-        error: `Вече съществува фактура с номер ${year}${String(maxExisting).padStart(6,'0')}. Следващият номер трябва да е поне ${maxExisting + 1}.`,
-      });
+    const padded = String(next).padStart(10, '0');
+    // Не позволявай номер, който вече е издаден (би създал дубликат)
+    const exists = db.prepare('SELECT 1 FROM rent_invoices WHERE invoice_number=?').get(padded);
+    if (exists) {
+      return res.status(400).json({ error: `Номер ${padded} вече е издаден. Избери по-голям.` });
     }
-
     // Store counter as (next - 1) so nextInvoiceNumber() will return `next`
-    const key = `invoice_counter_${year}`;
-    db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(key, String(next - 1));
-    res.json({
-      ok: true,
-      next_number: `${year}${String(next).padStart(6,'0')}`,
-    });
+    db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)')
+      .run(counterKey(isRent), String(next - 1));
+    res.json({ ok: true, series: isRent ? 'rent' : 'main', next_number: padded });
   });
 
   // GET list with search/sort/filter
@@ -561,7 +539,8 @@ module.exports = function(db) {
 
       const { reason, notes } = req.body;
       const issuer = getIssuer(db);
-      const invoice_number = nextInvoiceNumber(db);
+      // Кредитното известие следва серията на оригиналната фактура
+      const invoice_number = nextInvoiceNumber(db, { rent: (original.product || 'наем') === 'наем' });
       const issued_at = new Date().toISOString().slice(0, 10);
 
       const prop = db.prepare('SELECT адрес FROM properties WHERE id = ?').get(original.property_id);

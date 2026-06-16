@@ -19,7 +19,8 @@ export default function Settings({ API }) {
   const [kontrolisiAuto, setKontrolisiAuto] = useState(false)
   const [autoInvoiceActivate, setAutoInvoiceActivate] = useState(false)
   const [counter, setCounter] = useState(null)
-  const [nextSeq, setNextSeq] = useState('')
+  const [nextMain, setNextMain] = useState('')
+  const [nextRent, setNextRent] = useState('')
   const [savingCounter, setSavingCounter] = useState(false)
   const [autopayResult, setAutopayResult] = useState(null)
   const [autopayLoading, setAutopayLoading] = useState(false)
@@ -37,8 +38,24 @@ export default function Settings({ API }) {
   const loadCounter = () => {
     apiFetch(`${API}/api/invoices/counter`).then(r => r.json()).then(d => {
       setCounter(d)
-      setNextSeq(String(d.next_sequential))
+      setNextMain(String(d.main?.next_sequential ?? ''))
+      setNextRent(String(d.rent?.next_sequential ?? ''))
     }).catch(() => {})
+  }
+
+  const saveCounter = (series, value) => {
+    setSavingCounter(series)
+    apiFetch(`${API}/api/invoices/counter`, {
+      method: 'PUT',
+      body: JSON.stringify({ series, next_sequential: Number(value) }),
+    })
+      .then(r => r.json())
+      .then(d => {
+        setSavingCounter(false)
+        if (d.ok) { showToast(`Следваща ${series === 'rent' ? 'наемна ' : ''}фактура: ${d.next_number}`); loadCounter() }
+        else showToast(d.error || 'Грешка', 'error')
+      })
+      .catch(() => { setSavingCounter(false); showToast('Грешка при запис', 'error') })
   }
 
   useEffect(() => {
@@ -479,67 +496,56 @@ export default function Settings({ API }) {
         </p>
       </div>
 
-      {/* Invoice number counter */}
+      {/* Invoice number counter — две отделни серии */}
       <div className="bg-white rounded-xl shadow border border-gray-100 p-5 mb-6">
         <h3 className="text-base font-bold text-gray-800 mb-1">🔢 Пореден номер на фактурите</h3>
         <p className="text-sm text-gray-500 mb-4">
-          Формат: <code className="bg-gray-100 px-1.5 py-0.5 rounded text-xs">YYYYNNNNNN</code> (година + 6-цифрен пореден номер).
+          10-цифрен формат, две независими серии. <strong>Фактури</strong> — за интернет/услуги/ръчни (напр. <code className="bg-gray-100 px-1 rounded text-xs">1000000062</code>).
+          <strong> Наеми</strong> — за наемните фактури (с нули отпред, напр. <code className="bg-gray-100 px-1 rounded text-xs">0000000123</code>).
           Полезно ако продължаваш номерация от стара система.
         </p>
-        {counter && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 items-end">
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-              <div className="text-xs font-semibold text-blue-700 uppercase">Текущ статус ({counter.year})</div>
-              <div className="text-sm text-blue-900 mt-1">
-                Издадени до момента: <strong>{counter.counter}</strong> бр.
+        {counter && [
+          { series: 'main', label: '📄 Фактури (интернет / услуги / ръчни)', data: counter.main, val: nextMain, set: setNextMain,
+            box: 'bg-blue-50 border-blue-200', eyebrow: 'text-blue-700', body: 'text-blue-900' },
+          { series: 'rent', label: '🏠 Наеми', data: counter.rent, val: nextRent, set: setNextRent,
+            box: 'bg-emerald-50 border-emerald-200', eyebrow: 'text-emerald-700', body: 'text-emerald-900' },
+        ].map(row => (
+          <div key={row.series} className="grid grid-cols-1 md:grid-cols-2 gap-3 items-end mb-4 last:mb-0">
+            <div className={`border rounded-lg p-3 ${row.box}`}>
+              <div className={`text-xs font-semibold uppercase ${row.eyebrow}`}>{row.label}</div>
+              <div className={`text-sm mt-1 ${row.body}`}>
+                Издадени до момента: <strong>{row.data?.counter ?? 0}</strong> бр.
               </div>
-              <div className="text-sm text-blue-900">
-                Следваща фактура ще е: <strong className="font-mono">{counter.next_number}</strong>
+              <div className={`text-sm ${row.body}`}>
+                Следваща ще е: <strong className="font-mono">{row.data?.next_number}</strong>
+                {row.data && !row.data.configured && <span className="text-amber-600 text-xs ml-1">(стар формат — задай за да минеш на новия)</span>}
               </div>
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">
-                Следваща фактура — пореден номер (6 цифри)
+                Следваща {row.series === 'rent' ? 'наемна ' : ''}фактура — пълен номер (до 10 цифри)
               </label>
               <div className="flex gap-2">
-                <div className="flex items-center bg-gray-100 border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-500 font-mono">
-                  {counter.year}
-                </div>
                 <input
-                  type="number"
-                  min="1"
-                  max="999999"
-                  value={nextSeq}
-                  onChange={e => setNextSeq(e.target.value)}
+                  type="number" min="1" max="9999999999"
+                  value={row.val}
+                  onChange={e => row.set(e.target.value)}
                   className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
                 <button
-                  onClick={() => {
-                    setSavingCounter(true)
-                    apiFetch(`${API}/api/invoices/counter`, {
-                      method: 'PUT',
-                      body: JSON.stringify({ year: counter.year, next_sequential: Number(nextSeq) }),
-                    })
-                      .then(r => r.json())
-                      .then(d => {
-                        setSavingCounter(false)
-                        if (d.ok) { showToast(`Следваща фактура: ${d.next_number}`); loadCounter() }
-                        else showToast(d.error || 'Грешка', 'error')
-                      })
-                      .catch(() => { setSavingCounter(false); showToast('Грешка при запис', 'error') })
-                  }}
-                  disabled={savingCounter || !nextSeq || Number(nextSeq) === counter.next_sequential}
+                  onClick={() => saveCounter(row.series, row.val)}
+                  disabled={savingCounter === row.series || !row.val || Number(row.val) === row.data?.next_sequential}
                   className="px-4 py-2 text-sm font-medium bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white rounded-lg whitespace-nowrap"
                 >
-                  {savingCounter ? '...' : 'Запази'}
+                  {savingCounter === row.series ? '...' : 'Запази'}
                 </button>
               </div>
-              <p className="text-xs text-gray-400 mt-1">
-                Не може да е по-малък от съществуващи фактури. Скок напред е разрешен.
-              </p>
             </div>
           </div>
-        )}
+        ))}
+        <p className="text-xs text-gray-400 mt-2">
+          Номер, който вече е издаден, не се приема. Скок напред е разрешен.
+        </p>
       </div>
 
       {/* Email Settings — Resend */}
