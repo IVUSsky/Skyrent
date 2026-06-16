@@ -526,12 +526,12 @@ export default function Invoices({ API, role }) {
       {/* Recipient modal */}
       {recipientModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm">
-            <div className="px-6 py-4 border-b">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm max-h-[90vh] flex flex-col">
+            <div className="px-6 py-4 border-b shrink-0">
               <h3 className="font-bold text-gray-900">Данни на получателя</h3>
               <p className="text-sm text-gray-500">{recipientModal['адрес']} · {recipientModal['наемател']}</p>
             </div>
-            <div className="px-6 py-4 space-y-3">
+            <div className="px-6 py-4 space-y-3 overflow-y-auto">
               {[
                 { key: 'name',    label: 'Получател (фирма или физическо лице)', ph: recipientModal['наемател'] },
                 { key: 'address', label: 'Адрес',                               ph: 'гр. София, ул. ...' },
@@ -547,7 +547,7 @@ export default function Invoices({ API, role }) {
                 </div>
               ))}
             </div>
-            <div className="px-6 py-4 border-t flex justify-end gap-2">
+            <div className="px-6 py-4 border-t flex justify-end gap-2 shrink-0">
               <button onClick={() => setRecipientModal(null)} className="px-4 py-2 text-sm text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg">Отказ</button>
               <button onClick={saveRecipient} className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg">Запази</button>
             </div>
@@ -594,11 +594,11 @@ export default function Invoices({ API, role }) {
       {/* Edit Invoice Modal */}
       {editModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md">
-            <div className="px-6 py-4 border-b border-gray-200">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md max-h-[90vh] flex flex-col">
+            <div className="px-6 py-4 border-b border-gray-200 shrink-0">
               <h3 className="font-bold text-gray-900">✏️ Редактирай фактура {editModal.invoice_number}</h3>
             </div>
-            <div className="px-6 py-4 space-y-3">
+            <div className="px-6 py-4 space-y-3 overflow-y-auto">
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Сума с ДДС (EUR)</label>
@@ -632,7 +632,7 @@ export default function Invoices({ API, role }) {
                 })()}
               </div>
             </div>
-            <div className="px-6 py-4 border-t flex justify-end gap-2">
+            <div className="px-6 py-4 border-t flex justify-end gap-2 shrink-0">
               <button onClick={() => setEditModal(null)} className="px-4 py-2 text-sm text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg">Отказ</button>
               <button onClick={saveEdit} className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg">
                 💾 Запази и регенерирай PDF
