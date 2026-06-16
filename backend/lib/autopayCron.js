@@ -14,6 +14,7 @@
 const path = require('path');
 const fs = require('fs');
 const { getAddonChargesForProperty, markDepositsCharged } = require('./addonCharges');
+const { nextInvoiceNumber } = require('./invoiceNumber');
 
 let stripeSingleton = null;
 function getStripe() {
@@ -37,15 +38,6 @@ function getIssuer(db) {
   try { return JSON.parse(row.value); } catch { return {}; }
 }
 
-function nextInvoiceNumber(db) {
-  const year = new Date().getFullYear();
-  const counterKey = `invoice_counter_${year}`;
-  const row = db.prepare("SELECT value FROM settings WHERE key=?").get(counterKey);
-  const next = row ? (parseInt(String(row.value).replace(/"/g, '')) + 1) : 1;
-  db.prepare("INSERT OR REPLACE INTO settings (key,value) VALUES (?,?)").run(counterKey, String(next));
-  return `${year}${String(next).padStart(6, '0')}`;
-}
-
 // Find or create an unpaid invoice for the given property + current month
 function ensureInvoiceForMonth(db, property, month, generatePDF) {
   let inv = db.prepare("SELECT * FROM rent_invoices WHERE property_id=? AND month=? AND type='invoice'")
@@ -55,7 +47,7 @@ function ensureInvoiceForMonth(db, property, month, generatePDF) {
   if (!property.invoice_enabled) return null;
 
   const issuer = getIssuer(db);
-  const invoice_number = nextInvoiceNumber(db);
+  const invoice_number = nextInvoiceNumber(db, { rent: true });
   const vat_rate  = property.vat_exempt ? 0 : (issuer.vat_rate ? Number(issuer.vat_rate) : 0);
   const rent      = Number(property['наем'] || 0);
   const rent_net  = vat_rate > 0 ? Math.round(rent / (1 + vat_rate / 100) * 100) / 100 : rent;
