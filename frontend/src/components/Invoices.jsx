@@ -179,7 +179,7 @@ export default function Invoices({ API, role }) {
 
   const openEdit = (inv) => {
     setEditModal(inv)
-    setEditForm({ total: inv.total, vat_rate: inv.vat_rate || 0, notes: inv.notes || '', payment_type: inv.payment_type || '', recipient_name: inv.recipient_name || '', recipient_address: inv.recipient_address || '', recipient_eik: inv.recipient_eik || '', recipient_mol: inv.recipient_mol || '' })
+    setEditForm({ invoice_number: inv.invoice_number || '', total: inv.total, vat_rate: inv.vat_rate || 0, notes: inv.notes || '', payment_type: inv.payment_type || '', recipient_name: inv.recipient_name || '', recipient_address: inv.recipient_address || '', recipient_eik: inv.recipient_eik || '', recipient_mol: inv.recipient_mol || '' })
   }
 
   const saveEdit = () => {
@@ -599,6 +599,13 @@ export default function Invoices({ API, role }) {
               <h3 className="font-bold text-gray-900">✏️ Редактирай фактура {editModal.invoice_number}</h3>
             </div>
             <div className="px-6 py-4 space-y-3 overflow-y-auto">
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Номер на фактурата</label>
+                <input type="text" value={editForm.invoice_number}
+                  onChange={e => setEditForm(f => ({ ...f, invoice_number: e.target.value }))}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                <p className="text-xs text-gray-400 mt-1">Промяната ще регенерира PDF-а. Не може да съвпада със съществуващ номер.</p>
+              </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Сума с ДДС (EUR)</label>

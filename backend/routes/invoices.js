@@ -62,6 +62,46 @@ function fmtDate(d) {
 const EUR_BGN_RATE = 1.95583;
 const eurToBgn = (eur) => Math.round(Number(eur || 0) * EUR_BGN_RATE * 100) / 100;
 
+// Сума словом на български (за фактурите — законово изискване).
+function bgThreeDigits(num, gender) {
+  const ones = {
+    n: ['', 'едно', 'две', 'три', 'четири', 'пет', 'шест', 'седем', 'осем', 'девет'],
+    m: ['', 'един', 'два', 'три', 'четири', 'пет', 'шест', 'седем', 'осем', 'девет'],
+    f: ['', 'една', 'две', 'три', 'четири', 'пет', 'шест', 'седем', 'осем', 'девет'],
+  }[gender] || [];
+  const teens = ['десет', 'единадесет', 'дванадесет', 'тринадесет', 'четиринадесет', 'петнадесет', 'шестнадесет', 'седемнадесет', 'осемнадесет', 'деветнадесет'];
+  const tens = ['', '', 'двадесет', 'тридесет', 'четиридесет', 'петдесет', 'шестдесет', 'седемдесет', 'осемдесет', 'деветдесет'];
+  const hund = ['', 'сто', 'двеста', 'триста', 'четиристотин', 'петстотин', 'шестстотин', 'седемстотин', 'осемстотин', 'деветстотин'];
+  const h = Math.floor(num / 100), rem = num % 100, t = Math.floor(rem / 10), u = rem % 10;
+  let tp = [];
+  if (rem >= 10 && rem <= 19) tp.push(teens[rem - 10]);
+  else { if (t) tp.push(tens[t]); if (u) tp.push(ones[u]); }
+  const tail = tp.length === 2 ? tp[0] + ' и ' + tp[1] : (tp[0] || '');
+  if (h && tail) return tp.length === 2 ? hund[h] + ' ' + tail : hund[h] + ' и ' + tail;
+  if (h) return hund[h];
+  return tail;
+}
+function bgIntToWords(n) {
+  n = Math.floor(Math.abs(n));
+  if (n === 0) return 'нула';
+  const mil = Math.floor(n / 1000000), th = Math.floor((n % 1000000) / 1000), rest = n % 1000;
+  const g = [];
+  if (mil) g.push(bgThreeDigits(mil, 'm') + ' ' + (mil === 1 ? 'милион' : 'милиона'));
+  if (th) g.push(th === 1 ? 'хиляда' : bgThreeDigits(th, 'f') + ' хиляди');
+  if (rest) g.push(bgThreeDigits(rest, 'n'));
+  let res = g.join(' ');
+  if (g.length > 1 && rest > 0 && rest < 100) {
+    const last = g[g.length - 1];
+    if (!last.includes(' и ')) res = g.slice(0, -1).join(' ') + ' и ' + last;
+  }
+  return res.replace(/\s+/g, ' ').trim();
+}
+// напр. 25.98 → "двадесет и пет евро и 98 евроцента"
+function amountToWordsBG(amount) {
+  const x = Math.round(Math.abs(Number(amount || 0)) * 100);
+  return `${bgIntToWords(Math.floor(x / 100))} евро и ${String(x % 100).padStart(2, '0')} евроцента`;
+}
+
 // Invoice number: 10-digit sequential per year, e.g. 2026000001
 function getIssuer(db) {
   const row = db.prepare("SELECT value FROM settings WHERE key='issuer'").get();
@@ -258,7 +298,12 @@ function generatePDF(inv, issuer) {
       `Превалутиране при официален фиксиран курс 1 EUR = 1,95583 BGN`,
       tX - 60, y, { width: tW + 60, align: 'right' }
     );
-    y += 10;
+    y += 12;
+
+    // ── Сума словом (законово изискване)
+    doc.font('R').fontSize(8.5).fillColor('#374151');
+    doc.text(`Словом: ${amountToWordsBG(inv.total)}`, 50, y, { width: PW });
+    y += 14;
 
     // ── Notes
     if (inv.notes) {
@@ -783,7 +828,14 @@ module.exports = function(db) {
     try {
       const inv = db.prepare('SELECT * FROM rent_invoices WHERE id=?').get(req.params.id);
       if (!inv) return res.status(404).json({ error: 'Not found' });
-      const { total, vat_rate, notes, payment_type, tax_event_date, due_date, recipient_name, recipient_address, recipient_eik, recipient_mol } = req.body;
+      const { total, vat_rate, notes, payment_type, tax_event_date, due_date, recipient_name, recipient_address, recipient_eik, recipient_mol, invoice_number } = req.body;
+      // Смяна на номер (по желание) — с проверка за дубликат
+      let newNumber = inv.invoice_number;
+      if (invoice_number !== undefined && String(invoice_number).trim() && String(invoice_number).trim() !== inv.invoice_number) {
+        newNumber = String(invoice_number).trim();
+        const dup = db.prepare('SELECT 1 FROM rent_invoices WHERE invoice_number=? AND id<>?').get(newNumber, inv.id);
+        if (dup) return res.status(400).json({ error: `Фактура с номер ${newNumber} вече съществува` });
+      }
       const newTotal    = total    !== undefined ? Number(total)    : inv.total;
       const newVatRate  = vat_rate !== undefined ? Number(vat_rate) : (inv.vat_rate || 0);
       const newAmount   = newVatRate > 0
@@ -791,10 +843,12 @@ module.exports = function(db) {
         : newTotal;
       const newVatAmt   = Math.round((newTotal - newAmount) * 100) / 100;
       db.prepare(`UPDATE rent_invoices SET
+        invoice_number=?,
         amount=?, vat_rate=?, vat_amount=?, total=?,
         notes=?, payment_type=?, tax_event_date=?, due_date=?,
         recipient_name=?, recipient_address=?, recipient_eik=?, recipient_mol=?
         WHERE id=?`).run(
+        newNumber,
         newAmount, newVatRate, newVatAmt, newTotal,
         notes ?? inv.notes, payment_type ?? inv.payment_type,
         tax_event_date ?? inv.tax_event_date, due_date ?? inv.due_date,
