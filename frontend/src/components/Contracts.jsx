@@ -594,6 +594,14 @@ export default function Contracts({ API }) {
                               className="px-2 py-1 text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 rounded" title="Договор PDF">📄</button>
                             <button onClick={() => apiFetch(`${API}/api/contracts/${c.id}/protocol/pdf`).then(r => r.blob()).then(b => window.open(URL.createObjectURL(b), '_blank'))}
                               className="px-2 py-1 text-xs bg-amber-50 border border-amber-200 text-amber-700 hover:bg-amber-100 rounded" title="Приемо-предавателен протокол PDF">📋</button>
+                            {c.id_front_path && (
+                              <button onClick={() => apiFetch(`${API}/api/contracts/id-image/${c.id_front_path}`).then(r => r.blob()).then(b => window.open(URL.createObjectURL(b), '_blank'))}
+                                className="px-2 py-1 text-xs bg-blue-50 border border-blue-200 text-blue-700 hover:bg-blue-100 rounded" title="Лична карта — лице">🪪</button>
+                            )}
+                            {c.id_back_path && (
+                              <button onClick={() => apiFetch(`${API}/api/contracts/id-image/${c.id_back_path}`).then(r => r.blob()).then(b => window.open(URL.createObjectURL(b), '_blank'))}
+                                className="px-2 py-1 text-xs bg-blue-50 border border-blue-200 text-blue-700 hover:bg-blue-100 rounded" title="Лична карта — гръб">🪪↩</button>
+                            )}
                             <button onClick={() => sendContract(c)} disabled={sending===c.id}
                               className="px-2 py-1 text-xs bg-orange-50 border border-orange-200 text-orange-700 hover:bg-orange-100 rounded disabled:opacity-50" title="Изпрати по мейл">
                               {sending===c.id ? '...' : '📧'}
