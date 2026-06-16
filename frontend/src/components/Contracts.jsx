@@ -277,11 +277,45 @@ export default function Contracts({ API }) {
     tenant_name: '', tenant_address: '', tenant_egn: '', tenant_phone: '', tenant_email: '',
     tenant_mol: '',
     tenant_doc: 'лична карта', tenant_doc_date: '', tenant_doc_country: 'България', tenant_dob: '',
+    id_front_path: '', id_back_path: '',
     property_address: '', property_description: '', property_area: '',
     monthly_rent: '', currency: 'EUR', deposit: '', payment_day: '5',
     start_date: '', end_date: '', delivery_date: '', conditions: '', notes: '',
   })
   const [creating, setCreating] = useState(false)
+  const [idFront, setIdFront] = useState(null)
+  const [idBack, setIdBack] = useState(null)
+  const [extractingId, setExtractingId] = useState(false)
+
+  // Извличане на данни от снимки на лична карта (Claude Vision) → попълва полетата
+  const extractId = async () => {
+    if (!idFront) { showToast('Качи поне лицевата страна на личната карта', 'error'); return }
+    setExtractingId(true)
+    try {
+      const fd = new FormData()
+      fd.append('front', idFront)
+      if (idBack) fd.append('back', idBack)
+      const r = await apiFetch(`${API}/api/contracts/extract-id`, { method: 'POST', body: fd })
+      const d = await r.json()
+      if (!r.ok) { showToast(d.error || 'Грешка при извличане', 'error'); return }
+      const x = d.data || {}
+      setNewForm(f => ({
+        ...f,
+        tenant_name:        x.tenant_name      || f.tenant_name,
+        tenant_egn:         x.egn              || f.tenant_egn,
+        tenant_address:     x.permanent_address|| f.tenant_address,
+        tenant_dob:         x.birth_date       || f.tenant_dob,
+        tenant_doc:         'лична карта',
+        tenant_doc_date:    x.id_issued_date   || f.tenant_doc_date,
+        tenant_doc_country: f.tenant_doc_country || 'България',
+        id_front_path:      d.id_front_path    || '',
+        id_back_path:       d.id_back_path     || '',
+      }))
+      showToast('Данните са извлечени — прегледай ги (особено ЕГН) преди запазване')
+    } catch (e) {
+      showToast('Грешка при извличане', 'error')
+    } finally { setExtractingId(false) }
+  }
 
   // Actions
   const [sending, setSending] = useState(null)
@@ -675,6 +709,28 @@ export default function Contracts({ API }) {
               {/* Tenant */}
               <div className="bg-white rounded-xl shadow border border-gray-100 p-5">
                 <h3 className="font-bold text-gray-800 mb-3">Наемател</h3>
+
+                {/* Авто-попълване от лична карта */}
+                <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 p-3">
+                  <div className="text-sm font-semibold text-blue-900 mb-2">📷 Попълни автоматично от лична карта</div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-2">
+                    <label className="text-xs text-gray-600">Лице (задължително)
+                      <input type="file" accept="image/*" onChange={e => setIdFront(e.target.files[0] || null)}
+                        className="block w-full text-xs mt-1 file:mr-2 file:px-2 file:py-1 file:rounded file:border-0 file:bg-blue-100 file:text-blue-700" />
+                    </label>
+                    <label className="text-xs text-gray-600">Гръб (по желание)
+                      <input type="file" accept="image/*" onChange={e => setIdBack(e.target.files[0] || null)}
+                        className="block w-full text-xs mt-1 file:mr-2 file:px-2 file:py-1 file:rounded file:border-0 file:bg-blue-100 file:text-blue-700" />
+                    </label>
+                  </div>
+                  <button type="button" onClick={extractId} disabled={extractingId || !idFront}
+                    className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg">
+                    {extractingId ? 'Извличане…' : '✨ Извлечи данните'}
+                  </button>
+                  {newForm.id_front_path && <span className="ml-2 text-xs text-green-700">✓ снимките са прикачени към досието</span>}
+                  <p className="text-[11px] text-amber-700 mt-2">⚠️ Прегледай извлечените данни (особено ЕГН) преди да запазиш. Снимките на ЛК се пазят към досието на договора.</p>
+                </div>
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   {[
                     ['tenant_name','Пълно иmе / Фирма *','Иван Иванов / Римаунт ЕООД'],
