@@ -9,8 +9,15 @@ export function apiFetch(url, options = {}) {
       ...options.headers,
     },
   }).then(r => {
-    // 402 = изтекъл trial / спрян абонамент → прати към таб Абонамент
-    if (r.status === 402) window.dispatchEvent(new CustomEvent('skyrent:billing-required'));
+    // 402 има два случая:
+    //  - спрян/изтекъл абонамент (без `capability`) → прати към таб Абонамент
+    //  - capability-gate (липсваща функция в плана, има `capability`) → НЕ пренасочвай;
+    //    функцията просто не е достъпна, обработва се локално.
+    if (r.status === 402) {
+      r.clone().json()
+        .then(b => { if (!b || !b.capability) window.dispatchEvent(new CustomEvent('skyrent:billing-required')); })
+        .catch(() => window.dispatchEvent(new CustomEvent('skyrent:billing-required')));
+    }
     return r;
   });
 }

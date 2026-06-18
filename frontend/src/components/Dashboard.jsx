@@ -110,8 +110,9 @@ export default function Dashboard({ API }) {
     ])
       .then(([m, mo, pr, es]) => {
         setMetrics(m)
-        setMonthly(mo)
-        setProperties(pr)
+        // mo може да е 402/грешка обект (банков импорт не е в плана) → пази масив
+        setMonthly(Array.isArray(mo) ? mo : [])
+        setProperties(Array.isArray(pr) ? pr : [])
         setExpenseSummary(es)
         setLoading(false)
       })
