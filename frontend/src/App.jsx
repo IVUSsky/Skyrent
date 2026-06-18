@@ -1,5 +1,6 @@
 import React, { useState, useEffect, lazy, Suspense } from 'react'
 import Login from './components/Login'
+import LandingPage from './components/LandingPage'
 import NotificationBell from './components/NotificationBell'
 import { ThemeProvider } from './components/ThemeProvider'
 import ThemePicker from './components/ThemePicker'
@@ -121,6 +122,7 @@ function AnnouncementBar({ API }) {
 export default function App() {
   const [activeTab, setActiveTab]       = useState('invoices')
   const [authenticated, setAuthenticated] = useState(!!localStorage.getItem('skyrent_token'))
+  const [showLogin, setShowLogin]         = useState(false)
   const [role, setRole]                 = useState(parseRole)
   const [userName, setUserName]         = useState(localStorage.getItem('skyrent_name') || '')
   const [mustChangePwd, setMustChangePwd] = useState(localStorage.getItem('skyrent_must_change_pwd') === '1')
@@ -219,7 +221,9 @@ export default function App() {
   }
 
   if (!authenticated) {
-    return <Login API={API} onLogin={handleLogin} />
+    return showLogin
+      ? <Login API={API} onLogin={handleLogin} onBack={() => setShowLogin(false)} />
+      : <LandingPage onEnter={() => setShowLogin(true)} />
   }
 
   if (role === 'tenant') {

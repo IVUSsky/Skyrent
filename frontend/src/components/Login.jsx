@@ -40,7 +40,7 @@ const C = {
   lineSoft:'rgba(236,230,215,0.07)',
 }
 
-export default function Login({ API, onLogin }) {
+export default function Login({ API, onLogin, onBack }) {
   useFonts()
   const [step, setStep]         = useState('credentials')  // 'credentials' | 'totp' | 'signup'
   const [username, setUsername] = useState('')
@@ -136,6 +136,15 @@ export default function Login({ API, onLogin }) {
       {/* Atmosphere: gradient mesh + grain */}
       <div className="sky-mesh" aria-hidden />
       <div className="sky-grain" aria-hidden />
+
+      {onBack && (
+        <button onClick={onBack}
+          style={{ position: 'absolute', top: 22, left: 24, zIndex: 5, background: 'transparent',
+            border: '1px solid rgba(255,255,255,.16)', color: C.bone, borderRadius: 999, padding: '8px 16px',
+            fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: "'Hanken Grotesk', system-ui, sans-serif" }}>
+          ← Начало
+        </button>
+      )}
 
       <div className="sky-shell">
         {/* ── LEFT · brand panel ───────────────────────────────────────────── */}
