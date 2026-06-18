@@ -4,14 +4,27 @@
 // и заменя файла само ако новият е реално по-малък. Запазва формата (ext остава
 // валиден); jpeg по подразбиране (с mozjpeg).
 
-const sharp = require('sharp');
 const fs = require('fs');
 const path = require('path');
 
 const RASTER = new Set(['.jpg', '.jpeg', '.png', '.webp']);
 
+// Лениво зареждане на sharp — НЕ при require (за да не може повредена native
+// зависимост да събори целия сървър при старт). Кешира резултата.
+let _sharp;
+let _sharpTried = false;
+function getSharp() {
+  if (_sharpTried) return _sharp;
+  _sharpTried = true;
+  try { _sharp = require('sharp'); }
+  catch (e) { console.warn('[imageOptimize] sharp недостъпен — компресията е изключена:', e.message); _sharp = null; }
+  return _sharp;
+}
+
 async function optimizeImage(filepath, { maxDim = 1600, quality = 80 } = {}) {
   try {
+    const sharp = getSharp();
+    if (!sharp) return null;
     if (!fs.existsSync(filepath)) return null;
     const ext = path.extname(filepath).toLowerCase();
     if (!RASTER.has(ext)) return null;
