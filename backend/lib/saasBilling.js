@@ -2,14 +2,13 @@
 // Различно от tenant-rent плащанията (payments.js): тук ПЛАТФОРМАТА таксува
 // организациите-клиенти. Org 1 (Sky Capital) е exempt завинаги.
 const { getStripe } = require('../routes/payments');
+const { PLANS, canonicalPlan } = require('./plans'); // единен източник: basic/pro/agency
 
-// Планове: цена (цента EUR/месец) + лимит имоти (null = без лимит)
-const PLANS = {
-  starter:  { label: 'Starter',  amount: 700,  limit: 5 },
-  pro:      { label: 'Pro',      amount: 2900, limit: 30 },
-  business: { label: 'Business', amount: 7900, limit: null },
-};
-const LOOKUP = (plan) => `skyrent_${plan}_monthly`;
+// Само платените планове (amount>0) имат Stripe price. basic = free.
+const PAID_PLANS = Object.fromEntries(Object.entries(PLANS).filter(([, v]) => v.amount > 0));
+// _v2: нова ценова структура (pro €24 / agency €49). Старите skyrent_*_monthly
+// цени остават за легаси абонаменти, но новите checkout-и ползват свежите.
+const LOOKUP = (plan) => `skyrent_${plan}_v2_monthly`;
 
 let priceCache = null; // plan → stripe price id
 
@@ -18,14 +17,14 @@ async function ensurePlans() {
   const s = getStripe();
   if (!s) throw Object.assign(new Error('Stripe не е конфигуриран'), { status: 503 });
   if (priceCache) return priceCache;
-  const keys = Object.keys(PLANS).map(LOOKUP);
+  const keys = Object.keys(PAID_PLANS).map(LOOKUP);
   const existing = await s.prices.list({ lookup_keys: keys, limit: 10 });
   const map = {};
   for (const p of existing.data) {
-    const plan = Object.keys(PLANS).find(k => LOOKUP(k) === p.lookup_key);
+    const plan = Object.keys(PAID_PLANS).find(k => LOOKUP(k) === p.lookup_key);
     if (plan) map[plan] = p.id;
   }
-  for (const [plan, cfg] of Object.entries(PLANS)) {
+  for (const [plan, cfg] of Object.entries(PAID_PLANS)) {
     if (map[plan]) continue;
     const product = await s.products.create({ name: `Skyrent ${cfg.label}` });
     const price = await s.prices.create({
@@ -51,7 +50,8 @@ async function ensureCustomer(controlDb, org, email) {
 }
 
 async function createCheckout(controlDb, org, plan, { success_url, cancel_url, email }) {
-  if (!PLANS[plan]) throw Object.assign(new Error('Невалиден план'), { status: 400 });
+  if (plan === 'basic') throw Object.assign(new Error('Basic е безплатен — няма нужда от плащане'), { status: 400 });
+  if (!PAID_PLANS[plan]) throw Object.assign(new Error('Невалиден план'), { status: 400 });
   const s = getStripe();
   const prices = await ensurePlans();
   const customer = await ensureCustomer(controlDb, org, email);

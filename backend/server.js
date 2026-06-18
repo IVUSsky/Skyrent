@@ -89,7 +89,7 @@ async function main() {
   // Изтекъл trial / suspended абонамент → 402 за всичко освен billing+auth,
   // за да може клиентът да си избере/поднови план. Org 1 + superadmin exempt.
   // + лимит имоти по план (Starter 5 / Pro 30 / Business ∞) при добавяне.
-  const { PLANS: SAAS_PLANS } = require('./lib/saasBilling');
+  const { planConfig } = require('./lib/plans');
   const BILLING_ALLOWED = ['/api/billing', '/api/auth'];
   app.use('/api', (req, res, next) => {
     const orgId = req.user?.organization_id;
@@ -105,9 +105,9 @@ async function main() {
     if ((org.plan || 'trial') === 'trial' && org.trial_ends_at && org.trial_ends_at < today) {
       return res.status(402).json({ error: 'Пробният период изтече — избери план, за да продължиш', billing: true });
     }
-    // лимит имоти по план
+    // лимит имоти по план (canonical: basic 5 / pro,agency ∞)
     if (req.method === 'POST' && url === '/api/properties') {
-      const limit = SAAS_PLANS[org.plan]?.limit;
+      const limit = planConfig(org.plan).properties;
       if (limit != null) {
         const n = db.prepare('SELECT COUNT(*) AS n FROM properties').get().n;
         if (n >= limit) return res.status(402).json({ error: `Планът ${org.plan} позволява до ${limit} имота — надгради за повече`, billing: true });
