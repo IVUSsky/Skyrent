@@ -478,6 +478,21 @@ module.exports = function(db) {
     res.json(rows);
   });
 
+  // Публикуване в каталога (toggle + описание)
+  router.patch('/:id/publish', (req, res) => {
+    try {
+      const cur = db.prepare('SELECT id FROM properties WHERE id=?').get(req.params.id);
+      if (!cur) return res.status(404).json({ error: 'Not found' });
+      const published = req.body.published ? 1 : 0;
+      if (req.body.listing_desc !== undefined) {
+        db.prepare('UPDATE properties SET published=?, listing_desc=? WHERE id=?').run(published, req.body.listing_desc, req.params.id);
+      } else {
+        db.prepare('UPDATE properties SET published=? WHERE id=?').run(published, req.params.id);
+      }
+      res.json({ ok: true, published });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
   router.post('/:id/photos', uploadPhoto.array('photos', 20), orgContext, async (req, res) => {
     if (!req.files || req.files.length === 0) return res.status(400).json({ error: 'Няма файлове' });
     // Компресирай/resize преди запис — спестява място (телефонни снимки ~2.5MB→~0.3MB)
