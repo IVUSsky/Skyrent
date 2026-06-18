@@ -3,6 +3,7 @@ const { orgContext } = require('../db/db');
 const multer  = require('multer');
 const path    = require('path');
 const fs      = require('fs');
+const { optimizeMany } = require('../lib/imageOptimize');
 
 const DATA_DIR   = process.env.DATA_DIR || path.join(__dirname, '../data');
 const PHOTOS_DIR = path.join(DATA_DIR, 'property_photos');
@@ -477,8 +478,10 @@ module.exports = function(db) {
     res.json(rows);
   });
 
-  router.post('/:id/photos', uploadPhoto.array('photos', 20), orgContext, (req, res) => {
+  router.post('/:id/photos', uploadPhoto.array('photos', 20), orgContext, async (req, res) => {
     if (!req.files || req.files.length === 0) return res.status(400).json({ error: 'Няма файлове' });
+    // Компресирай/resize преди запис — спестява място (телефонни снимки ~2.5MB→~0.3MB)
+    await optimizeMany(req.files.map(f => f.path));
     const inserted = req.files.map(f => {
       const caption = req.body.caption || '';
       const r = db.prepare('INSERT INTO property_photos (property_id, filename, caption) VALUES (?,?,?)').run(req.params.id, f.filename, caption);
