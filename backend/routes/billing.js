@@ -2,7 +2,7 @@
 // собствения си абонамент. Org 1 = платформен акаунт (без абонамент).
 const express = require('express');
 const { PLANS, createCheckout, createPortal } = require('../lib/saasBilling');
-const { planCapabilities, ALL_CAPABILITIES } = require('../lib/plans');
+const { planCapabilities, ALL_CAPABILITIES, planConfig } = require('../lib/plans');
 
 module.exports = function (db, controlDb) {
   const router = express.Router();
@@ -24,7 +24,6 @@ module.exports = function (db, controlDb) {
         ? Math.max(0, Math.ceil((new Date(org.trial_ends_at) - new Date(today)) / 86400000))
         : null;
       const propCount = db.prepare('SELECT COUNT(*) AS n FROM properties').get().n;
-      const planCfg = PLANS[org.plan] || null;
       res.json({
         platform,
         plan: org.plan, status: org.status,
@@ -32,8 +31,8 @@ module.exports = function (db, controlDb) {
         expired: !platform && org.plan === 'trial' && trialDaysLeft === 0,
         suspended: org.status === 'suspended',
         property_count: propCount,
-        property_limit: planCfg ? planCfg.limit : null,
-        plans: Object.fromEntries(Object.entries(PLANS).map(([k, v]) => [k, { label: v.label, eur: v.amount / 100, limit: v.limit }])),
+        property_limit: planConfig(org.plan).properties,
+        plans: Object.fromEntries(Object.entries(PLANS).map(([k, v]) => [k, { label: v.label, eur: v.amount / 100, limit: v.properties, perUnit: !!v.perUnit }])),
         has_subscription: !!org.stripe_subscription_id,
         // Възможности на текущия план (платформата има всички). Frontend заключва
         // UI по тях; backend enforcement идва в следващ инкремент.

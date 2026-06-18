@@ -2,9 +2,9 @@ import { useEffect, useState } from 'react'
 import { apiFetch } from '../api'
 
 const PLAN_META = {
-  starter:  { icon: '🏠', desc: 'За малки наемодатели' },
-  pro:      { icon: '📊', desc: 'За растящи портфейли' },
-  business: { icon: '🏢', desc: 'За PM фирми с екип' },
+  basic:  { icon: '🏠', desc: 'Основно управление — без автоматизация' },
+  pro:    { icon: '📊', desc: 'Плащания, портал, авто-импорт' },
+  agency: { icon: '🏢', desc: 'За агенции — мулти-собственик, white-label' },
 }
 
 export default function Billing({ API = '' }) {
@@ -76,20 +76,23 @@ export default function Billing({ API = '' }) {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
         {Object.entries(data.plans).map(([key, p]) => {
           const current = data.plan === key
+          const isFree = !p.eur
           return (
             <div key={key} className={`kpi-card flex flex-col ${current ? 'ring-2 ring-amber-400' : ''}`}>
               <div className="kpi-label">{PLAN_META[key]?.icon} {p.label}</div>
-              <div className="kpi-value">{p.eur}€<span className="text-sm text-gray-400 font-normal"> /мес</span></div>
+              <div className="kpi-value">
+                {isFree ? 'Безплатно' : <>{p.perUnit ? 'от ' : ''}{p.eur}€<span className="text-sm text-gray-400 font-normal"> /мес</span></>}
+              </div>
               <div className="kpi-sub mb-3">
                 {p.limit ? `до ${p.limit} имота` : 'неограничени имоти'} · {PLAN_META[key]?.desc}
               </div>
               <button
                 onClick={() => checkout(key)}
-                disabled={busy !== null || current}
-                className={`mt-auto px-3 py-2 rounded-lg text-sm font-medium ${current
+                disabled={busy !== null || current || isFree}
+                className={`mt-auto px-3 py-2 rounded-lg text-sm font-medium ${current || isFree
                   ? 'bg-gray-100 text-gray-400 cursor-default'
                   : 'bg-amber-600 text-white hover:bg-amber-700'}`}>
-                {current ? 'Текущ план' : busy === key ? 'Пренасочване…' : 'Избери'}
+                {current ? 'Текущ план' : isFree ? 'Безплатен' : busy === key ? 'Пренасочване…' : 'Избери'}
               </button>
             </div>
           )
