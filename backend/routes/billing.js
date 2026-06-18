@@ -2,6 +2,7 @@
 // собствения си абонамент. Org 1 = платформен акаунт (без абонамент).
 const express = require('express');
 const { PLANS, createCheckout, createPortal } = require('../lib/saasBilling');
+const { planCapabilities, ALL_CAPABILITIES } = require('../lib/plans');
 
 module.exports = function (db, controlDb) {
   const router = express.Router();
@@ -34,6 +35,9 @@ module.exports = function (db, controlDb) {
         property_limit: planCfg ? planCfg.limit : null,
         plans: Object.fromEntries(Object.entries(PLANS).map(([k, v]) => [k, { label: v.label, eur: v.amount / 100, limit: v.limit }])),
         has_subscription: !!org.stripe_subscription_id,
+        // Възможности на текущия план (платформата има всички). Frontend заключва
+        // UI по тях; backend enforcement идва в следващ инкремент.
+        capabilities: platform ? ALL_CAPABILITIES : planCapabilities(org.plan),
       });
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
