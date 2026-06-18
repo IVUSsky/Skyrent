@@ -170,12 +170,26 @@ async function main() {
     }
   });
 
+  // Capability gating: гейтва функция по плана на организацията. Org 1 +
+  // superadmin + заявки без контекст (напр. Stripe webhook) са exempt.
+  const { hasCapability } = require('./lib/plans');
+  const requireCapability = (cap) => (req, res, next) => {
+    const orgId = req.user?.organization_id;
+    if (!orgId || orgId === 1 || req.user?.is_superadmin) return next();
+    const org = controlDb.prepare('SELECT plan FROM organizations WHERE id=?').get(orgId);
+    if (org && hasCapability(org.plan, cap)) return next();
+    return res.status(402).json({
+      error: 'Тази функция не е включена в плана ви — надградете, за да я ползвате',
+      billing: true, capability: cap,
+    });
+  };
+
   // Routes
   app.use('/api/properties', require('./routes/properties')(db));
   app.use('/api/loans',      require('./routes/loans')(db));
   app.use('/api/metrics',    require('./routes/metrics')(db));
   app.use('/api/metrics/portfolio', require('./routes/metricsPortfolio')(db));
-  app.use('/api/import',     require('./routes/import')(db));
+  app.use('/api/import',     requireCapability('bank_import'), require('./routes/import')(db));
   app.use('/api/settings',   require('./routes/settings')(db));
   app.use('/api/email',      require('./routes/email')(db));
   app.use('/api/invoices',   require('./routes/invoices')(db));
@@ -191,12 +205,12 @@ async function main() {
   app.use('/api/investments', require('./routes/investments')(db));
   app.use('/api/investments/bulgar', require('./routes/bulgar')(db));
   app.use('/api/personal', require('./routes/personal')(db));
-  app.use('/api/tenant', require('./routes/tenant')(db));
+  app.use('/api/tenant', requireCapability('tenant_portal'), require('./routes/tenant')(db));
   app.use('/api/chat-learning', require('./routes/chatLearning')(db));
   app.use('/api/addons', require('./routes/addons')(db));
   app.use('/api/support', require('./routes/support')(db));
   app.use('/api/notifications', require('./routes/notifications')(db));
-  app.use('/api/internet', require('./routes/internet')(db));
+  app.use('/api/internet', requireCapability('internet'), require('./routes/internet')(db));
   app.use('/api/integrity', require('./routes/integrity')(db));
   app.use('/api/platform', require('./routes/platform')(controlDb, getOrgDb));
   app.use('/api/billing', require('./routes/billing')(db, controlDb));
@@ -204,7 +218,7 @@ async function main() {
 
   // Stripe payments — tenant-facing endpoints mounted under /api/tenant (auth + tenant guard inside)
   const { tenantPaymentsRouter, webhookHandler } = require('./routes/payments');
-  app.use('/api/tenant', tenantPaymentsRouter(db));
+  app.use('/api/tenant', requireCapability('tenant_portal'), tenantPaymentsRouter(db));
   // Wire up the pre-registered webhook handler (was placeholder before DB init)
   // Webhook-ът идва от Stripe БЕЗ auth → няма ALS контекст → bound org-1 handle.
   // (Stripe billing е само за org 1 в Phase 1; per-org Stripe = Phase 3.)
