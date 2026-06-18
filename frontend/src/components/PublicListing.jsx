@@ -22,7 +22,14 @@ export default function PublicListing({ param, API = '' }) {
     if (!org || !pid) { setErr(true); return }
     fetch(`${API}/api/public/listings/${org}/${pid}`)
       .then(r => r.ok ? r.json() : Promise.reject())
-      .then(setData).catch(() => setErr(true))
+      .then(d => {
+        setData(d)
+        const t = (PT_LABEL[d.тип] || d.тип || 'Имот')
+        document.title = `${t}${d.район ? ' · ' + d.район : ''} — ${Number(d.наем || 0)}€/мес | Skyrent`
+        const md = document.querySelector('meta[name="description"]')
+        if (md) md.setAttribute('content', (d.desc || `${t} под наем${d.район ? ' в ' + d.район : ''} — ${Number(d.наем || 0)}€/месец.`).slice(0, 160))
+      })
+      .catch(() => setErr(true))
   }, [org, pid])
 
   const submit = (e) => {
@@ -51,6 +58,7 @@ export default function PublicListing({ param, API = '' }) {
 
   return (
     <div style={S.wrap}>
+      <a href="/imoti" style={{ ...S.foot, marginTop: 0, marginBottom: 14, textDecoration: 'none', color: '#6b7280' }}>← Всички обяви</a>
       <div style={S.shell}>
         {/* Gallery */}
         <div style={S.gallery}>

@@ -2,6 +2,7 @@ import React, { useState, useEffect, lazy, Suspense } from 'react'
 import Login from './components/Login'
 import LandingPage from './components/LandingPage'
 import PublicListing from './components/PublicListing'
+import Catalog from './components/Catalog'
 import NotificationBell from './components/NotificationBell'
 import { ThemeProvider } from './components/ThemeProvider'
 import ThemePicker from './components/ThemePicker'
@@ -221,7 +222,12 @@ export default function App() {
     setMustChangePwd(false)
   }
 
-  // Публична обява (?listing=<org>-<id>) — достъпна без login, преди всичко друго
+  // Публичен каталог/обяви — достъпни без login, преди всичко друго.
+  // /imoti → каталог; /obiava/<org>-<id> → обява; ?listing= (backward-compat).
+  const pubPath = window.location.pathname
+  if (pubPath === '/imoti' || pubPath.startsWith('/imoti/')) return <Catalog API={API} />
+  const obiava = pubPath.match(/^\/obiava\/([\w-]+)/)
+  if (obiava) return <PublicListing param={obiava[1]} API={API} />
   const listingParam = new URLSearchParams(window.location.search).get('listing')
   if (listingParam) return <PublicListing param={listingParam} API={API} />
 

@@ -65,7 +65,7 @@ async function main() {
   app.use('/api/auth', require('./routes/auth')(controlDb, getOrgDb));
 
   // Публичен каталог под наем (БЕЗ auth) — само публикувани имоти
-  app.use('/api/public', require('./routes/public')(getOrgDb));
+  app.use('/api/public', require('./routes/public')(getOrgDb, controlDb));
 
   // Protected routes
   const authMiddleware = require('./middleware/auth');
