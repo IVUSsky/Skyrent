@@ -28,6 +28,9 @@ export default function Portfolio({ API }) {
   const [tableWidth, setTableWidth] = useState(0)
 
   const [photosProp, setPhotosProp] = useState(null)
+  const [pubOn, setPubOn] = useState(false)
+  const [pubDesc, setPubDesc] = useState('')
+  const [pubSaving, setPubSaving] = useState(false)
   const [inventoryProp, setInventoryProp] = useState(null)
   const [utilityProp, setUtilityProp] = useState(null)
   const [knowledgeProp, setKnowledgeProp] = useState(null)
@@ -128,8 +131,21 @@ export default function Portfolio({ API }) {
       .catch(e => { setSaving(false); alert('Грешка: ' + e.message) })
   }
 
+  const savePublish = (next) => {
+    if (!photosProp) return
+    setPubSaving(true)
+    apiFetch(`${API}/api/properties/${photosProp.id}/publish`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ published: next, listing_desc: pubDesc }),
+    }).then(r => r.json()).then(() => { setPubOn(next); setPubSaving(false); load() })
+      .catch(() => setPubSaving(false))
+  }
+  // org id от JWT (за линка към публичната обява)
+  const orgId = (() => { try { return JSON.parse(atob((localStorage.getItem('skyrent_token') || '').split('.')[1])).organization_id || 1 } catch { return 1 } })()
+
   const openPhotos = (prop) => {
     setPhotosProp(prop)
+    setPubOn(!!prop.published); setPubDesc(prop.listing_desc || '')
     apiFetch(`${API}/api/properties/${prop.id}/photos`)
       .then(r => r.json()).then(setPhotos)
   }
@@ -344,6 +360,30 @@ export default function Portfolio({ API }) {
               <button onClick={() => setPhotosProp(null)} className="text-gray-400 hover:text-gray-600 text-2xl leading-none">×</button>
             </div>
             <div className="px-6 py-4 overflow-y-auto flex-1">
+              {/* Публикуване в каталога под наем */}
+              <div className="mb-5 rounded-xl border border-amber-200 bg-amber-50 p-4">
+                <div className="flex items-center justify-between gap-3 flex-wrap">
+                  <div>
+                    <div className="font-semibold text-amber-900">🌐 Публична обява под наем</div>
+                    <div className="text-xs text-amber-800 mt-0.5">Показва имота (цена + снимки) на публичен линк, за да намериш наемател по-бързо.</div>
+                  </div>
+                  <button onClick={() => savePublish(!pubOn)} disabled={pubSaving}
+                    className={`px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50 ${pubOn ? 'bg-amber-600 text-white hover:bg-amber-700' : 'bg-white border border-amber-300 text-amber-800 hover:bg-amber-100'}`}>
+                    {pubSaving ? '...' : pubOn ? '✓ Публикувана — спри' : 'Публикувай'}
+                  </button>
+                </div>
+                <textarea value={pubDesc} onChange={e => setPubDesc(e.target.value)}
+                  onBlur={() => pubOn && savePublish(true)}
+                  placeholder="Кратко описание за обявата (по желание) — напр. обзаведен, до метро, юг..."
+                  className="w-full mt-3 border border-amber-200 rounded-lg px-3 py-2 text-sm bg-white" rows={2} />
+                {pubOn && (
+                  <a href={`/?listing=${orgId}-${photosProp.id}`} target="_blank" rel="noreferrer"
+                    className="inline-block mt-2 text-sm font-medium text-amber-700 underline hover:text-amber-900">
+                    Виж обявата →
+                  </a>
+                )}
+              </div>
+
               {/* Upload zone */}
               <div
                 className="border-2 border-dashed border-blue-300 rounded-xl p-6 text-center mb-5 cursor-pointer hover:border-blue-500 hover:bg-blue-50 transition-colors"

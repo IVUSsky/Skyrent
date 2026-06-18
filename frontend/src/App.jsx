@@ -1,6 +1,7 @@
 import React, { useState, useEffect, lazy, Suspense } from 'react'
 import Login from './components/Login'
 import LandingPage from './components/LandingPage'
+import PublicListing from './components/PublicListing'
 import NotificationBell from './components/NotificationBell'
 import { ThemeProvider } from './components/ThemeProvider'
 import ThemePicker from './components/ThemePicker'
@@ -219,6 +220,10 @@ export default function App() {
     setRole(null)
     setMustChangePwd(false)
   }
+
+  // Публична обява (?listing=<org>-<id>) — достъпна без login, преди всичко друго
+  const listingParam = new URLSearchParams(window.location.search).get('listing')
+  if (listingParam) return <PublicListing param={listingParam} API={API} />
 
   if (!authenticated) {
     return showLogin
