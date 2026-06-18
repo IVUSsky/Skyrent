@@ -377,7 +377,7 @@ export default function Portfolio({ API }) {
                   placeholder="Кратко описание за обявата (по желание) — напр. обзаведен, до метро, юг..."
                   className="w-full mt-3 border border-amber-200 rounded-lg px-3 py-2 text-sm bg-white" rows={2} />
                 {pubOn && (
-                  <a href={`/?listing=${orgId}-${photosProp.id}`} target="_blank" rel="noreferrer"
+                  <a href={`/obiava/${orgId}-${photosProp.id}`} target="_blank" rel="noreferrer"
                     className="inline-block mt-2 text-sm font-medium text-amber-700 underline hover:text-amber-900">
                     Виж обявата →
                   </a>
