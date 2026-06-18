@@ -8,6 +8,7 @@ const nodemailer = require('nodemailer');
 const { ensureTenantUser, sendWelcomeEmail } = require('../lib/tenantOnboarding');
 const { generateRentInvoice, autoInvoiceOnActivateOn } = require('./invoices');
 const { parseRecipients } = require('../lib/email');
+const { optimizeMany } = require('../lib/imageOptimize');
 
 const FONT_REGULAR = path.join(__dirname, '../fonts/arial.ttf');
 const FONT_BOLD    = path.join(__dirname, '../fonts/arialbd.ttf');
@@ -853,6 +854,8 @@ module.exports = function(db) {
       const front = req.files?.front?.[0];
       const back  = req.files?.back?.[0];
       if (!front) return res.status(400).json({ error: 'Качи поне лицевата страна на личната карта' });
+      // Компресирай преди четене за Claude + дългосрочно съхранение
+      await optimizeMany([front.path, back?.path].filter(Boolean));
 
       let Anthropic;
       try { Anthropic = require('@anthropic-ai/sdk'); }

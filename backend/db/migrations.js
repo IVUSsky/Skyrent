@@ -79,6 +79,17 @@ function runTenantMigrations(db) {
     acked_at TEXT
   )`);
   try { db.exec("ALTER TABLE properties ADD COLUMN rent_channel TEXT DEFAULT 'this'"); console.log('Migration: added properties.rent_channel'); } catch(_) {}
+  // Публичен каталог под наем
+  try { db.exec("ALTER TABLE properties ADD COLUMN published INTEGER DEFAULT 0"); console.log('Migration: added properties.published'); } catch(_) {}
+  try { db.exec("ALTER TABLE properties ADD COLUMN listing_desc TEXT"); console.log('Migration: added properties.listing_desc'); } catch(_) {}
+  // Запитвания от публичния каталог (lead-ове за наемодателя)
+  try { db.exec(`CREATE TABLE IF NOT EXISTS listing_inquiries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    property_id INTEGER,
+    name TEXT, email TEXT, phone TEXT, message TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    handled INTEGER DEFAULT 0
+  )`); console.log('listing_inquiries table ready'); } catch(_) {}
   console.log('integrity tables ready');
 
   // Default lifecycle_stage from emoji status (idempotent — only if NULL).

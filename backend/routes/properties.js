@@ -3,6 +3,7 @@ const { orgContext } = require('../db/db');
 const multer  = require('multer');
 const path    = require('path');
 const fs      = require('fs');
+const { optimizeMany } = require('../lib/imageOptimize');
 
 const DATA_DIR   = process.env.DATA_DIR || path.join(__dirname, '../data');
 const PHOTOS_DIR = path.join(DATA_DIR, 'property_photos');
@@ -477,8 +478,25 @@ module.exports = function(db) {
     res.json(rows);
   });
 
-  router.post('/:id/photos', uploadPhoto.array('photos', 20), orgContext, (req, res) => {
+  // Публикуване в каталога (toggle + описание)
+  router.patch('/:id/publish', (req, res) => {
+    try {
+      const cur = db.prepare('SELECT id FROM properties WHERE id=?').get(req.params.id);
+      if (!cur) return res.status(404).json({ error: 'Not found' });
+      const published = req.body.published ? 1 : 0;
+      if (req.body.listing_desc !== undefined) {
+        db.prepare('UPDATE properties SET published=?, listing_desc=? WHERE id=?').run(published, req.body.listing_desc, req.params.id);
+      } else {
+        db.prepare('UPDATE properties SET published=? WHERE id=?').run(published, req.params.id);
+      }
+      res.json({ ok: true, published });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  router.post('/:id/photos', uploadPhoto.array('photos', 20), orgContext, async (req, res) => {
     if (!req.files || req.files.length === 0) return res.status(400).json({ error: 'Няма файлове' });
+    // Компресирай/resize преди запис — спестява място (телефонни снимки ~2.5MB→~0.3MB)
+    await optimizeMany(req.files.map(f => f.path));
     const inserted = req.files.map(f => {
       const caption = req.body.caption || '';
       const r = db.prepare('INSERT INTO property_photos (property_id, filename, caption) VALUES (?,?,?)').run(req.params.id, f.filename, caption);
