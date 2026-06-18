@@ -9,9 +9,9 @@ export const ALL_TABS = [
   { id: 'portfolio', label: '🏢 Имоти',       roles: ['admin'],            tier: 'standard' },
   { id: 'list',      label: 'Таблица',        roles: ['admin'],            tier: 'standard' },
   { id: 'addons',    label: '🛍️ Услуги',      roles: ['admin'],            tier: 'standard' },
-  { id: 'internet',  label: '🌐 Интернет',    roles: ['admin'],            tier: 'standard' },
+  { id: 'internet',  label: '🌐 Интернет',    roles: ['admin'],            tier: 'standard', capability: 'internet' },
   { id: 'support',   label: '🛟 Поддръжка',   roles: ['admin'],            tier: 'standard' },
-  { id: 'import',    label: '📥 Банка',       roles: ['admin'],            tier: 'standard' },
+  { id: 'import',    label: '📥 Банка',       roles: ['admin'],            tier: 'standard', capability: 'bank_import' },
   { id: 'investor',  label: '📊 Анализ',      roles: ['admin'],            tier: 'advanced' },
   { id: 'history',   label: '📈 История',     roles: ['admin'],            tier: 'advanced' },
   { id: 'loans',     label: 'Кредити',        roles: ['admin'],            tier: 'advanced' },
@@ -38,4 +38,11 @@ export function planAllowsTier(plan, platform, tier) {
   if (platform) return true
   if (tier !== 'advanced') return true
   return plan !== 'starter'
+}
+
+// Capability-гейтинг: таб с `capability` се показва само ако планът го включва.
+// platform (org 1) винаги; ако caps още не са заредени (null) — не крий (без мигане).
+export function planAllowsCapability(capabilities, platform, tab) {
+  if (platform || !tab.capability || capabilities == null) return true
+  return capabilities.includes(tab.capability)
 }

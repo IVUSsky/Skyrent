@@ -4,7 +4,7 @@ import NotificationBell from './components/NotificationBell'
 import { ThemeProvider } from './components/ThemeProvider'
 import ThemePicker from './components/ThemePicker'
 import ErrorBoundary from './components/ErrorBoundary'
-import { ALL_TABS, ORG1_ONLY_TABS, SIMPLE_TIERS, planAllowsTier } from './menuTabs'
+import { ALL_TABS, ORG1_ONLY_TABS, SIMPLE_TIERS, planAllowsTier, planAllowsCapability } from './menuTabs'
 import { apiFetch } from './api'
 
 // Lazy-loaded tabs — намалява initial bundle (само избраното се сваля)
@@ -129,6 +129,7 @@ export default function App() {
   const [uiMode, setUiMode]               = useState(getInitialUiMode)
   const [orgPlan, setOrgPlan]             = useState(null)   // план на org-а (за gating)
   const [orgPlatform, setOrgPlatform]     = useState(false)  // org 1 → без gating
+  const [orgCaps, setOrgCaps]             = useState(null)   // възможности на плана (capability gating)
   const [hiddenMenus, setHiddenMenus]     = useState([])     // собственик-скрити менюта (settings.menu_hidden)
   const toggleUiMode = () => setUiMode(m => {
     const next = m === 'simple' ? 'advanced' : 'simple'
@@ -158,7 +159,7 @@ export default function App() {
       .catch(() => {})
     // план на org-а → план-гейтинг на менютата
     apiFetch(`${API}/api/billing`).then(r => r.json())
-      .then(b => { setOrgPlan(b?.plan || null); setOrgPlatform(!!b?.platform) })
+      .then(b => { setOrgPlan(b?.plan || null); setOrgPlatform(!!b?.platform); setOrgCaps(Array.isArray(b?.capabilities) ? b.capabilities : null) })
       .catch(() => {})
   }, [authenticated, role])
 
@@ -237,6 +238,7 @@ export default function App() {
     ...ALL_TABS.filter(t => t.roles.includes(role)
       && (orgId === 1 || !ORG1_ONLY_TABS.has(t.id))         // org-1-only интеграции
       && planAllowsTier(orgPlan, orgPlatform, t.tier)        // план-гейтинг (starter без advanced)
+      && planAllowsCapability(orgCaps, orgPlatform, t)        // capability-гейтинг (план без функцията)
       && (t.tier === 'system' || !hiddenMenus.includes(t.id)) // собственик-скрити (без системните)
       && (uiMode === 'advanced' || SIMPLE_TIERS.has(t.tier))), // Лесен/Разширен
     ...(isSuper ? [{ id: 'platform', label: '🛸 Платформа', roles: ['admin'], tier: 'system' }] : []),
