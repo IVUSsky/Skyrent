@@ -58,4 +58,7 @@ async function optimizeMany(filepaths, opts) {
   for (const fp of filepaths) { try { await optimizeImage(fp, opts); } catch (_) {} }
 }
 
-module.exports = { optimizeImage, optimizeMany };
+// Дали sharp е достъпен (за health диагностика).
+function sharpAvailable() { return !!getSharp(); }
+
+module.exports = { optimizeImage, optimizeMany, sharpAvailable };

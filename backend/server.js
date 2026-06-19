@@ -76,7 +76,10 @@ async function main() {
   // Health (public, lightweight) — за keep-alive pinger (UptimeRobot) който държи
   // Railway контейнера буден и предотвратява 20-30s cold-start след престой.
   // НЕ докосва базата → нулева цена.
-  app.get('/api/health', (req, res) => res.json({ ok: true, ts: Date.now() }));
+  app.get('/api/health', (req, res) => {
+    let sharp = false; try { sharp = require('./lib/imageOptimize').sharpAvailable(); } catch (_) {}
+    res.json({ ok: true, ts: Date.now(), sharp });
+  });
 
   // Auth (public)
   app.use('/api/auth', require('./routes/auth')(controlDb, getOrgDb));

@@ -1,0 +1,6 @@
+# Не копирай host node_modules в образа (native binaries за грешен ОС — напр.
+# Windows sharp/better-sqlite3 → counterfeit на linux build). npm ci ги прави наново.
+node_modules
+npm-debug.log
+.git
+*.log
