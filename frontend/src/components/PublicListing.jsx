@@ -39,9 +39,25 @@ export default function PublicListing({ param, API = '' }) {
       .then(d => {
         setData(d)
         const t = (PT_LABEL[d.тип] || d.тип || 'Имот')
-        document.title = `${t}${d.район ? ' · ' + d.район : ''} — ${Number(d.наем || 0)}€/мес | Skyrent`
-        const md = document.querySelector('meta[name="description"]')
-        if (md) md.setAttribute('content', (d.desc || `${t} под наем${d.район ? ' в ' + d.район : ''} — ${Number(d.наем || 0)}€/месец.`).slice(0, 160))
+        const title = `${t}${d.район ? ' · ' + d.район : ''} — ${Number(d.наем || 0)}€/мес`
+        const desc = (d.desc || `${t} под наем${d.район ? ' в ' + d.район : ''} — ${Number(d.наем || 0)}€/месец.`).slice(0, 180)
+        const base = (API && /^https?:/.test(API)) ? API : window.location.origin
+        const img = (d.photo_ids && d.photo_ids[0]) ? `${base}/api/public/listings/${org}/${pid}/photo/${d.photo_ids[0]}` : ''
+        document.title = `${title} | Skyrent`
+        const setMeta = (key, attr, content) => {
+          if (!content) return
+          let el = document.head.querySelector(`meta[${attr}="${key}"]`)
+          if (!el) { el = document.createElement('meta'); el.setAttribute(attr, key); document.head.appendChild(el) }
+          el.setAttribute('content', content)
+        }
+        setMeta('description', 'name', desc)
+        setMeta('og:title', 'property', title)
+        setMeta('og:description', 'property', desc)
+        setMeta('og:type', 'property', 'website')
+        setMeta('og:image', 'property', img)
+        setMeta('twitter:card', 'name', img ? 'summary_large_image' : 'summary')
+        setMeta('twitter:title', 'name', title)
+        setMeta('twitter:image', 'name', img)
       })
       .catch(() => setErr(true))
   }, [org, pid])

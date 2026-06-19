@@ -57,6 +57,7 @@ export default function Catalog({ API = '' }) {
                       ? <img src={`${API}/api/public/listings/${x.org_id}/${x.id}/photo/${x.photo}`} alt="" style={S.thumb} />
                       : <div style={S.noThumb}>🏠</div>}
                     <div style={S.priceTag}>{fmt(x.наем)} €</div>
+                    {x.video && <div style={S.videoTag}>🎥 видео</div>}
                   </div>
                   <div style={S.cardBody}>
                     <div style={S.cardTitle}>{PT_LABEL[x.тип] || x.тип || 'Имот'}{x.район ? ` · ${x.район}` : ''}</div>
@@ -88,6 +89,7 @@ const S = {
   thumb: { width: '100%', height: '100%', objectFit: 'cover', display: 'block' },
   noThumb: { height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 34, color: '#555' },
   priceTag: { position: 'absolute', bottom: 10, left: 10, background: 'rgba(21,21,30,.85)', color: '#e8c977', fontWeight: 700, fontSize: 15, padding: '5px 12px', borderRadius: 999 },
+  videoTag: { position: 'absolute', top: 10, right: 10, background: 'rgba(21,21,30,.8)', color: '#fff', fontWeight: 600, fontSize: 11, padding: '4px 9px', borderRadius: 999 },
   cardBody: { padding: '14px 16px' },
   cardTitle: { fontWeight: 600, color: '#15151e', fontSize: 15.5, marginBottom: 3 },
   cardMeta: { fontSize: 13, color: '#6b7280' },
