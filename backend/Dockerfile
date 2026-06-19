@@ -1,4 +1,4 @@
-FROM node:18-slim
+FROM node:20-slim
 WORKDIR /app
 # Build toolchain for better-sqlite3 native module (falls back to compile if no prebuild)
 RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ \
