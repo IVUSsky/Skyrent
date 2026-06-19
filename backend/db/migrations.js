@@ -82,6 +82,7 @@ function runTenantMigrations(db) {
   // Публичен каталог под наем
   try { db.exec("ALTER TABLE properties ADD COLUMN published INTEGER DEFAULT 0"); console.log('Migration: added properties.published'); } catch(_) {}
   try { db.exec("ALTER TABLE properties ADD COLUMN listing_desc TEXT"); console.log('Migration: added properties.listing_desc'); } catch(_) {}
+  try { db.exec("ALTER TABLE properties ADD COLUMN listing_video TEXT"); console.log('Migration: added properties.listing_video'); } catch(_) {}
   // Запитвания от публичния каталог (lead-ове за наемодателя)
   try { db.exec(`CREATE TABLE IF NOT EXISTS listing_inquiries (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

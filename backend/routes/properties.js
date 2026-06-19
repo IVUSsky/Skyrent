@@ -504,14 +504,13 @@ module.exports = function(db) {
   // Публикуване в каталога (toggle + описание)
   router.patch('/:id/publish', (req, res) => {
     try {
-      const cur = db.prepare('SELECT id FROM properties WHERE id=?').get(req.params.id);
+      const cur = db.prepare('SELECT id, listing_desc, listing_video FROM properties WHERE id=?').get(req.params.id);
       if (!cur) return res.status(404).json({ error: 'Not found' });
       const published = req.body.published ? 1 : 0;
-      if (req.body.listing_desc !== undefined) {
-        db.prepare('UPDATE properties SET published=?, listing_desc=? WHERE id=?').run(published, req.body.listing_desc, req.params.id);
-      } else {
-        db.prepare('UPDATE properties SET published=? WHERE id=?').run(published, req.params.id);
-      }
+      const desc = req.body.listing_desc !== undefined ? req.body.listing_desc : cur.listing_desc;
+      const video = req.body.listing_video !== undefined ? (req.body.listing_video || null) : cur.listing_video;
+      db.prepare('UPDATE properties SET published=?, listing_desc=?, listing_video=? WHERE id=?')
+        .run(published, desc, video, req.params.id);
       res.json({ ok: true, published });
     } catch (e) { res.status(500).json({ error: e.message }); }
   });

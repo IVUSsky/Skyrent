@@ -77,14 +77,14 @@ module.exports = function (getOrgDb, controlDb) {
   router.get('/listings/:orgId/:id', (req, res) => {
     const db = openOrg(req.params.orgId);
     if (!db) return res.status(404).json({ error: 'Не е намерена' });
-    const p = db.prepare('SELECT id, адрес, район, наем, тип, площ, listing_desc, published, наемател FROM properties WHERE id=?').get(req.params.id);
+    const p = db.prepare('SELECT id, адрес, район, наем, тип, площ, listing_desc, listing_video, published, наемател FROM properties WHERE id=?').get(req.params.id);
     // 404 ако не е публикувана ИЛИ е отдадена (има наемател)
     if (!p || !p.published || (p.наемател && String(p.наемател).trim())) return res.status(404).json({ error: 'Не е намерена или вече е отдадена' });
     const photos = db.prepare('SELECT id FROM property_photos WHERE property_id=? ORDER BY created_at').all(p.id);
     res.json({
       org_id: Number(req.params.orgId),
       id: p.id, адрес: p.адрес, район: p.район, наем: p.наем, тип: p.тип, площ: p.площ,
-      desc: p.listing_desc || '',
+      desc: p.listing_desc || '', video: p.listing_video || '',
       photo_ids: photos.map(x => x.id),
     });
   });

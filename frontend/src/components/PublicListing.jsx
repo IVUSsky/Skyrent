@@ -5,6 +5,20 @@ import React, { useEffect, useState } from 'react'
 
 const PT_LABEL = { '2-стаен': 'Двустаен', '3-стаен': 'Тристаен', '1-стаен': 'Едностаен' }
 
+// Само YouTube/Vimeo → embed URL. Непознат домейн → null (не вграждаме произволни
+// iframe-ове = защита срещу iframe инжекция).
+function videoEmbed(url) {
+  if (!url) return null
+  try {
+    const u = new URL(url)
+    const h = u.hostname.replace(/^www\.|^m\./, '')
+    if (h === 'youtube.com') { const id = u.searchParams.get('v'); if (id) return `https://www.youtube.com/embed/${encodeURIComponent(id)}` }
+    if (h === 'youtu.be') { const id = u.pathname.slice(1); if (id) return `https://www.youtube.com/embed/${encodeURIComponent(id)}` }
+    if (h === 'vimeo.com') { const id = u.pathname.split('/').filter(Boolean)[0]; if (/^\d+$/.test(id)) return `https://player.vimeo.com/video/${id}` }
+  } catch (_) {}
+  return null
+}
+
 export default function PublicListing({ param, API = '' }) {
   const [m, org, pid] = (() => {
     const x = String(param || '').split('-')
@@ -76,6 +90,12 @@ export default function PublicListing({ param, API = '' }) {
               )}
             </>
           ) : <div style={S.noPhoto}>🏠 Без снимки</div>}
+          {videoEmbed(data.video) && (
+            <div style={{ position: 'relative', paddingTop: '56.25%', background: '#000' }}>
+              <iframe src={videoEmbed(data.video)} title="Видео обиколка" allow="fullscreen; encrypted-media; picture-in-picture" allowFullScreen
+                style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', border: 0 }} />
+            </div>
+          )}
         </div>
 
         {/* Details */}
