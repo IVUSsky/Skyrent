@@ -252,6 +252,15 @@ export default function Portfolio({ API }) {
                           className="text-green-500 hover:text-green-700 hover:bg-green-50 p-1 rounded transition-colors"
                           title="Снимки"
                         >📷</button>
+                        {p.published ? (
+                          <a
+                            href={`/obiava/${orgId}-${p.id}`}
+                            target="_blank" rel="noreferrer"
+                            onClick={e => e.stopPropagation()}
+                            className="text-amber-700 hover:text-amber-900 hover:bg-amber-50 p-1 rounded transition-colors"
+                            title="Виж публичната обява"
+                          >🌐</a>
+                        ) : null}
                         <button
                           onClick={() => setInventoryProp(p)}
                           className="text-amber-600 hover:text-amber-800 hover:bg-amber-50 p-1 rounded transition-colors"
