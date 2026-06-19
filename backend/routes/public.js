@@ -30,9 +30,10 @@ module.exports = function (getOrgDb, controlDb) {
         let db;
         try { db = getOrgDb(o.id); } catch { continue; }
         let rows;
-        try { rows = db.prepare('SELECT id, адрес, район, наем, тип, площ, listing_desc FROM properties WHERE published=1').all(); }
+        try { rows = db.prepare('SELECT id, адрес, район, наем, тип, площ, listing_desc, наемател FROM properties WHERE published=1').all(); }
         catch { continue; }
         for (const p of rows) {
+          if (p.наемател && String(p.наемател).trim()) continue; // отдаден → не се показва
           let photo = null;
           try { photo = db.prepare('SELECT id FROM property_photos WHERE property_id=? ORDER BY created_at LIMIT 1').get(p.id)?.id ?? null; } catch {}
           out.push({ org_id: o.id, id: p.id, район: p.район, адрес: p.адрес, наем: p.наем, тип: p.тип, площ: p.площ, desc: p.listing_desc || '', photo });
@@ -52,8 +53,9 @@ module.exports = function (getOrgDb, controlDb) {
   router.get('/listings/:orgId/:id', (req, res) => {
     const db = openOrg(req.params.orgId);
     if (!db) return res.status(404).json({ error: 'Не е намерена' });
-    const p = db.prepare('SELECT id, адрес, район, наем, тип, площ, listing_desc, published FROM properties WHERE id=?').get(req.params.id);
-    if (!p || !p.published) return res.status(404).json({ error: 'Не е намерена' });
+    const p = db.prepare('SELECT id, адрес, район, наем, тип, площ, listing_desc, published, наемател FROM properties WHERE id=?').get(req.params.id);
+    // 404 ако не е публикувана ИЛИ е отдадена (има наемател)
+    if (!p || !p.published || (p.наемател && String(p.наемател).trim())) return res.status(404).json({ error: 'Не е намерена или вече е отдадена' });
     const photos = db.prepare('SELECT id FROM property_photos WHERE property_id=? ORDER BY created_at').all(p.id);
     res.json({
       org_id: Number(req.params.orgId),
