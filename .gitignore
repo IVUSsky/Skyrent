@@ -15,7 +15,16 @@ dist/
 backend/data/contracts/
 backend/data/invoices/
 
-# Untracked one-off scripts/dumps с hardcoded токени и лични данни — НИКОГА в git
-backend/scripts/_*
+# Untracked one-off scripts/dumps с hardcoded токени и лични данни — НИКОГА в git.
+# Игнорираме ЦЯЛАТА scripts/ папка и whitelist-ваме само легитимните tracked
+# скриптове → `git add -A` не може случайно да закачи one-off с admin JWT.
+backend/scripts/*
+!backend/scripts/check_data_quality.js
+!backend/scripts/cleanup_duplicate_currency_tx.js
+!backend/scripts/test-mikrotik.js
+!backend/scripts/test_e2e_multitenancy.js
+!backend/scripts/test_integrity.js
+!backend/scripts/test_multitenancy.js
+!backend/scripts/test_portfolio_metrics.js
 *_token.txt
 backend/scripts/*_backup_*.json

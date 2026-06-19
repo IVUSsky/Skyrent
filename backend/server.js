@@ -368,7 +368,17 @@ async function main() {
   app.use((err, req, res, next) => {
     console.error('[express error]', req.method, req.path, '—', err.message);
     if (res.headersSent) return next(err);
-    res.status(err.status || 500).json({ error: err.message || 'Internal server error' });
+    // multer грешки (качване) → ясно клиентско 400
+    if (err.code === 'LIMIT_FILE_SIZE') return res.status(400).json({ error: 'Файлът е твърде голям' });
+    if (err.code === 'BAD_FILE_TYPE')   return res.status(400).json({ error: err.message });
+    if (typeof err.code === 'string' && err.code.startsWith('LIMIT_')) return res.status(400).json({ error: 'Невалиден файл' });
+    const status = err.status || 500;
+    // 4xx → умишлено валидационно съобщение; 5xx в prod → генерично (без вътрешни
+    // детайли като SQL/пътища). В dev показваме реалното за дебъг.
+    const msg = status < 500
+      ? (err.message || 'Грешка')
+      : (process.env.NODE_ENV === 'production' ? 'Вътрешна грешка' : (err.message || 'Internal server error'));
+    res.status(status).json({ error: msg });
   });
 
   app.listen(PORT, () => console.log(`Backend running on port ${PORT}`));
