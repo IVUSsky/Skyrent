@@ -37,6 +37,11 @@ export default function Portfolio({ API }) {
   const [photos, setPhotos] = useState([])
   const [uploading, setUploading] = useState(false)
   const photoInputRef = React.useRef()
+  const [inquiries, setInquiries] = useState([])
+  const [showInquiries, setShowInquiries] = useState(false)
+
+  const loadInquiries = () => apiFetch(`${API}/api/properties/inquiries`)
+    .then(r => r.json()).then(d => setInquiries(Array.isArray(d) ? d : [])).catch(() => {})
 
   const load = () => {
     setLoading(true)
@@ -46,7 +51,17 @@ export default function Portfolio({ API }) {
       .catch(e => { setError(e.message); setLoading(false) })
   }
 
-  useEffect(() => { load() }, [])
+  useEffect(() => { load(); loadInquiries() }, [])
+
+  const toggleInquiry = (inq) => {
+    apiFetch(`${API}/api/properties/inquiries/${inq.id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ handled: inq.handled ? 0 : 1 }),
+    }).then(() => loadInquiries())
+  }
+  const deleteInquiry = (inq) => {
+    apiFetch(`${API}/api/properties/inquiries/${inq.id}`, { method: 'DELETE' }).then(() => loadInquiries())
+  }
 
   useEffect(() => {
     const el = tableScrollRef.current
@@ -191,6 +206,18 @@ export default function Portfolio({ API }) {
           className="px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-lg transition-colors"
         >
           + Добави имот
+        </button>
+        <button
+          onClick={() => { setShowInquiries(true); loadInquiries() }}
+          className="relative px-4 py-2 text-sm font-medium text-amber-800 bg-amber-50 border border-amber-300 hover:bg-amber-100 rounded-lg transition-colors"
+          title="Запитвания от каталога"
+        >
+          📨 Запитвания
+          {inquiries.filter(i => !i.handled).length > 0 && (
+            <span className="absolute -top-2 -right-2 bg-red-600 text-white text-xs font-bold rounded-full min-w-[20px] h-5 px-1 flex items-center justify-center">
+              {inquiries.filter(i => !i.handled).length}
+            </span>
+          )}
         </button>
         <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-2 text-sm">
           <span className="text-gray-500">Общ месечен наем: </span>
@@ -665,6 +692,48 @@ export default function Portfolio({ API }) {
             </div>
             <div className="p-4">
               <UtilityHistoryChart propertyId={utilityProp.id} showAmounts={true} compact={false} />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Запитвания от каталога */}
+      {showInquiries && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-40 p-4" onClick={() => setShowInquiries(false)}>
+          <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="px-6 py-4 border-b flex justify-between items-center shrink-0">
+              <h3 className="text-lg font-bold text-gray-900">📨 Запитвания от каталога</h3>
+              <button onClick={() => setShowInquiries(false)} className="text-gray-400 hover:text-gray-600 text-2xl leading-none">×</button>
+            </div>
+            <div className="px-6 py-4 overflow-y-auto">
+              {inquiries.length === 0
+                ? <div className="text-center text-gray-400 py-10">Все още няма запитвания. Появяват се, когато някой се свърже от обява в каталога.</div>
+                : <div className="space-y-3">
+                    {inquiries.map(inq => (
+                      <div key={inq.id} className={`rounded-lg border p-3 ${inq.handled ? 'bg-gray-50 border-gray-200 opacity-70' : 'bg-amber-50 border-amber-200'}`}>
+                        <div className="flex justify-between items-start gap-3 flex-wrap">
+                          <div className="min-w-0">
+                            <div className="font-semibold text-gray-900">{inq.name}</div>
+                            <div className="text-sm text-gray-700">
+                              {inq.phone && <a href={`tel:${inq.phone}`} className="text-blue-700 hover:underline mr-3">📞 {inq.phone}</a>}
+                              {inq.email && <a href={`mailto:${inq.email}`} className="text-blue-700 hover:underline">✉️ {inq.email}</a>}
+                            </div>
+                            {inq.message && <div className="text-sm text-gray-600 mt-1">„{inq.message}"</div>}
+                            <div className="text-xs text-gray-400 mt-1">
+                              {inq.property_address || 'имот'} · {(inq.created_at || '').slice(0, 16).replace('T', ' ')}
+                            </div>
+                          </div>
+                          <div className="flex gap-1 shrink-0">
+                            <button onClick={() => toggleInquiry(inq)}
+                              className={`text-xs px-2 py-1 rounded border ${inq.handled ? 'bg-white text-gray-600 border-gray-300' : 'bg-green-600 text-white border-green-600 hover:bg-green-700'}`}>
+                              {inq.handled ? '↩ Върни' : '✓ Обработено'}
+                            </button>
+                            <button onClick={() => deleteInquiry(inq)} className="text-xs px-2 py-1 rounded border border-red-200 bg-red-50 text-red-700 hover:bg-red-100">🗑</button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>}
             </div>
           </div>
         </div>

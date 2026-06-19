@@ -22,6 +22,28 @@ const uploadPhoto = multer({ storage: photoStorage, limits: { fileSize: 10 * 102
 module.exports = function(db) {
   const router = express.Router();
 
+  // ── Запитвания от публичния каталог (lead-ове) ─── ПРЕДИ /:id route-овете ──
+  router.get('/inquiries', (req, res) => {
+    try {
+      const rows = db.prepare(`
+        SELECT i.*, p.адрес AS property_address
+        FROM listing_inquiries i LEFT JOIN properties p ON p.id = i.property_id
+        ORDER BY i.handled ASC, i.created_at DESC
+      `).all();
+      res.json(rows);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+  router.patch('/inquiries/:id', (req, res) => {
+    try {
+      db.prepare('UPDATE listing_inquiries SET handled=? WHERE id=?').run(req.body.handled ? 1 : 0, req.params.id);
+      res.json({ ok: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+  router.delete('/inquiries/:id', (req, res) => {
+    try { db.prepare('DELETE FROM listing_inquiries WHERE id=?').run(req.params.id); res.json({ ok: true }); }
+    catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
   router.get('/', (req, res) => {
     const rows = db.prepare('SELECT * FROM properties ORDER BY id').all();
     res.json(rows);

@@ -5,9 +5,33 @@
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
+const { notifyAdmin } = require('../lib/notify');
 
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '../data');
 const PHOTOS_DIR = path.join(DATA_DIR, 'property_photos');
+
+const esc = (s) => String(s || '').replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
+
+// Имейл до наемодателя при ново запитване (best-effort). Получател: issuer.email
+// от org settings → fallback org admin имейл от control.db.
+async function sendInquiryEmail(db, controlDb, orgId, inq, propAddr) {
+  try {
+    const resendKey = process.env.RESEND_API_KEY;
+    if (!resendKey) return;
+    let to = null;
+    try { const s = db.prepare("SELECT value FROM settings WHERE key='issuer'").get(); if (s) to = JSON.parse(s.value)?.email || null; } catch (_) {}
+    if (!to && controlDb) { try { to = controlDb.prepare("SELECT email FROM users WHERE organization_id=? AND email IS NOT NULL AND email!='' ORDER BY is_superadmin DESC, id ASC LIMIT 1").get(orgId)?.email || null; } catch (_) {} }
+    if (!to) return;
+    const from = process.env.RESEND_FROM_EMAIL || 'info@skycapital.pro';
+    const html = `<p>Ново запитване за обявата <b>${esc(propAddr || 'имот под наем')}</b>:</p>
+      <p><b>${esc(inq.name)}</b><br>${inq.phone ? 'Тел: ' + esc(inq.phone) + '<br>' : ''}${inq.email ? 'Имейл: ' + esc(inq.email) + '<br>' : ''}${inq.message ? 'Съобщение: ' + esc(inq.message) : ''}</p>
+      <p>Виж всички запитвания в Skyrent → таб <b>Имоти → 📨 Запитвания</b>.</p>`;
+    await fetch('https://api.resend.com/emails', {
+      method: 'POST', headers: { Authorization: `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ from: `Skyrent <${from}>`, to: [to], subject: `Ново запитване — ${propAddr || 'обява под наем'}`, html }),
+    });
+  } catch (e) { console.warn('[inquiry email] failed:', e.message); }
+}
 
 module.exports = function (getOrgDb, controlDb) {
   const router = express.Router();
@@ -82,12 +106,26 @@ module.exports = function (getOrgDb, controlDb) {
   router.post('/listings/:orgId/:id/inquiry', (req, res) => {
     const db = openOrg(req.params.orgId);
     if (!db) return res.status(404).json({ error: 'Не е намерена' });
-    const p = db.prepare('SELECT id, published FROM properties WHERE id=?').get(req.params.id);
+    const p = db.prepare('SELECT id, published, адрес FROM properties WHERE id=?').get(req.params.id);
     if (!p || !p.published) return res.status(404).json({ error: 'Не е намерена' });
     const { name, email, phone, message } = req.body || {};
     if (!name || (!email && !phone)) return res.status(400).json({ error: 'Име и контакт (имейл или телефон) са задължителни' });
-    db.prepare('INSERT INTO listing_inquiries (property_id, name, email, phone, message) VALUES (?,?,?,?,?)')
-      .run(p.id, String(name).slice(0, 120), String(email || '').slice(0, 160), String(phone || '').slice(0, 40), String(message || '').slice(0, 1000));
+    const inq = {
+      name: String(name).slice(0, 120), email: String(email || '').slice(0, 160),
+      phone: String(phone || '').slice(0, 40), message: String(message || '').slice(0, 1000),
+    };
+    const r = db.prepare('INSERT INTO listing_inquiries (property_id, name, email, phone, message) VALUES (?,?,?,?,?)')
+      .run(p.id, inq.name, inq.email, inq.phone, inq.message);
+    // Известия за наемодателя (best-effort): in-app 🔔 + имейл
+    try {
+      notifyAdmin(db, {
+        kind: 'listing_inquiry',
+        title: 'Ново запитване за обява под наем',
+        body: `${inq.name}${inq.phone ? ' · ' + inq.phone : ''}${inq.email ? ' · ' + inq.email : ''}${p.адрес ? ' — ' + p.адрес : ''}`,
+        link: 'portfolio', ref_type: 'listing_inquiry', ref_id: r.lastInsertRowid,
+      });
+    } catch (_) {}
+    sendInquiryEmail(db, controlDb, Number(req.params.orgId), inq, p.адрес).catch(() => {});
     res.json({ ok: true });
   });
 
