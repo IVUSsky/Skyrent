@@ -15,6 +15,15 @@ app.use(cors({
   origin: (origin, cb) => cb(null, true) // permissive; tighten via FRONTEND_URL in prod
 }));
 
+// Сигурностни хедъри — nosniff спира браузъра да „надушва" качен файл като
+// HTML/SVG (защита срещу stored XSS през uploads, сервирани inline).
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  next();
+});
+
 // Stripe webhook must be registered BEFORE express.json() — needs raw body
 // for signature verification. The handler itself is mounted later (after DB init).
 let stripeWebhookHandler = null;

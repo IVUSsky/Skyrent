@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
 const { getOrgDb, als } = require('../db/db');
+const JWT_SECRET = require('../lib/jwtSecret'); // fail-closed; без слаб fallback
 
 module.exports = function(req, res, next) {
   // Accept JWT from Authorization header (default) OR ?token= query param
@@ -8,7 +9,7 @@ module.exports = function(req, res, next) {
   if (!token) return res.status(401).json({ error: 'Unauthorized' });
   let payload;
   try {
-    payload = jwt.verify(token, process.env.JWT_SECRET || 'skyrent-secret');
+    payload = jwt.verify(token, JWT_SECRET);
   } catch {
     return res.status(401).json({ error: 'Invalid token' });
   }

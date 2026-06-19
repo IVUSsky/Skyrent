@@ -9,6 +9,7 @@ const { ensureTenantUser, sendWelcomeEmail } = require('../lib/tenantOnboarding'
 const { generateRentInvoice, autoInvoiceOnActivateOn } = require('./invoices');
 const { parseRecipients } = require('../lib/email');
 const { optimizeMany } = require('../lib/imageOptimize');
+const { imagesOnly } = require('../lib/uploadFilter');
 
 const FONT_REGULAR = path.join(__dirname, '../fonts/arial.ttf');
 const FONT_BOLD    = path.join(__dirname, '../fonts/arialbd.ttf');
@@ -35,7 +36,7 @@ const idStorage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, ID_DIR),
   filename: (req, file, cb) => cb(null, `${Date.now()}_${file.fieldname}_${file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_')}`),
 });
-const idUpload = multer({ storage: idStorage, limits: { fileSize: 10 * 1024 * 1024 } });
+const idUpload = multer({ storage: idStorage, limits: { fileSize: 10 * 1024 * 1024 }, fileFilter: imagesOnly });
 
 function fmtDate(d) {
   if (!d) return '..................';
