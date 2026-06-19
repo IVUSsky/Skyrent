@@ -30,6 +30,7 @@ export default function Portfolio({ API }) {
   const [photosProp, setPhotosProp] = useState(null)
   const [pubOn, setPubOn] = useState(false)
   const [pubDesc, setPubDesc] = useState('')
+  const [pubVideo, setPubVideo] = useState('')
   const [pubSaving, setPubSaving] = useState(false)
   const [inventoryProp, setInventoryProp] = useState(null)
   const [utilityProp, setUtilityProp] = useState(null)
@@ -151,7 +152,7 @@ export default function Portfolio({ API }) {
     setPubSaving(true)
     apiFetch(`${API}/api/properties/${photosProp.id}/publish`, {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ published: next, listing_desc: pubDesc }),
+      body: JSON.stringify({ published: next, listing_desc: pubDesc, listing_video: pubVideo }),
     }).then(r => r.json()).then(() => { setPubOn(next); setPubSaving(false); load() })
       .catch(() => setPubSaving(false))
   }
@@ -160,7 +161,7 @@ export default function Portfolio({ API }) {
 
   const openPhotos = (prop) => {
     setPhotosProp(prop)
-    setPubOn(!!prop.published); setPubDesc(prop.listing_desc || '')
+    setPubOn(!!prop.published); setPubDesc(prop.listing_desc || ''); setPubVideo(prop.listing_video || '')
     apiFetch(`${API}/api/properties/${prop.id}/photos`)
       .then(r => r.json()).then(setPhotos)
   }
@@ -412,6 +413,11 @@ export default function Portfolio({ API }) {
                   onBlur={() => pubOn && savePublish(true)}
                   placeholder="Кратко описание за обявата (по желание) — напр. обзаведен, до метро, юг..."
                   className="w-full mt-3 border border-amber-200 rounded-lg px-3 py-2 text-sm bg-white" rows={2} />
+                <input type="url" value={pubVideo} onChange={e => setPubVideo(e.target.value)}
+                  onBlur={() => pubOn && savePublish(true)}
+                  placeholder="🎥 Видео линк (YouTube или Vimeo) — по желание"
+                  className="w-full mt-2 border border-amber-200 rounded-lg px-3 py-2 text-sm bg-white" />
+                <div className="text-[11px] text-amber-700 mt-1">Качи видеото в YouTube/Vimeo (може „unlisted") и постави линка — вгражда се в обявата без да тежи на системата.</div>
                 {/* Винаги видимо правило — за да не се чудят наемодателите */}
                 <div className="text-xs text-amber-700 mt-2">
                   ⚠️ В каталога се показват само <b>свободни</b> имоти. Ако полето „наемател" е попълнено, обявата се скрива автоматично (отдадените не се рекламират).
