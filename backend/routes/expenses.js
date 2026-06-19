@@ -399,7 +399,7 @@ IBAN EXTRACTION RULES - very important:
 module.exports = function(db) {
   const expRouter  = express.Router();
   const cpRouter   = express.Router();
-  const upload     = multer({ storage: makeStorage() });
+  const upload     = multer({ storage: makeStorage(), limits: { fileSize: 20 * 1024 * 1024 } }); // лимит срещу DoS
 
   // ═══ EXPENSES ═══════════════════════════════════════════════
 

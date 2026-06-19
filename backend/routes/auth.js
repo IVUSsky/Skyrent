@@ -5,6 +5,7 @@ const crypto    = require('crypto');
 const rateLimit = require('express-rate-limit');
 const { authenticator } = require('otplib');
 const QRCode    = require('qrcode');
+const JWT_SECRET = require('../lib/jwtSecret'); // fail-closed; без слаб fallback
 
 // 6-digit codes, 30-second window, allow ±1 step (default) for clock drift
 authenticator.options = { window: 1 };
@@ -111,7 +112,7 @@ function requireAuth(req, res, next) {
   const token = req.headers.authorization?.split(' ')[1];
   if (!token) return res.status(401).json({ error: 'Unauthorized' });
   try {
-    req.user = jwt.verify(token, process.env.JWT_SECRET || 'skyrent-secret');
+    req.user = jwt.verify(token, JWT_SECRET);
     next();
   } catch { res.status(401).json({ error: 'Invalid token' }); }
 }
@@ -123,7 +124,6 @@ module.exports = function(controlDb, getOrgDb) {
   const db = controlDb;
   const orgDbOf = (u) => getOrgDb(Number(u?.organization_id) || 1);
   const router = express.Router();
-  const JWT_SECRET = process.env.JWT_SECRET || 'skyrent-secret';
 
   // ── Signup (Phase 2, закрита бета) ───────────────────────────────────
   // Нова организация + owner акаунт + auto-login. Изисква SIGNUP_CODE (env).

@@ -1,14 +1,16 @@
 const jwt = require('jsonwebtoken');
 const { getOrgDb, als } = require('../db/db');
+const JWT_SECRET = require('../lib/jwtSecret'); // fail-closed; без слаб fallback
 
 module.exports = function(req, res, next) {
-  // Accept JWT from Authorization header (default) OR ?token= query param
-  // (needed for <a href> PDF downloads and <img src> photos that can't set headers)
-  const token = req.headers.authorization?.split(' ')[1] || req.query.token;
+  // Accept JWT from Authorization header (default) OR ?token= query param.
+  // Query-токенът се приема САМО за GET (сваляне на PDF/снимки през <a>/<img>) —
+  // така изтекъл URL-токен (логове/history) не може да се ползва за write (POST/PUT/DELETE).
+  const token = req.headers.authorization?.split(' ')[1] || (req.method === 'GET' ? req.query.token : undefined);
   if (!token) return res.status(401).json({ error: 'Unauthorized' });
   let payload;
   try {
-    payload = jwt.verify(token, process.env.JWT_SECRET || 'skyrent-secret');
+    payload = jwt.verify(token, JWT_SECRET);
   } catch {
     return res.status(401).json({ error: 'Invalid token' });
   }

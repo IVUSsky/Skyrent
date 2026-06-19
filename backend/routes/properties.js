@@ -4,6 +4,7 @@ const multer  = require('multer');
 const path    = require('path');
 const fs      = require('fs');
 const { optimizeMany } = require('../lib/imageOptimize');
+const { imagesOnly } = require('../lib/uploadFilter');
 
 const DATA_DIR   = process.env.DATA_DIR || path.join(__dirname, '../data');
 const PHOTOS_DIR = path.join(DATA_DIR, 'property_photos');
@@ -16,7 +17,7 @@ const photoStorage = multer.diskStorage({
     cb(null, `prop_${req.params.id}_${Date.now()}${ext}`);
   },
 });
-const uploadPhoto = multer({ storage: photoStorage, limits: { fileSize: 10 * 1024 * 1024 } });
+const uploadPhoto = multer({ storage: photoStorage, limits: { fileSize: 10 * 1024 * 1024 }, fileFilter: imagesOnly });
 
 module.exports = function(db) {
   const router = express.Router();
