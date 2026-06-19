@@ -376,6 +376,9 @@ export default function Portfolio({ API }) {
                   onBlur={() => pubOn && savePublish(true)}
                   placeholder="Кратко описание за обявата (по желание) — напр. обзаведен, до метро, юг..."
                   className="w-full mt-3 border border-amber-200 rounded-lg px-3 py-2 text-sm bg-white" rows={2} />
+                {pubOn && photosProp['наемател'] && String(photosProp['наемател']).trim() && (
+                  <div className="text-xs text-amber-700 mt-2">ℹ️ Имотът е отдаден (има наемател) — обявата е <b>скрита</b> от каталога, докато се освободи.</div>
+                )}
                 {pubOn && (
                   <a href={`/obiava/${orgId}-${photosProp.id}`} target="_blank" rel="noreferrer"
                     className="inline-block mt-2 text-sm font-medium text-amber-700 underline hover:text-amber-900">
