@@ -13,11 +13,12 @@ const RASTER = new Set(['.jpg', '.jpeg', '.png', '.webp']);
 // зависимост да събори целия сървър при старт). Кешира резултата.
 let _sharp;
 let _sharpTried = false;
+let _sharpError = null;
 function getSharp() {
   if (_sharpTried) return _sharp;
   _sharpTried = true;
   try { _sharp = require('sharp'); }
-  catch (e) { console.warn('[imageOptimize] sharp недостъпен — компресията е изключена:', e.message); _sharp = null; }
+  catch (e) { _sharpError = e.message; console.warn('[imageOptimize] sharp недостъпен — компресията е изключена:', e.message); _sharp = null; }
   return _sharp;
 }
 
@@ -60,5 +61,7 @@ async function optimizeMany(filepaths, opts) {
 
 // Дали sharp е достъпен (за health диагностика).
 function sharpAvailable() { return !!getSharp(); }
+// Грешката при зареждане на sharp (за диагностика на prod build-а).
+function sharpError() { getSharp(); return _sharpError; }
 
-module.exports = { optimizeImage, optimizeMany, sharpAvailable };
+module.exports = { optimizeImage, optimizeMany, sharpAvailable, sharpError };

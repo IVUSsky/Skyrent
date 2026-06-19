@@ -77,8 +77,9 @@ async function main() {
   // Railway контейнера буден и предотвратява 20-30s cold-start след престой.
   // НЕ докосва базата → нулева цена.
   app.get('/api/health', (req, res) => {
-    let sharp = false; try { sharp = require('./lib/imageOptimize').sharpAvailable(); } catch (_) {}
-    res.json({ ok: true, ts: Date.now(), sharp });
+    let sharp = false, sharp_error = null;
+    try { const io = require('./lib/imageOptimize'); sharp = io.sharpAvailable(); if (!sharp) sharp_error = io.sharpError(); } catch (e) { sharp_error = e.message; }
+    res.json({ ok: true, ts: Date.now(), sharp, sharp_error });
   });
 
   // Auth (public)
