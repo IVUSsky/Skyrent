@@ -11,8 +11,16 @@ const allowedOrigins = process.env.FRONTEND_URL
   ? [process.env.FRONTEND_URL]
   : ['http://localhost:5173', 'http://localhost:4173'];
 
+// CORS allowlist — само познати домейни (skycapital.pro, Railway, localhost).
+// Заявки без origin (curl, същия origin, server-to-server) се пропускат.
+// Auth е Bearer токен (не cookie), но ограничаваме като defense-in-depth.
+const CORS_HOSTS = [/(^|\.)skycapital\.pro$/, /\.up\.railway\.app$/, /^localhost$/, /^127\.0\.0\.1$/];
 app.use(cors({
-  origin: (origin, cb) => cb(null, true) // permissive; tighten via FRONTEND_URL in prod
+  origin: (origin, cb) => {
+    if (!origin) return cb(null, true);
+    try { if (CORS_HOSTS.some(re => re.test(new URL(origin).hostname))) return cb(null, true); } catch (_) {}
+    return cb(null, false);
+  },
 }));
 
 // Сигурностни хедъри — nosniff спира браузъра да „надушва" качен файл като
