@@ -12,9 +12,9 @@ export default function Settings({ API }) {
   const [saving, setSaving] = useState(false)
   const [toast, setToast] = useState(null)
   const [error, setError] = useState(null)
-  const [smtp, setSmtp] = useState({ host: '', port: '587', user: '', pass: '', from_name: 'Sky Capital' })
+  const [smtp, setSmtp] = useState({ host: '', port: '587', user: '', pass: '', from_name: '' })
   const [testingSmtp, setTestingSmtp] = useState(false)
-  const [issuer, setIssuer] = useState({ name: '', address: '', eik: '', mol: '', vat_number: '', iban: '', bic: '', place: '', vat_rate: '0' })
+  const [issuer, setIssuer] = useState({ name: '', address: '', eik: '', mol: '', vat_number: '', iban: '', bic: '', place: '', email: '', phone: '', vat_rate: '0' })
   const [kontrolisiEmail, setKontrolisiEmail] = useState('')
   const [kontrolisiAuto, setKontrolisiAuto] = useState(false)
   const [autoInvoiceActivate, setAutoInvoiceActivate] = useState(false)
@@ -422,7 +422,7 @@ export default function Settings({ API }) {
         <p className="text-sm text-gray-500 mb-4">Тези данни се отпечатват на всяка фактура като "Доставчик".</p>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {[
-            { key: 'name',       label: 'Фирма / Име',           placeholder: 'Sky Capital OOD' },
+            { key: 'name',       label: 'Фирма / Име',           placeholder: 'Вашата фирма ООД' },
             { key: 'eik',        label: 'ЕИК / ЕГН',             placeholder: '123456789' },
             { key: 'mol',        label: 'МОЛ',                    placeholder: 'Иво Лазаров' },
             { key: 'address',    label: 'Адрес',                  placeholder: 'София, ул. ...' },
@@ -430,6 +430,8 @@ export default function Settings({ API }) {
             { key: 'vat_number', label: 'ДДС номер (ако има)',    placeholder: 'BG123456789' },
             { key: 'iban',       label: 'IBAN',                   placeholder: 'BG80BNBG96611020345678' },
             { key: 'bic',        label: 'BIC',                    placeholder: 'BNBGBGSF' },
+            { key: 'email',      label: 'Имейл за контакт',       placeholder: 'office@firma.bg' },
+            { key: 'phone',      label: 'Телефон за контакт',     placeholder: '+359 ...' },
           ].map(({ key, label, placeholder }) => (
             <div key={key}>
               <label className="block text-xs font-medium text-gray-600 mb-1">{label}</label>
@@ -571,7 +573,7 @@ export default function Settings({ API }) {
             <label className="block text-xs font-medium text-gray-600 mb-1">Изпращач (показвано име)</label>
             <input type="text" value={smtp.from_name}
               onChange={e => setSmtp(s => ({ ...s, from_name: e.target.value }))}
-              placeholder="Sky Capital"
+              placeholder="Име на подателя"
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
         </div>

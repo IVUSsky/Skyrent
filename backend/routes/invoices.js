@@ -7,6 +7,7 @@ const { getAddonChargesForProperty, markDepositsCharged } = require('../lib/addo
 const { notifyTenant } = require('../lib/notify');
 const { nextInvoiceNumber, peekNextInvoiceNumber, counterKey } = require('../lib/invoiceNumber');
 const { parseRecipients } = require('../lib/email');
+const { getIssuer, issuerComplete, brandEmailHtml } = require('../lib/branding');
 
 const FONT_REGULAR = path.join(__dirname, '../fonts/arial.ttf');
 const FONT_BOLD    = path.join(__dirname, '../fonts/arialbd.ttf');
@@ -14,33 +15,7 @@ const FONT_BOLD    = path.join(__dirname, '../fonts/arialbd.ttf');
 // survive redeploys; fall back to local backend/data for dev.
 const DATA_DIR     = process.env.DATA_DIR || path.join(__dirname, '../data');
 const PDF_DIR      = path.join(DATA_DIR, 'invoices');
-const LOGO_PATH    = path.join(__dirname, '../data/logos/sky_capital_logo.png');
 if (!fs.existsSync(PDF_DIR)) fs.mkdirSync(PDF_DIR, { recursive: true });
-
-function buildEmailHtml(bodyHtml, senderName) {
-  const hasLogo = fs.existsSync(LOGO_PATH);
-  const logoTag = hasLogo
-    ? `<img src="cid:skylogo" alt="Sky Capital" style="height:44px;display:block;">`
-    : `<span style="color:#e8eaf2;font-size:16px;font-weight:bold;letter-spacing:2px;">SKY CAPITAL</span>`;
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"></head>
-<body style="margin:0;padding:0;background:#f0f2f8;font-family:Arial,sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f0f2f8;padding:30px 0;">
-    <tr><td align="center">
-      <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:10px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.10);">
-        <tr><td style="background:#1a1a2e;padding:18px 32px;">${logoTag}</td></tr>
-        <tr><td style="padding:32px 32px 24px;color:#1a1a2e;font-size:14px;line-height:1.7;">${bodyHtml}</td></tr>
-        <tr><td style="background:#e8eaf2;padding:14px 32px;text-align:center;font-size:11px;color:#6b7280;border-top:1px solid #d1d5db;">
-          <strong>${senderName || 'Sky Capital OOD'}</strong> &nbsp;|&nbsp; info@skycapital.pro &nbsp;|&nbsp; +359 888 64 64 20
-        </td></tr>
-      </table>
-    </td></tr>
-  </table>
-</body></html>`;
-}
-function logoAttachment() {
-  if (!fs.existsSync(LOGO_PATH)) return [];
-  return [{ filename: 'logo.png', path: LOGO_PATH, cid: 'skylogo' }];
-}
 
 const BG_MONTHS = ['Януари','Февруари','Март','Април','Май','Юни','Юли','Август','Септември','Октомври','Ноември','Декември'];
 function monthLabel(ym) {
@@ -103,11 +78,6 @@ function amountToWordsBG(amount) {
 }
 
 // Invoice number: 10-digit sequential per year, e.g. 2026000001
-function getIssuer(db) {
-  const row = db.prepare("SELECT value FROM settings WHERE key='issuer'").get();
-  if (!row) return {};
-  try { return JSON.parse(row.value); } catch { return {}; }
-}
 function getSmtp(db) {
   const row = db.prepare("SELECT value FROM settings WHERE key='smtp'").get();
   if (!row) return null;
@@ -150,10 +120,10 @@ async function sendInvoiceToKontrolisi(db, inv) {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      from: `${issuer.name || 'Sky Capital'} <${fromEmail}>`,
+      from: `${issuer.name || 'Skyrent'} <${fromEmail}>`,
       to: recipients,
       subject: `${docLabel} — ${inv.recipient_name || inv.tenant_name || ''}`,
-      html: `<p>${docLabel} от ${issuer.name || 'Sky Capital'} е приложена.</p>`,
+      html: `<p>${docLabel} от ${issuer.name || 'Skyrent'} е приложена.</p>`,
       attachments: [{ filename: `${docLabel.replace(/\s/g, '_')}.pdf`, content: pdfBase64 }],
     }),
   });
@@ -220,7 +190,7 @@ function generatePDF(inv, issuer) {
 
     // Issuer block
     let iy = y;
-    doc.font('B').fontSize(10).fillColor('#111827').text(issuer.name || 'Sky Capital', col1, iy, { width: colW });
+    doc.font('B').fontSize(10).fillColor('#111827').text(issuer.name || 'Skyrent', col1, iy, { width: colW });
     iy += 14;
     doc.font('R').fontSize(9).fillColor('#374151');
     if (issuer.address)    { doc.text(issuer.address,                     col1, iy, { width: colW }); iy += 12; }
@@ -563,6 +533,7 @@ module.exports = function(db) {
     try {
       const { property_id, month, payment_type, notes, tax_event_date, due_date } = req.body;
       if (!property_id || !month) return res.status(400).json({ error: 'property_id и month са задължителни' });
+      if (!issuerComplete(getIssuer(db))) return res.status(400).json({ error: 'Попълнете фирмените данни (Настройки → Данни на издателя) преди да издавате фактури.', code: 'ISSUER_INCOMPLETE' });
       const r = await generateRentInvoice(db, { property_id, month, payment_type, notes, tax_event_date, due_date });
       if (!r.ok) {
         const map = {
@@ -794,7 +765,7 @@ module.exports = function(db) {
       <p>Прилагаме <strong>${docLabel.toLowerCase()}</strong> за наем за
       <strong>${monthLabel(inv.month)}</strong> на стойност <strong>${fmtMoney(inv.total)} €</strong>.</p>
       <p>Моля прегледайте приложения документ.</p>
-      <p style="margin-top:24px;">С уважение,<br><strong>${issuer.name || 'Sky Capital'}</strong></p>`;
+      <p style="margin-top:24px;">С уважение,<br><strong>${issuer.name || 'Skyrent'}</strong></p>`;
 
     try {
       const pdfBase64 = fs.readFileSync(filepath).toString('base64');
@@ -802,10 +773,10 @@ module.exports = function(db) {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          from: `${issuer.name || 'Sky Capital'} <${fromEmail}>`,
+          from: `${issuer.name || 'Skyrent'} <${fromEmail}>`,
           to: recipients,
           subject: `${docLabel} — наем ${monthLabel(inv.month)}`,
-          html: buildEmailHtml(bodyHtml, issuer.name),
+          html: brandEmailHtml(bodyHtml, issuer),
           attachments: [
             { filename: `${docLabel.replace(/\s/g,'_')}.pdf`, content: pdfBase64 },
           ],
