@@ -3,9 +3,18 @@
 // Връща само ПУБЛИКУВАНИ имоти и само безопасни полета.
 
 const express = require('express');
+const rateLimit = require('express-rate-limit');
 const path = require('path');
 const fs = require('fs');
 const { notifyAdmin } = require('../lib/notify');
+const { buildRentalContract } = require('../lib/publicContractPdf');
+
+// Лимит за публичния генератор на договори (PDF е по-тежък ресурс).
+const contractLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, max: 30,
+  message: { error: 'Твърде много заявки. Опитайте по-късно.' },
+  standardHeaders: true, legacyHeaders: false,
+});
 
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '../data');
 const PHOTOS_DIR = path.join(DATA_DIR, 'property_photos');
@@ -127,6 +136,23 @@ module.exports = function (getOrgDb, controlDb) {
     } catch (_) {}
     sendInquiryEmail(db, controlDb, Number(req.params.orgId), inq, p.адрес).catch(() => {});
     res.json({ ok: true });
+  });
+
+  // SEO инструмент: генериране на „Договор за наем" (образец) → PDF. БЕЗ login.
+  router.post('/rental-contract', contractLimiter, async (req, res) => {
+    try {
+      const f = req.body || {};
+      if (!f.landlord_name || !f.tenant_name || !f.property_address) {
+        return res.status(400).json({ error: 'Наемодател, наемател и адрес на имота са задължителни' });
+      }
+      const pdf = await buildRentalContract(f);
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', 'attachment; filename="dogovor-naem.pdf"');
+      res.send(pdf);
+    } catch (e) {
+      console.warn('[rental-contract] failed:', e.message);
+      res.status(500).json({ error: 'Грешка при генериране на документа' });
+    }
   });
 
   return router;
