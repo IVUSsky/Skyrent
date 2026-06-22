@@ -162,6 +162,10 @@ export default function LandingPage({ onEnter }) {
 
       <footer className="lp-foot">
         <span>Skyrent°</span>
+        <span style={{ display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+          <a href="/kalkulator-naem" style={{ color: 'inherit', textDecoration: 'none' }}>Калкулатор данък наем</a>
+          <a href="/imoti" style={{ color: 'inherit', textDecoration: 'none' }}>Имоти под наем</a>
+        </span>
         <span>© {new Date().getFullYear()} · Управление на наемния бизнес</span>
       </footer>
     </div>
