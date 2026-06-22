@@ -49,14 +49,33 @@ export default function Login({ API, onLogin, onBack }) {
   const [code, setCode]         = useState('')
   const [error, setError]       = useState(null)
   const [loading, setLoading]   = useState(false)
-  // signup (закрита бета)
-  const [signupCode, setSignupCode] = useState('')
+  // signup (отворена регистрация)
   const [orgName, setOrgName]       = useState('')
   const [email, setEmail]           = useState('')
   const [fullName, setFullName]     = useState('')
+  const [honeypot, setHoneypot]     = useState('')        // анти-бот скрито поле
+  const [unverifiedEmail, setUnverifiedEmail] = useState(null) // вход блокиран — непотвърден
+  const [notice, setNotice]         = useState(null)      // банер от ?verify= в имейл линка
   const codeRef = useRef(null)
 
   useEffect(() => { if (step === 'totp') setTimeout(() => codeRef.current?.focus(), 50) }, [step])
+
+  // Резултат от клик на верификационния линк (?verify=success|expired|invalid)
+  useEffect(() => {
+    const v = new URLSearchParams(window.location.search).get('verify')
+    if (!v) return
+    if (v === 'success') setNotice({ type: 'ok', msg: '✓ Имейлът е потвърден! Вече можете да влезете.' })
+    else if (v === 'expired') setNotice({ type: 'err', msg: 'Линкът за потвърждение е изтекъл. Влезте и поискайте нов.' })
+    else setNotice({ type: 'err', msg: 'Невалиден линк за потвърждение.' })
+    window.history.replaceState({}, '', window.location.pathname)
+  }, [])
+
+  const resendVerification = (mail) => {
+    fetch(`${API}/api/auth/resend-verification`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: mail }),
+    }).then(() => setNotice({ type: 'ok', msg: 'Изпратихме нов линк за потвърждение — проверете пощата.' })).catch(() => {})
+  }
 
   const submitCreds = (e) => {
     e.preventDefault()
@@ -77,6 +96,9 @@ export default function Login({ API, onLogin, onBack }) {
         if (data.token) {
           localStorage.setItem('skyrent_token', data.token)
           onLogin({ role: data.role, name: data.name, must_change_password: data.must_change_password })
+        } else if (data.code === 'EMAIL_UNVERIFIED') {
+          setUnverifiedEmail(data.email || email || username)
+          setError(data.error || 'Имейлът не е потвърден.')
         } else {
           setError(data.error || 'Грешка при вход')
         }
@@ -114,7 +136,7 @@ export default function Login({ API, onLogin, onBack }) {
     fetch(`${API}/api/auth/signup`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ signup_code: signupCode, org_name: orgName, username, password, email, name: fullName }),
+      body: JSON.stringify({ org_name: orgName, username, password, email, name: fullName, company: honeypot }),
     })
       .then(r => r.json())
       .then(data => {
@@ -122,6 +144,8 @@ export default function Login({ API, onLogin, onBack }) {
         if (data.token) {
           localStorage.setItem('skyrent_token', data.token)
           onLogin({ role: data.role, name: data.name, must_change_password: false })
+        } else if (data.pending_verification) {
+          setStep('verify-sent')
         } else {
           setError(data.error || 'Грешка при регистрация')
         }
@@ -198,6 +222,13 @@ export default function Login({ API, onLogin, onBack }) {
         {/* ── RIGHT · form panel ───────────────────────────────────────────── */}
         <main className="sky-form-wrap">
           <div className="sky-card sky-rise" style={{ animationDelay: '.24s' }}>
+            {notice && (
+              <div style={{ marginBottom: 14, padding: '10px 14px', borderRadius: 8, fontSize: 13,
+                background: notice.type === 'ok' ? 'rgba(122,162,122,.15)' : 'rgba(200,80,80,.15)',
+                color: notice.type === 'ok' ? '#bfe3bf' : '#f0b4b4', border: '1px solid rgba(255,255,255,.1)' }}>
+                {notice.msg}
+              </div>
+            )}
             {step === 'credentials' ? (
               <>
                 <div className="sky-card-head">
@@ -210,6 +241,12 @@ export default function Login({ API, onLogin, onBack }) {
                   <Field id="p" label="Парола" type="password" value={password}
                          onChange={setPassword} />
                   {error && <div className="sky-error">{error}</div>}
+                  {unverifiedEmail && (
+                    <button type="button" className="sky-back"
+                      onClick={() => resendVerification(unverifiedEmail)}>
+                      Изпрати наново линка за потвърждение →
+                    </button>
+                  )}
                   <SubmitBtn loading={loading} idle="Влез" busy="Влизане…" />
                   <button type="button" className="sky-back"
                     onClick={() => { setStep('signup'); setError(null) }}>
@@ -220,13 +257,16 @@ export default function Login({ API, onLogin, onBack }) {
             ) : step === 'signup' ? (
               <>
                 <div className="sky-card-head">
-                  <div className="sky-eyebrow">Закрита бета · с код за достъп</div>
+                  <div className="sky-eyebrow">Безплатен старт · 30 дни пробен период</div>
                   <h2 className="sky-card-title">Регистрация</h2>
                   <p className="sky-card-note">Нова организация — собствено изолирано портфолио.</p>
                 </div>
                 <form onSubmit={submitSignup} className="sky-fields">
-                  <Field id="sc" label="Код за достъп" value={signupCode} onChange={setSignupCode} autoFocus />
-                  <Field id="on" label="Фирма / организация" value={orgName} onChange={setOrgName} />
+                  {/* honeypot — скрито за хора, ботове го попълват → отказваме */}
+                  <input type="text" name="company" value={honeypot} onChange={e => setHoneypot(e.target.value)}
+                    tabIndex={-1} autoComplete="off" aria-hidden="true"
+                    style={{ position: 'absolute', left: '-9999px', width: 1, height: 1, opacity: 0 }} />
+                  <Field id="on" label="Фирма / организация" value={orgName} onChange={setOrgName} autoFocus />
                   <Field id="fn" label="Вашето име" value={fullName} onChange={setFullName} />
                   <Field id="em" label="Имейл" type="email" value={email} onChange={setEmail} />
                   <Field id="su" label="Потребителско име" value={username} onChange={setUsername} />
@@ -235,6 +275,24 @@ export default function Login({ API, onLogin, onBack }) {
                   <SubmitBtn loading={loading} idle="Създай акаунт" busy="Създаване…" />
                   <button type="button" onClick={goBack} className="sky-back">← обратно към вход</button>
                 </form>
+              </>
+            ) : step === 'verify-sent' ? (
+              <>
+                <div className="sky-card-head">
+                  <div className="sky-eyebrow">Почти готово</div>
+                  <h2 className="sky-card-title">Потвърдете имейла</h2>
+                </div>
+                <div className="sky-fields" style={{ textAlign: 'center' }}>
+                  <div style={{ fontSize: 40, margin: '6px 0' }}>📩</div>
+                  <p className="sky-card-note">
+                    Изпратихме линк за активиране на <b>{email}</b>. Кликнете го, за да влезете.
+                    Проверете и папка „Спам".
+                  </p>
+                  <button type="button" className="sky-back" onClick={() => resendVerification(email)}>
+                    Не го получихте? Изпрати наново →
+                  </button>
+                  <button type="button" onClick={goBack} className="sky-back">← към вход</button>
+                </div>
               </>
             ) : (
               <>

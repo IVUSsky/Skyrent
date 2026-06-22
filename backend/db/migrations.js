@@ -851,6 +851,12 @@ function runControlMigrations(db) {
   // Phase 3: Stripe SaaS billing
   try { db.exec("ALTER TABLE organizations ADD COLUMN stripe_customer_id TEXT");     console.log('Migration: added organizations.stripe_customer_id'); }     catch(_) {}
   try { db.exec("ALTER TABLE organizations ADD COLUMN stripe_subscription_id TEXT"); console.log('Migration: added organizations.stripe_subscription_id'); } catch(_) {}
+  // Self-serve регистрация (Phase 2 open): email верификация на нови организации.
+  // DEFAULT 1 → СЪЩЕСТВУВАЩИТЕ orgs остават верифицирани (не се заключват). Само
+  // публичните self-serve signup-и се създават с 0 + verify_token (sha256).
+  try { db.exec("ALTER TABLE organizations ADD COLUMN email_verified INTEGER DEFAULT 1"); console.log('Migration: added organizations.email_verified'); } catch(_) {}
+  try { db.exec("ALTER TABLE organizations ADD COLUMN verify_token TEXT");                console.log('Migration: added organizations.verify_token'); }   catch(_) {}
+  try { db.exec("ALTER TABLE organizations ADD COLUMN verify_expires DATETIME");          console.log('Migration: added organizations.verify_expires'); } catch(_) {}
 
   // Phase 5: платформен команден център — broadcast оферти/новини + leads
   db.exec(`CREATE TABLE IF NOT EXISTS announcements (
