@@ -1,4 +1,5 @@
-import React from 'react'
+import React, { useEffect } from 'react'
+import { setCanonical } from '../lib/seo'
 
 // Позиционираща страница за Skyrent — "Private Wealth Terminal" посока:
 // ink + brass, редакторски serif (Playfair Display), кирилица. Самостоятелна,
@@ -38,6 +39,10 @@ const PLANS = [
 ]
 
 export default function LandingPage({ onEnter }) {
+  useEffect(() => {
+    setCanonical('/')
+    document.title = 'Skyrent — операционна система за наемния бизнес'
+  }, [])
   return (
     <div className="skylp">
       <style>{CSS}</style>
@@ -163,6 +168,7 @@ export default function LandingPage({ onEnter }) {
       <footer className="lp-foot">
         <span>Skyrent°</span>
         <span style={{ display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+          <a href="/dogovor-naem" style={{ color: 'inherit', textDecoration: 'none' }}>Договор за наем</a>
           <a href="/kalkulator-naem" style={{ color: 'inherit', textDecoration: 'none' }}>Калкулатор данък наем</a>
           <a href="/imoti" style={{ color: 'inherit', textDecoration: 'none' }}>Имоти под наем</a>
         </span>

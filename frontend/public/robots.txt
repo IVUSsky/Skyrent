@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://skycapital.pro/sitemap.xml

@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react'
+import { setCanonical } from '../lib/seo'
 
 // Публичен каталог под наем (БЕЗ login) — /imoti. Грид с обяви + филтри.
 // Cross-org: /api/public/catalog събира обявите от всички наемодатели.
@@ -12,7 +13,7 @@ export default function Catalog({ API = '' }) {
   const [type, setType] = useState('')
   const [max, setMax] = useState('')
 
-  useEffect(() => { document.title = 'Имоти под наем | Skyrent' }, [])
+  useEffect(() => { document.title = 'Имоти под наем | Skyrent'; setCanonical('/imoti') }, [])
   useEffect(() => {
     fetch(`${API}/api/public/catalog`).then(r => r.json()).then(d => setAll(Array.isArray(d) ? d : [])).catch(() => setAll([]))
   }, [])

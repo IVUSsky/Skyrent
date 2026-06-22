@@ -4,6 +4,7 @@ import LandingPage from './components/LandingPage'
 import PublicListing from './components/PublicListing'
 import Catalog from './components/Catalog'
 import RentTaxCalculator from './components/RentTaxCalculator'
+import RentalContractGenerator from './components/RentalContractGenerator'
 import NotificationBell from './components/NotificationBell'
 import { ThemeProvider } from './components/ThemeProvider'
 import ThemePicker from './components/ThemePicker'
@@ -235,6 +236,7 @@ export default function App() {
   if (listingParam) return <PublicListing param={listingParam} API={API} />
   // SEO инструменти (публични, без login)
   if (pubPath === '/kalkulator-naem') return <RentTaxCalculator />
+  if (pubPath === '/dogovor-naem') return <RentalContractGenerator API={API} />
 
   if (!authenticated) {
     return showLogin
