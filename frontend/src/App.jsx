@@ -3,6 +3,7 @@ import Login from './components/Login'
 import LandingPage from './components/LandingPage'
 import PublicListing from './components/PublicListing'
 import Catalog from './components/Catalog'
+import RentTaxCalculator from './components/RentTaxCalculator'
 import NotificationBell from './components/NotificationBell'
 import { ThemeProvider } from './components/ThemeProvider'
 import ThemePicker from './components/ThemePicker'
@@ -232,6 +233,8 @@ export default function App() {
   if (obiava) return <PublicListing param={obiava[1]} API={API} />
   const listingParam = new URLSearchParams(window.location.search).get('listing')
   if (listingParam) return <PublicListing param={listingParam} API={API} />
+  // SEO инструменти (публични, без login)
+  if (pubPath === '/kalkulator-naem') return <RentTaxCalculator />
 
   if (!authenticated) {
     return showLogin
