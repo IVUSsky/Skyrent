@@ -10,6 +10,7 @@ const { generateRentInvoice, autoInvoiceOnActivateOn } = require('./invoices');
 const { parseRecipients } = require('../lib/email');
 const { optimizeMany } = require('../lib/imageOptimize');
 const { imagesOnly } = require('../lib/uploadFilter');
+const { getIssuer, issuerComplete } = require('../lib/branding');
 
 const FONT_REGULAR = path.join(__dirname, '../fonts/arial.ttf');
 const FONT_BOLD    = path.join(__dirname, '../fonts/arialbd.ttf');
@@ -57,12 +58,6 @@ function getSmtp(db) {
   const row = db.prepare("SELECT value FROM settings WHERE key='smtp'").get();
   if (!row) return null;
   try { return JSON.parse(row.value); } catch { return null; }
-}
-
-function getIssuer(db) {
-  const row = db.prepare("SELECT value FROM settings WHERE key='issuer'").get();
-  if (!row) return {};
-  try { return JSON.parse(row.value); } catch { return {}; }
 }
 
 // Substitute {{PLACEHOLDER}} in template text

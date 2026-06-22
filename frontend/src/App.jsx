@@ -151,11 +151,13 @@ export default function App() {
   // White-label (Phase 4): бранд от org settings.issuer (име + опц. лого).
   // Org 1 (Sky Capital) пада на вграденото лого; нови организации виждат своето.
   const [brand, setBrand] = useState(null) // { name, logo? }
+  const [issuerIncomplete, setIssuerIncomplete] = useState(false) // фирмен профил непълен → банер
   useEffect(() => {
     if (!authenticated || role === 'tenant') return
     apiFetch(`${API}/api/settings`).then(r => r.json())
       .then(s => {
         if (s?.issuer?.name) setBrand({ name: s.issuer.name, logo: s.issuer.logo || null })
+        setIssuerIncomplete(!(s?.issuer?.name && s?.issuer?.eik))
         // менюта, скрити от собственика (JSON масив от tab id-та)
         try { setHiddenMenus(Array.isArray(s?.menu_hidden) ? s.menu_hidden : JSON.parse(s?.menu_hidden || '[]')) }
         catch { setHiddenMenus([]) }
@@ -351,6 +353,12 @@ export default function App() {
       <AnnouncementBar API={API} />
 
       <main className="max-w-7xl mx-auto px-4 py-6">
+        {issuerIncomplete && validTab !== 'settings' && (
+          <button onClick={() => setActiveTab('settings')}
+            className="w-full mb-4 text-left rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 hover:bg-amber-100 transition">
+            ⚠️ <strong>Попълнете фирмените данни</strong> (Настройки → Данни на издателя) — име и ЕИК са нужни, за да издавате фактури и договори със своята фирма. <span className="underline">Отвори настройки →</span>
+          </button>
+        )}
         <ErrorBoundary resetKey={validTab}>
         <Suspense fallback={<TabFallback/>}>
           {validTab === 'dashboard' && <Dashboard API={API} />}
