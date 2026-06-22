@@ -1,4 +1,5 @@
-import React from 'react'
+import React, { useEffect } from 'react'
+import { setCanonical } from '../lib/seo'
 
 // Позиционираща страница за Skyrent — "Private Wealth Terminal" посока:
 // ink + brass, редакторски serif (Playfair Display), кирилица. Самостоятелна,
@@ -38,6 +39,10 @@ const PLANS = [
 ]
 
 export default function LandingPage({ onEnter }) {
+  useEffect(() => {
+    setCanonical('/')
+    document.title = 'Skyrent — операционна система за наемния бизнес'
+  }, [])
   return (
     <div className="skylp">
       <style>{CSS}</style>

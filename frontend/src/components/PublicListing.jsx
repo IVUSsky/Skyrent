@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react'
+import { setCanonical } from '../lib/seo'
 
 // Публична страница на обява под наем — БЕЗ login. Зарежда се при URL ?listing=<org>-<id>.
 // Лек, премиум вид (brass акцент), снимки + цена + детайли + форма за запитване.
@@ -34,6 +35,7 @@ export default function PublicListing({ param, API = '' }) {
 
   useEffect(() => {
     if (!org || !pid) { setErr(true); return }
+    setCanonical(`/obiava/${org}-${pid}`)
     fetch(`${API}/api/public/listings/${org}/${pid}`)
       .then(r => r.ok ? r.json() : Promise.reject())
       .then(d => {

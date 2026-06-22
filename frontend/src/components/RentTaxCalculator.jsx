@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
+import { setCanonical } from '../lib/seo'
 
 // Публичен SEO инструмент (БЕЗ login) — /kalkulator-naem.
 // Калкулатор за данък върху доход от наем за ФИЗИЧЕСКИ ЛИЦА в България.
@@ -17,6 +18,7 @@ export default function RentTaxCalculator() {
   const [monthly, setMonthly] = useState('')
 
   useEffect(() => {
+    setCanonical('/kalkulator-naem')
     document.title = 'Калкулатор данък наем 2026 — физически лица | Skyrent'
     const setMeta = (name, content) => {
       let el = document.head.querySelector(`meta[name="${name}"]`)

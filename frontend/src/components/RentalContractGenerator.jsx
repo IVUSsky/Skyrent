@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react'
+import { setCanonical } from '../lib/seo'
 
 // Публичен SEO инструмент (БЕЗ login) — /dogovor-naem.
 // Генератор на „Договор за наем" (образец) → PDF от backend. Силен SEO термин
@@ -36,6 +37,7 @@ export default function RentalContractGenerator({ API = '' }) {
   const [error, setError] = useState(null)
 
   useEffect(() => {
+    setCanonical('/dogovor-naem')
     document.title = 'Договор за наем — безплатен образец (PDF) | Skyrent'
     const setMeta = (name, content) => {
       let el = document.head.querySelector(`meta[name="${name}"]`)
