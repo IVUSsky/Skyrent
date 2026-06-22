@@ -155,5 +155,37 @@ module.exports = function (getOrgDb, controlDb) {
     }
   });
 
+  // Динамичен sitemap: маркетинг страници + ВСИЧКИ публикувани обяви (cross-org).
+  // Сервира се от api домейна; с Domain property в GSC (покрива и api., и root)
+  // се подава директно. URL-ите сочат каноничния skycapital.pro.
+  router.get('/sitemap.xml', (req, res) => {
+    const SITE = 'https://skycapital.pro';
+    const esc2 = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;');
+    const urls = [
+      { loc: SITE + '/', freq: 'weekly', pri: '1.0' },
+      { loc: SITE + '/imoti', freq: 'daily', pri: '0.9' },
+      { loc: SITE + '/dogovor-naem', freq: 'monthly', pri: '0.8' },
+      { loc: SITE + '/kalkulator-naem', freq: 'monthly', pri: '0.8' },
+    ];
+    try {
+      const orgs = controlDb.prepare("SELECT id FROM organizations WHERE status != 'suspended'").all();
+      for (const o of orgs) {
+        let odb;
+        try { odb = getOrgDb(o.id); } catch { continue; }
+        let rows;
+        try { rows = odb.prepare('SELECT id, наемател FROM properties WHERE published=1').all(); } catch { continue; }
+        for (const p of rows) {
+          if (p.наемател && String(p.наемател).trim()) continue; // отдаден → не се листва
+          urls.push({ loc: `${SITE}/obiava/${o.id}-${p.id}`, freq: 'weekly', pri: '0.7' });
+        }
+      }
+    } catch (_) {}
+    const body = urls.map(u =>
+      `  <url>\n    <loc>${esc2(u.loc)}</loc>\n    <changefreq>${u.freq}</changefreq>\n    <priority>${u.pri}</priority>\n  </url>`
+    ).join('\n');
+    res.setHeader('Content-Type', 'application/xml');
+    res.send(`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${body}\n</urlset>`);
+  });
+
   return router;
 };
