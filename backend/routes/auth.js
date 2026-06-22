@@ -20,6 +20,50 @@ const loginLimiter = rateLimit({
   skipSuccessfulRequests: true,
 });
 
+// Per-IP signup лимит — по-строг (създава реални ресурси). Брои ВСИЧКИ опити.
+const signupLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 5,
+  message: { error: 'Твърде много опити за регистрация. Опитайте по-късно.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Очевидно еднократни/temp имейл домейни — блокираме за self-serve (спам orgs).
+const DISPOSABLE_DOMAINS = new Set([
+  'mailinator.com', 'guerrillamail.com', '10minutemail.com', 'tempmail.com', 'temp-mail.org',
+  'yopmail.com', 'trashmail.com', 'getnada.com', 'sharklasers.com', 'throwawaymail.com',
+  'maildrop.cc', 'dispostable.com', 'fakeinbox.com', 'mailnesia.com', 'mintemail.com',
+]);
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+const emailLooksValid = (e) => EMAIL_RE.test(String(e || '').trim());
+const isDisposable = (e) => DISPOSABLE_DOMAINS.has(String(e || '').toLowerCase().split('@')[1] || '');
+
+// Верификационен имейл (платформен Skyrent брандинг — org-ът още не е доверен).
+async function sendVerificationEmail(toEmail, name, link) {
+  const apiKey = process.env.RESEND_API_KEY;
+  if (!apiKey || !toEmail) return;
+  const from = process.env.RESEND_FROM_EMAIL || 'info@skycapital.pro';
+  try {
+    await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        from: `Skyrent <${from}>`,
+        to: [toEmail],
+        subject: 'Потвърдете имейла си — Skyrent',
+        html: `<div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto">
+          <h2 style="color:#1a1a2e">Добре дошли в Skyrent${name ? ', ' + name : ''}!</h2>
+          <p>Остава една стъпка — потвърдете имейла си, за да активирате акаунта:</p>
+          <p style="margin:24px 0"><a href="${link}" style="background:#1a1a2e;color:#fff;text-decoration:none;padding:12px 24px;border-radius:8px;font-weight:bold;display:inline-block">Потвърди имейла</a></p>
+          <p style="font-size:13px;color:#6b7280">Или копирайте този линк: ${link}</p>
+          <p style="font-size:12px;color:#9aa0aa;margin-top:18px">Линкът е валиден 24 часа. Ако не сте се регистрирали, игнорирайте този имейл.</p>
+        </div>`,
+      }),
+    });
+  } catch (e) { console.warn('[auth] verification email failed:', e.message); }
+}
+
 function clientIp(req) {
   return (req.headers['x-forwarded-for']?.split(',')[0]?.trim()) || req.ip || req.connection?.remoteAddress || '';
 }
@@ -125,45 +169,107 @@ module.exports = function(controlDb, getOrgDb) {
   const orgDbOf = (u) => getOrgDb(Number(u?.organization_id) || 1);
   const router = express.Router();
 
-  // ── Signup (Phase 2, закрита бета) ───────────────────────────────────
-  // Нова организация + owner акаунт + auto-login. Изисква SIGNUP_CODE (env).
-  // Без env код → 403 (signup изключен). Кодът се сменя/маха само от Railway.
-  router.post('/signup', loginLimiter, async (req, res) => {
+  // ── Signup (Phase 2 — отворена self-serve регистрация) ───────────────
+  // По подразбиране ПУБЛИЧНА с email верификация. Ако е зададен SIGNUP_CODE
+  // (env) → invite-only режим (валиден код → доверен → auto-login, без верифик.).
+  // SIGNUP_DISABLED=1 → напълно изключена. Анти-спам: rate-limit + honeypot +
+  // блок на disposable имейли + email верификация преди първи вход.
+  router.post('/signup', signupLimiter, async (req, res) => {
     try {
-      const { signup_code, org_name, username, password, email, name } = req.body || {};
-      const required = process.env.SIGNUP_CODE;
-      if (!required) return res.status(403).json({ error: 'Регистрацията е затворена в момента' });
-      if (String(signup_code || '') !== required) {
+      const { signup_code, org_name, username, password, email, name, company } = req.body || {};
+      // honeypot — ботове попълват скритото поле 'company'; тихо "успяваме"
+      if (company) return res.status(201).json({ ok: true, pending_verification: true });
+      if (process.env.SIGNUP_DISABLED === '1') return res.status(403).json({ error: 'Регистрацията е временно затворена' });
+
+      const inviteCode = process.env.SIGNUP_CODE;
+      const invited = !!inviteCode && String(signup_code || '') === inviteCode;
+      // Зададен код → invite-only: иска валиден код.
+      if (inviteCode && !invited) {
         logAttempt(db, { username, success: false, ip: clientIp(req), userAgent: req.headers['user-agent'], reason: 'bad_signup_code' });
         return res.status(403).json({ error: 'Невалиден код за достъп' });
       }
+      // Публична регистрация → имейлът е задължителен (нужен за верификация).
+      if (!invited) {
+        if (!emailLooksValid(email)) return res.status(400).json({ error: 'Въведете валиден имейл адрес' });
+        if (isDisposable(email)) return res.status(400).json({ error: 'Моля използвайте постоянен имейл адрес' });
+      }
+
+      let verifyToken = null, verifyExpires = null, tokenRaw = null;
+      if (!invited) {
+        tokenRaw = crypto.randomBytes(32).toString('hex');
+        verifyToken = sha256(tokenRaw);
+        verifyExpires = new Date(Date.now() + 24 * 3600 * 1000).toISOString();
+      }
+
       const { createOrg } = require('../lib/createOrg');
       const r = createOrg(db, getOrgDb, {
         name: org_name, owner_username: username, owner_password: password,
         owner_email: email, owner_name: name,
+        email_verified: invited ? 1 : 0, verify_token: verifyToken, verify_expires: verifyExpires,
       });
-      const token = jwt.sign({ id: r.owner_user_id, username, role: 'admin',
-        organization_id: r.organization_id, is_superadmin: 0 }, JWT_SECRET, { expiresIn: '7d' });
-      logAttempt(db, { user: { id: r.owner_user_id, username }, username, success: true, ip: clientIp(req), userAgent: req.headers['user-agent'] });
-      // welcome email — не блокира при липсващ ключ/грешка
-      if (process.env.RESEND_API_KEY && email) {
-        fetch('https://api.resend.com/emails', {
-          method: 'POST',
-          headers: { 'Authorization': `Bearer ${process.env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            from: `Skyrent <${process.env.RESEND_FROM_EMAIL || 'info@skycapital.pro'}>`,
-            to: [email],
-            subject: 'Добре дошъл в Skyrent 🏠',
-            html: `<h2>Добре дошъл, ${name || username}!</h2>
-              <p>Организацията <b>${org_name}</b> е създадена. Пробен период: 30 дни.</p>
-              <p>Започни с добавяне на първия си имот от таб <b>Портфолио</b>.</p>`,
-          }),
-        }).catch(() => {});
+
+      if (invited) {
+        // Доверен invite → auto-login + welcome (запазено поведение от бетата)
+        const token = jwt.sign({ id: r.owner_user_id, username, role: 'admin',
+          organization_id: r.organization_id, is_superadmin: 0 }, JWT_SECRET, { expiresIn: '7d' });
+        logAttempt(db, { user: { id: r.owner_user_id, username }, username, success: true, ip: clientIp(req), userAgent: req.headers['user-agent'] });
+        if (process.env.RESEND_API_KEY && email) {
+          fetch('https://api.resend.com/emails', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${process.env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              from: `Skyrent <${process.env.RESEND_FROM_EMAIL || 'info@skycapital.pro'}>`,
+              to: [email],
+              subject: 'Добре дошъл в Skyrent 🏠',
+              html: `<h2>Добре дошъл, ${name || username}!</h2>
+                <p>Организацията <b>${org_name}</b> е създадена. Пробен период: 30 дни.</p>
+                <p>Започни с добавяне на първия си имот от таб <b>Портфолио</b>.</p>`,
+            }),
+          }).catch(() => {});
+        }
+        return res.status(201).json({ token, role: 'admin', name: name || username, organization_id: r.organization_id, must_change_password: false });
       }
-      res.status(201).json({ token, role: 'admin', name: name || username, organization_id: r.organization_id, must_change_password: false });
+
+      // Публична регистрация → верификационен имейл, БЕЗ auto-login
+      const link = `https://${req.get('host')}/api/auth/verify-email?token=${tokenRaw}`;
+      sendVerificationEmail(email, name || username, link).catch(() => {});
+      logAttempt(db, { user: { id: r.owner_user_id, username }, username, success: true, ip: clientIp(req), userAgent: req.headers['user-agent'], reason: 'signup_pending_verify' });
+      return res.status(201).json({ ok: true, pending_verification: true, email });
     } catch (e) {
       res.status(e.status || 500).json({ error: e.message });
     }
+  });
+
+  // ── Email верификация (публично, GET за клик от имейла) → активира + редирект
+  router.get('/verify-email', (req, res) => {
+    const front = process.env.FRONTEND_URL || 'https://app.skycapital.pro';
+    const token = String(req.query.token || '');
+    if (!token) return res.redirect(`${front}/?verify=invalid`);
+    const org = db.prepare('SELECT id, verify_expires FROM organizations WHERE verify_token=?').get(sha256(token));
+    if (!org) return res.redirect(`${front}/?verify=invalid`);
+    if (org.verify_expires && new Date(org.verify_expires) < new Date()) return res.redirect(`${front}/?verify=expired`);
+    db.prepare('UPDATE organizations SET email_verified=1, verify_token=NULL, verify_expires=NULL WHERE id=?').run(org.id);
+    return res.redirect(`${front}/?verify=success`);
+  });
+
+  // ── Повторно изпращане на верификация (анти-enumeration: винаги ok)
+  router.post('/resend-verification', signupLimiter, (req, res) => {
+    try {
+      const { email } = req.body || {};
+      if (emailLooksValid(email)) {
+        const u = db.prepare('SELECT id, name, organization_id FROM users WHERE LOWER(email)=LOWER(?)').get(String(email).trim());
+        if (u) {
+          const org = db.prepare('SELECT id, email_verified FROM organizations WHERE id=?').get(u.organization_id);
+          if (org && org.email_verified === 0) {
+            const raw = crypto.randomBytes(32).toString('hex');
+            const exp = new Date(Date.now() + 24 * 3600 * 1000).toISOString();
+            db.prepare('UPDATE organizations SET verify_token=?, verify_expires=? WHERE id=?').run(sha256(raw), exp, org.id);
+            sendVerificationEmail(email, u.name, `https://${req.get('host')}/api/auth/verify-email?token=${raw}`).catch(() => {});
+          }
+        }
+      }
+      res.json({ ok: true });
+    } catch { res.json({ ok: true }); }
   });
 
   // ── Step 1: username + password ──────────────────────────────────────
@@ -180,6 +286,14 @@ module.exports = function(controlDb, getOrgDb) {
     if (!user || !bcrypt.compareSync(password, user.password_hash)) {
       logAttempt(db, { user, username: ident, success: false, ip, userAgent, reason: 'bad_credentials' });
       return res.status(401).json({ error: 'Грешно потребителско име или парола' });
+    }
+
+    // Блокирай вход докато имейлът на организацията не е потвърден (self-serve).
+    // Съществуващите orgs имат email_verified=1 (default) → незасегнати.
+    const vorg = db.prepare('SELECT email_verified FROM organizations WHERE id=?').get(user.organization_id || 1);
+    if (vorg && vorg.email_verified === 0) {
+      logAttempt(db, { user, username: ident, success: false, ip, userAgent, reason: 'email_unverified' });
+      return res.status(403).json({ error: 'Имейлът не е потвърден. Проверете пощата си за линка за активиране.', code: 'EMAIL_UNVERIFIED', email: user.email });
     }
 
     // If 2FA enabled → return a short-lived stage token, don't issue full JWT yet

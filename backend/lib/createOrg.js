@@ -7,7 +7,7 @@ const bcrypt = require('bcryptjs');
  * @returns {{ organization_id, owner_user_id }}
  * @throws Error с .status за HTTP кода (400 при валидация)
  */
-function createOrg(controlDb, getOrgDb, { name, owner_username, owner_password, owner_email, owner_name, plan = 'trial' }) {
+function createOrg(controlDb, getOrgDb, { name, owner_username, owner_password, owner_email, owner_name, plan = 'trial', email_verified = 1, verify_token = null, verify_expires = null }) {
   if (!name || !String(name).trim()) { const e = new Error('Името на организацията е задължително'); e.status = 400; throw e; }
   if (!owner_username || !owner_password) { const e = new Error('owner_username и owner_password са задължителни'); e.status = 400; throw e; }
   if (String(owner_password).length < 8) { const e = new Error('Паролата трябва да е поне 8 знака'); e.status = 400; throw e; }
@@ -16,8 +16,8 @@ function createOrg(controlDb, getOrgDb, { name, owner_username, owner_password, 
   }
 
   const trialEnds = new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString().slice(0, 10);
-  const orgR = controlDb.prepare("INSERT INTO organizations (name, status, plan, trial_ends_at) VALUES (?, 'active', ?, ?)")
-    .run(String(name).trim(), plan, trialEnds);
+  const orgR = controlDb.prepare("INSERT INTO organizations (name, status, plan, trial_ends_at, email_verified, verify_token, verify_expires) VALUES (?, 'active', ?, ?, ?, ?, ?)")
+    .run(String(name).trim(), plan, trialEnds, email_verified ? 1 : 0, verify_token, verify_expires);
   const orgId = Number(orgR.lastInsertRowid);
 
   const orgDb = getOrgDb(orgId); // създава orgs/<id>.db + tenant миграции (празна структура, без seed)
