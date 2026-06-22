@@ -21,7 +21,7 @@ const TABS = [
 ]
 
 export default function TenantApp({ userName, onLogout, mustChangePassword }) {
-  const { lang, t: tr, toggle: toggleLang } = useTenantI18n()
+  const { lang, t: tr, setLang, langs } = useTenantI18n()
   const [tab, setTab] = useState('home')
   const [me, setMe] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -199,11 +199,11 @@ export default function TenantApp({ userName, onLogout, mustChangePassword }) {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={toggleLang}
-              title={lang === 'bg' ? 'Switch to English' : 'Превключи на български'}
-              className="text-xs font-semibold text-slate-300 hover:text-white px-2 py-1 rounded hover:bg-white/10 border border-white/20">
-              {lang === 'bg' ? 'EN' : 'BG'}
-            </button>
+            <select value={lang} onChange={e => setLang(e.target.value)}
+              title="Език / Language / Язык / Мова"
+              className="text-xs font-semibold text-slate-300 bg-transparent hover:text-white px-2 py-1 rounded border border-white/20 focus:outline-none cursor-pointer">
+              {langs.map(l => <option key={l.code} value={l.code} style={{ color: '#0f172a' }}>{l.label}</option>)}
+            </select>
             <NotificationBell
               API={API}
               basePath="/api/tenant/notifications"
