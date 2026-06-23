@@ -38,6 +38,27 @@ const PLANS = [
   { id: 'agency', name: 'Agency', price: '€49', unit: '/мес', note: 'за агенции', desc: 'За екипи и чужди портфейли.', feats: ['Всичко от Pro', 'Мулти-собственик', 'White-label', 'Приоритетна поддръжка'], cta: 'За агенции' },
 ]
 
+// Сравнение функция-по-функция (за да е ясно какво дава плащането).
+const CMP = [
+  { label: 'Брой имоти', basic: 'до 5', pro: 'неогранич.', agency: 'неогранич.' },
+  { label: 'Потребители (екип)', basic: '1', pro: '3', agency: 'неогранич.' },
+  { label: 'Имоти, фактури, договори, разходи, отчети', basic: true, pro: true, agency: true },
+  { label: 'Онлайн плащания (карта + SEPA автоплащане)', basic: false, pro: true, agency: true },
+  { label: 'Tenant портал + AI асистент', basic: false, pro: true, agency: true },
+  { label: 'Банков авто-импорт на извлечения', basic: false, pro: true, agency: true },
+  { label: 'Интернет препродажба', basic: false, pro: true, agency: true },
+  { label: 'Мулти-собственик (чужди портфейли)', basic: false, pro: false, agency: true },
+  { label: 'White-label брандинг', basic: false, pro: false, agency: true },
+  { label: 'Приоритетна поддръжка', basic: false, pro: false, agency: true },
+]
+
+const CMP_OK = '#d8b25a', CMP_NO = '#5b574f', CMP_TXT = '#ece7dc', CMP_LINE = 'rgba(236,231,220,.12)'
+function CmpCell({ v }) {
+  if (v === true) return <span style={{ color: CMP_OK, fontWeight: 800, fontSize: 16 }}>✓</span>
+  if (v === false) return <span style={{ color: CMP_NO, fontSize: 16 }}>–</span>
+  return <span style={{ color: CMP_TXT, fontWeight: 600, fontSize: 12.5 }}>{v}</span>
+}
+
 export default function LandingPage({ onEnter }) {
   useEffect(() => {
     setCanonical('/')
@@ -155,6 +176,33 @@ export default function LandingPage({ onEnter }) {
               <button className={p.featured ? 'lp-brass' : 'lp-ghost'} onClick={onEnter}>{p.cta}</button>
             </div>
           ))}
+        </div>
+
+        {/* Сравнение функция-по-функция — ясно какво дава плащането */}
+        <div style={{ maxWidth: 720, margin: '38px auto 0', overflowX: 'auto' }}>
+          <table style={{ width: '100%', minWidth: 480, borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ borderBottom: `1px solid ${CMP_LINE}` }}>
+                <th style={{ textAlign: 'left', padding: '10px 8px', fontSize: 12, fontWeight: 700, color: '#a6a299' }}>Какво включва</th>
+                <th style={{ padding: '10px 6px', fontSize: 13, fontWeight: 700, color: '#ece7dc' }}>Basic<br /><span style={{ fontSize: 10.5, color: '#a6a299', fontWeight: 600 }}>безплатно</span></th>
+                <th style={{ padding: '10px 6px', fontSize: 13, fontWeight: 800, color: '#e0bd6e' }}>Pro<br /><span style={{ fontSize: 10.5, color: '#a6a299', fontWeight: 600 }}>€24/мес</span></th>
+                <th style={{ padding: '10px 6px', fontSize: 13, fontWeight: 700, color: '#ece7dc' }}>Agency<br /><span style={{ fontSize: 10.5, color: '#a6a299', fontWeight: 600 }}>€49/мес</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              {CMP.map((r, i) => (
+                <tr key={i} style={{ borderBottom: `1px solid ${CMP_LINE}` }}>
+                  <td style={{ textAlign: 'left', padding: '10px 8px', fontSize: 13, color: '#cfc9bd' }}>{r.label}</td>
+                  <td style={{ padding: '10px 6px', textAlign: 'center' }}><CmpCell v={r.basic} /></td>
+                  <td style={{ padding: '10px 6px', textAlign: 'center' }}><CmpCell v={r.pro} /></td>
+                  <td style={{ padding: '10px 6px', textAlign: 'center' }}><CmpCell v={r.agency} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p style={{ textAlign: 'center', fontSize: 12, color: '#a6a299', marginTop: 14 }}>
+            Безплатният план е завинаги — до 5 имота, без карта. Платените отключват автоматизацията (плащания, портал, банков импорт).
+          </p>
         </div>
       </section>
 
