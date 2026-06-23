@@ -1,5 +1,6 @@
 const express = require('express');
 const bcrypt  = require('bcryptjs');
+const { planConfig } = require('../lib/plans');
 
 module.exports = function(db) {
   const router = express.Router();
@@ -19,6 +20,19 @@ module.exports = function(db) {
   router.post('/', adminOnly, (req, res) => {
     const { username, password, role, name, email } = req.body;
     if (!username || !password) return res.status(400).json({ error: 'username и password са задължителни' });
+    // Seat лимит по план (наемателите НЕ се броят — те са self-service портал).
+    // Org 1 (платформата) е освободена. trial = Pro лимити (3).
+    if (db.orgId !== 1 && (role || 'broker') !== 'tenant') {
+      let plan = 'basic';
+      try { plan = db.control.prepare('SELECT plan FROM organizations WHERE id=?').get(db.orgId)?.plan || 'basic'; } catch (_) {}
+      const cfg = planConfig(plan);
+      if (cfg.seats != null) {
+        const used = db.prepare("SELECT COUNT(*) AS c FROM users WHERE role != 'tenant'").get().c;
+        if (used >= cfg.seats) {
+          return res.status(403).json({ error: `Достигнат лимит на потребители за ${cfg.label} (${cfg.seats}). Ъпгрейдни плана за повече места.`, code: 'SEAT_LIMIT' });
+        }
+      }
+    }
     // username е глобално UNIQUE (control.db, всички org-и)
     const existing = db.control.prepare('SELECT id FROM users WHERE username=?').get(username);
     if (existing) return res.status(400).json({ error: 'Потребителят вече съществува' });
