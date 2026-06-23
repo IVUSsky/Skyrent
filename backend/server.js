@@ -216,6 +216,7 @@ async function main() {
   app.use('/api/import',     requireCapability('bank_import'), require('./routes/import')(db));
   app.use('/api/settings',   require('./routes/settings')(db));
   app.use('/api/onboarding', require('./routes/onboarding')(db));
+  app.use('/api/white-label', require('./routes/whiteLabel')(db));
   app.use('/api/email',      require('./routes/email')(db));
   app.use('/api/invoices',   require('./routes/invoices')(db));
   app.use('/api/contracts',  require('./routes/contracts')(db));

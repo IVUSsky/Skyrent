@@ -90,11 +90,13 @@ module.exports = function (getOrgDb, controlDb) {
     // 404 ако не е публикувана ИЛИ е отдадена (има наемател)
     if (!p || !p.published || (p.наемател && String(p.наемател).trim())) return res.status(404).json({ error: 'Не е намерена или вече е отдадена' });
     const photos = db.prepare('SELECT id FROM property_photos WHERE property_id=? ORDER BY created_at').all(p.id);
+    let white_label = false;
+    try { const w = db.prepare("SELECT value FROM settings WHERE key='white_label'").get(); white_label = !!w && (w.value === 'true' || w.value === '"true"'); } catch (_) {}
     res.json({
       org_id: Number(req.params.orgId),
       id: p.id, адрес: p.адрес, район: p.район, наем: p.наем, тип: p.тип, площ: p.площ,
       desc: p.listing_desc || '', video: p.listing_video || '',
-      photo_ids: photos.map(x => x.id),
+      photo_ids: photos.map(x => x.id), white_label,
     });
   });
 
