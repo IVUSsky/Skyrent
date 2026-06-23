@@ -154,7 +154,7 @@ export default function PublicListing({ param, API = '' }) {
           </div>
         </div>
       </div>
-      <div style={S.foot}>Powered by <b style={{ color: '#1a1a2e' }}>Skyrent</b>°</div>
+      {!data.white_label && <div style={S.foot}>Powered by <b style={{ color: '#1a1a2e' }}>Skyrent</b>°</div>}
     </div>
   )
 }

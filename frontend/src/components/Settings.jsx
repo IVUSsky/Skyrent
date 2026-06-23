@@ -29,6 +29,17 @@ export default function Settings({ API }) {
   const [savingUser, setSavingUser] = useState(false)
   const [hiddenMenus, setHiddenMenus] = useState([])
   const [savingMenus, setSavingMenus] = useState(false)
+  const [whiteLabel, setWhiteLabel] = useState({ available: false, enabled: false })
+
+  const toggleWhiteLabel = () => {
+    const next = !whiteLabel.enabled
+    setWhiteLabel(w => ({ ...w, enabled: next }))
+    apiFetch(`${API}/api/white-label`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: next }) })
+      .then(r => r.json()).then(d => {
+        if (d.ok) showToast(next ? 'White-label включен' : 'White-label изключен')
+        else { setWhiteLabel(w => ({ ...w, enabled: !next })); showToast(d.error || 'Грешка', 'error') }
+      }).catch(() => { setWhiteLabel(w => ({ ...w, enabled: !next })); showToast('Грешка', 'error') })
+  }
 
   const showToast = (msg, type = 'success') => {
     setToast({ msg, type })
@@ -60,6 +71,7 @@ export default function Settings({ API }) {
 
   useEffect(() => {
     apiFetch(`${API}/api/users`).then(r => r.json()).then(d => { if (Array.isArray(d)) setUsers(d) }).catch(() => {})
+    apiFetch(`${API}/api/white-label`).then(r => r.json()).then(d => { if (d && typeof d.available === 'boolean') setWhiteLabel(d) }).catch(() => {})
     loadCounter()
     apiFetch(`${API}/api/settings`)
       .then(r => r.json())
@@ -450,6 +462,26 @@ export default function Settings({ API }) {
               <option value="20">20% — регистрирани по ДДС</option>
             </select>
           </div>
+        </div>
+      </div>
+
+      {/* White-label (Agency) */}
+      <div className="bg-white rounded-xl shadow border border-gray-100 p-5 mb-6">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h3 className="text-base font-bold text-gray-800 mb-1">🏷️ White-label
+              {!whiteLabel.available && <span className="ml-2 text-xs font-semibold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">Agency</span>}
+            </h3>
+            <p className="text-sm text-gray-500">Скрий „Powered by Skyrent" на публичните си обяви и покажи своя бранд.</p>
+          </div>
+          {whiteLabel.available ? (
+            <button onClick={toggleWhiteLabel}
+              className={`shrink-0 relative w-12 h-7 rounded-full transition ${whiteLabel.enabled ? 'bg-green-500' : 'bg-gray-300'}`}>
+              <span className={`absolute top-0.5 left-0.5 w-6 h-6 bg-white rounded-full shadow transition ${whiteLabel.enabled ? 'translate-x-5' : ''}`} />
+            </button>
+          ) : (
+            <span className="shrink-0 text-xs text-gray-400">Налично в Agency плана</span>
+          )}
         </div>
       </div>
 
