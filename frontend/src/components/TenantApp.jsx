@@ -190,9 +190,11 @@ export default function TenantApp({ userName, onLogout, mustChangePassword }) {
       <header className="ten-head shadow-md sticky top-0 z-10">
         <div className="max-w-2xl mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div style={{ background: 'white', borderRadius: '6px', padding: '3px 8px' }}>
-              <img src="/sky_capital_logo.png" alt="Sky Capital" style={{ height: '32px' }} />
-            </div>
+            {me?.white_label
+              ? <div style={{ fontWeight: 700, fontSize: 16, color: '#fff', letterSpacing: '.3px' }}>{me.brand || ''}</div>
+              : <div style={{ background: 'white', borderRadius: '6px', padding: '3px 8px' }}>
+                  <img src="/sky_capital_logo.png" alt="Sky Capital" style={{ height: '32px' }} />
+                </div>}
             <div>
               <div className="ten-hello">{tr('common.hello')}</div>
               <div className="ten-name">{userName || me?.user?.name || tr('common.tenant')}</div>

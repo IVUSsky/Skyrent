@@ -62,7 +62,12 @@ module.exports = function(db) {
                     FROM properties WHERE id IN (${propertyIds.map(() => '?').join(',')})`).all(...propertyIds)
       : [];
 
-    res.json({ user, contracts, properties });
+    // White-label: агенцията скрива Sky Capital логото и показва своя бранд.
+    let white_label = false, brand = '';
+    try { const w = db.prepare("SELECT value FROM settings WHERE key='white_label'").get(); white_label = !!w && (w.value === 'true' || w.value === '"true"'); } catch (_) {}
+    try { const s = db.prepare("SELECT value FROM settings WHERE key='issuer'").get(); if (s) brand = (JSON.parse(s.value) || {}).name || ''; } catch (_) {}
+
+    res.json({ user, contracts, properties, white_label, brand });
   });
 
   // POST /api/tenant/change-password — for must_change_password flow
