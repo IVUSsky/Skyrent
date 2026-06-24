@@ -8,6 +8,7 @@ export const ALL_TABS = [
   { id: 'expenses',  label: '💸 Разходи',     roles: ['admin'],            tier: 'core' },
   { id: 'portfolio', label: '🏢 Имоти',       roles: ['admin'],            tier: 'standard' },
   { id: 'list',      label: 'Таблица',        roles: ['admin'],            tier: 'standard' },
+  { id: 'owners',    label: '👤 Собственици', roles: ['admin'],            tier: 'standard', capability: 'multi_owner' },
   { id: 'addons',    label: '🛍️ Услуги',      roles: ['admin'],            tier: 'standard' },
   { id: 'internet',  label: '🌐 Интернет',    roles: ['admin'],            tier: 'standard', capability: 'internet' },
   { id: 'support',   label: '🛟 Поддръжка',   roles: ['admin'],            tier: 'standard' },

@@ -61,6 +61,19 @@ function runTenantMigrations(db) {
   try { db.exec("ALTER TABLE properties ADD COLUMN абонат_тец TEXT");  console.log('Migration: added абонат_тец');  } catch(_) {}
   try { db.exec("ALTER TABLE properties ADD COLUMN абонат_вход TEXT"); console.log('Migration: added абонат_вход'); } catch(_) {}
 
+  // Multi-owner (Agency): собственици на имоти (агенцията управлява чужди портфейли).
+  db.exec(`CREATE TABLE IF NOT EXISTS owners (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    egn_eik TEXT DEFAULT '',
+    email TEXT DEFAULT '',
+    phone TEXT DEFAULT '',
+    iban TEXT DEFAULT '',
+    notes TEXT DEFAULT '',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+  try { db.exec("ALTER TABLE properties ADD COLUMN owner_id INTEGER"); console.log('Migration: added properties.owner_id'); } catch(_) {}
+
   // Lifecycle stage + pre-construction tracking (2026-06-07)
   // lifecycle_stage values: active | listing | furnishing | renovating |
   //                        pre_construction | reserved | for_sale | inactive
