@@ -15,6 +15,7 @@ import { apiFetch } from './api'
 
 // Lazy-loaded tabs — намалява initial bundle (само избраното се сваля)
 const Portfolio      = lazy(() => import('./components/Portfolio'))
+const Owners         = lazy(() => import('./components/Owners'))
 const List           = lazy(() => import('./components/List'))
 const Dashboard      = lazy(() => import('./components/Dashboard'))
 const InvestorView   = lazy(() => import('./components/InvestorView'))
@@ -363,6 +364,7 @@ export default function App() {
           {validTab === 'dashboard' && <Dashboard API={API} />}
           {validTab === 'investor'  && <InvestorView API={API} />}
           {validTab === 'portfolio' && <Portfolio API={API} />}
+          {validTab === 'owners'    && <Owners API={API} />}
           {validTab === 'list'      && <List API={API} />}
           {validTab === 'tenants'   && <Tenants API={API} />}
           {validTab === 'invoices'  && <Invoices API={API} role={role} />}

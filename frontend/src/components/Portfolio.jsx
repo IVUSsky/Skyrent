@@ -10,7 +10,7 @@ const STATUS_COLORS = {
   '❌': 'bg-red-100 text-red-800',
 }
 
-const EMPTY_FORM = { адрес:'', район:'', статус:'✅', наем:0, наемател:'', площ:'', тип:'2-стаен', покупна:0, ремонт:0, market_val:'' }
+const EMPTY_FORM = { адрес:'', район:'', статус:'✅', наем:0, наемател:'', площ:'', тип:'2-стаен', покупна:0, ремонт:0, market_val:'', owner_id:'' }
 
 const fmt = (n) => (n || 0).toLocaleString('bg-BG')
 
@@ -40,9 +40,15 @@ export default function Portfolio({ API }) {
   const photoInputRef = React.useRef()
   const [inquiries, setInquiries] = useState([])
   const [showInquiries, setShowInquiries] = useState(false)
+  const [owners, setOwners] = useState([]) // Agency multi_owner; [] ако не е включено
 
   const loadInquiries = () => apiFetch(`${API}/api/properties/inquiries`)
     .then(r => r.json()).then(d => setInquiries(Array.isArray(d) ? d : [])).catch(() => {})
+
+  // Собственици (само ако планът включва multi_owner — иначе 402 → празно, без селектор)
+  useEffect(() => {
+    apiFetch(`${API}/api/owners`).then(r => r.ok ? r.json() : []).then(d => setOwners(Array.isArray(d) ? d : [])).catch(() => setOwners([]))
+  }, [])
 
   const load = () => {
     setLoading(true)
@@ -86,6 +92,7 @@ export default function Portfolio({ API }) {
       площ: prop['площ'] || '',
       покупна: prop['покупна'] || 0,
       ремонт: prop['ремонт'] || 0,
+      owner_id: prop['owner_id'] || '',
       абонат_ток:  prop['абонат_ток']  || '',
       абонат_вода: prop['абонат_вода'] || '',
       абонат_тец:  prop['абонат_тец']  || '',
@@ -112,6 +119,7 @@ export default function Portfolio({ API }) {
         покупна: Number(newForm.покупна) || 0,
         ремонт: Number(newForm.ремонт) || 0,
         market_val: newForm.market_val !== '' ? Number(newForm.market_val) : null,
+        owner_id: newForm.owner_id || null,
       }),
     })
       .then(r => r.json())
@@ -140,6 +148,7 @@ export default function Portfolio({ API }) {
         абонат_вода: editForm.абонат_вода || null,
         абонат_тец:  editForm.абонат_тец  || null,
         абонат_вход: editForm.абонат_вход || null,
+        owner_id: editForm.owner_id || null,
       }),
     })
       .then(r => r.json())
@@ -361,6 +370,16 @@ export default function Portfolio({ API }) {
                   ))}
                 </select>
               </div>
+              {owners.length > 0 && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">👤 Собственик</label>
+                  <select value={newForm.owner_id} onChange={e => setNewForm(f => ({ ...f, owner_id: e.target.value }))}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-500 text-sm">
+                    <option value="">— без собственик —</option>
+                    {owners.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+                  </select>
+                </div>
+              )}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Статус</label>
                 <select value={newForm.статус} onChange={e => setNewForm(f => ({ ...f, статус: e.target.value }))}
@@ -590,6 +609,16 @@ export default function Portfolio({ API }) {
                   ))}
                 </select>
               </div>
+              {owners.length > 0 && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">👤 Собственик</label>
+                  <select value={editForm.owner_id || ''} onChange={e => setEditForm(f => ({ ...f, owner_id: e.target.value }))}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="">— без собственик —</option>
+                    {owners.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+                  </select>
+                </div>
+              )}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Площ (м²)</label>
                 <input

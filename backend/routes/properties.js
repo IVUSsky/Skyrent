@@ -347,18 +347,19 @@ module.exports = function(db) {
 
   router.post('/', (req, res) => {
     try {
-      const { адрес, район, статус, наем, наемател, площ, тип, покупна, ремонт, market_val, email, телефон } = req.body;
+      const { адрес, район, статус, наем, наемател, площ, тип, покупна, ремонт, market_val, email, телефон, owner_id } = req.body;
       if (!адрес) return res.status(400).json({ error: 'адрес е задължителен' });
       const r = db.prepare(`
-        INSERT INTO properties (адрес, район, статус, наем, наемател, площ, тип, покупна, ремонт, market_val, email, телефон)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO properties (адрес, район, статус, наем, наемател, площ, тип, покупна, ремонт, market_val, email, телефон, owner_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         адрес, район || '', статус || '✅',
         Number(наем) || 0, наемател || '',
         площ ? Number(площ) : null, тип || 'друго',
         Number(покупна) || 0, Number(ремонт) || 0,
         market_val ? Number(market_val) : null,
-        email || null, телефон || null
+        email || null, телефон || null,
+        owner_id ? Number(owner_id) : null
       );
       const created = db.prepare('SELECT * FROM properties WHERE id = ?').get(r.lastInsertRowid);
       res.status(201).json(created);
@@ -403,15 +404,16 @@ module.exports = function(db) {
       const абонат_вода = body.абонат_вода !== undefined ? body.абонат_вода : current.абонат_вода;
       const абонат_тец  = body.абонат_тец  !== undefined ? body.абонат_тец  : current.абонат_тец;
       const абонат_вход = body.абонат_вход !== undefined ? body.абонат_вход : current.абонат_вход;
+      const owner_id   = body.owner_id   !== undefined ? (body.owner_id ? Number(body.owner_id) : null) : current.owner_id;
 
       db.prepare(`
         UPDATE properties
         SET адрес=?, район=?, наем=?, наемател=?, статус=?, market_val=?, тип=?, площ=?, покупна=?, ремонт=?,
             email=?, телефон=?, invoice_enabled=?, invoice_recipient=?, vat_exempt=?, stripe_enabled=?,
-            абонат_ток=?, абонат_вода=?, абонат_тец=?, абонат_вход=?,
+            абонат_ток=?, абонат_вода=?, абонат_тец=?, абонат_вход=?, owner_id=?,
             updated_at=CURRENT_TIMESTAMP
         WHERE id=?
-      `).run(адрес, район, наем, наемател, статус, market_val, тип, площ, покупна, ремонт, email, телефон, invoice_enabled, invoice_recipient, vat_exempt, stripe_enabled, абонат_ток, абонат_вода, абонат_тец, абонат_вход, id);
+      `).run(адрес, район, наем, наемател, статус, market_val, тип, площ, покупна, ремонт, email, телефон, invoice_enabled, invoice_recipient, vat_exempt, stripe_enabled, абонат_ток, абонат_вода, абонат_тец, абонат_вход, owner_id, id);
 
       const updated = db.prepare('SELECT * FROM properties WHERE id = ?').get(id);
       console.log('Saved тип:', updated.тип, '| покупна:', updated.покупна, '| ремонт:', updated.ремонт);
