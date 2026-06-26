@@ -24,6 +24,12 @@ export default function Platform({ API = '' }) {
   }
   useEffect(load, [])
 
+  // Задай план / comp (безплатен) на организация
+  const setPlan = (id, plan, comp) => {
+    apiFetch(`${API}/api/platform/orgs/${id}/plan`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ plan, comp: comp ? 1 : 0 }) })
+      .then(r => r.json()).then(d => { if (d.ok) load(); else setMsg(d.error || 'Грешка') }).catch(() => {})
+  }
+
   const publish = () => {
     if (!form.title || !form.body) { setMsg('Заглавие и текст са задължителни'); return }
     apiFetch(`${API}/api/platform/announcements`, {
@@ -112,7 +118,20 @@ export default function Platform({ API = '' }) {
                 <tr key={o.id} className={o.id === 1 ? 'bg-amber-50/40' : 'hover:bg-gray-50'}>
                   <td className="px-3 py-2 text-gray-400">{o.id}</td>
                   <td className="px-3 py-2 font-medium">{o.name}{o.id === 1 && <span className="ml-1 text-xs text-amber-600">(платформа)</span>}</td>
-                  <td className="px-3 py-2">{o.id === 1 ? '—' : o.plan}</td>
+                  <td className="px-3 py-2">
+                    {o.id === 1 ? '—' : (
+                      <div className="flex items-center gap-1.5 whitespace-nowrap">
+                        <select value={o.plan} onChange={e => setPlan(o.id, e.target.value, o.comp)}
+                          className="border border-gray-300 rounded px-1.5 py-0.5 text-xs bg-white">
+                          {['trial', 'basic', 'pro', 'agency'].map(p => <option key={p} value={p}>{p}</option>)}
+                        </select>
+                        <label className="flex items-center gap-1 text-xs text-gray-600 cursor-pointer" title="Безплатен (не се брои в MRR)">
+                          <input type="checkbox" checked={!!o.comp} onChange={e => setPlan(o.id, o.plan, e.target.checked)} />
+                          {o.comp ? <span className="text-green-700 font-semibold">🎁</span> : 'comp'}
+                        </label>
+                      </div>
+                    )}
+                  </td>
                   <td className="px-3 py-2">{o.status === 'active' ? '🟢' : '🔴'} {o.status}</td>
                   <td className="px-3 py-2 text-right">{o.property_count ?? '—'}</td>
                   <td className="px-3 py-2 text-right">{o.user_count}</td>

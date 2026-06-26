@@ -16,10 +16,11 @@ module.exports = function (controlDb, getOrgDb) {
     try {
       const { PLANS } = require('../lib/saasBilling');
       const orgs = controlDb.prepare('SELECT * FROM organizations WHERE id != 1').all();
-      const byPlan = {}; let mrr = 0; let paying = 0; let trial = 0; let suspended = 0;
+      const byPlan = {}; let mrr = 0; let paying = 0; let trial = 0; let suspended = 0; let comp = 0;
       for (const o of orgs) {
         byPlan[o.plan] = (byPlan[o.plan] || 0) + 1;
         if (o.status === 'suspended') { suspended++; continue; }
+        if (o.comp) { comp++; continue; }              // безплатен — не се брои в MRR
         if (o.plan === 'trial') trial++;
         else if (PLANS[o.plan]) { paying++; mrr += PLANS[o.plan].amount / 100; }
       }
@@ -28,7 +29,7 @@ module.exports = function (controlDb, getOrgDb) {
       ).get('-' + days + ' days').n;
       const leads = controlDb.prepare('SELECT COUNT(*) AS n FROM announcement_leads').get().n;
       res.json({
-        total: orgs.length, trial, paying, suspended, mrr_eur: mrr, by_plan: byPlan,
+        total: orgs.length, trial, paying, suspended, comp, mrr_eur: mrr, by_plan: byPlan,
         new_7d: newOrgs(7), new_30d: newOrgs(30), leads_total: leads,
       });
     } catch (e) { res.status(500).json({ error: e.message }); }
@@ -38,7 +39,7 @@ module.exports = function (controlDb, getOrgDb) {
   router.get('/orgs', (req, res) => {
     try {
       const orgs = controlDb.prepare(`
-        SELECT o.id, o.name, o.status, o.plan, o.trial_ends_at, o.created_at,
+        SELECT o.id, o.name, o.status, o.plan, o.comp, o.trial_ends_at, o.created_at,
                (SELECT COUNT(*) FROM users u WHERE u.organization_id = o.id) AS user_count,
                (SELECT MAX(u.last_login_at) FROM users u WHERE u.organization_id = o.id) AS last_login,
                (SELECT u.email FROM users u WHERE u.organization_id = o.id AND u.role='admin' ORDER BY u.id LIMIT 1) AS owner_email
@@ -50,6 +51,20 @@ module.exports = function (controlDb, getOrgDb) {
         catch (_) { o.property_count = null; }
       }
       res.json(orgs);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // POST /api/platform/orgs/:id/plan { plan, comp } — задава план / безплатен (comp)
+  router.post('/orgs/:id/plan', (req, res) => {
+    try {
+      const { plan, comp } = req.body || {};
+      const VALID = ['basic', 'pro', 'agency', 'trial'];
+      if (!VALID.includes(plan)) return res.status(400).json({ error: 'Невалиден план' });
+      const id = Number(req.params.id);
+      if (id === 1) return res.status(400).json({ error: 'Платформеният акаунт не се променя' });
+      controlDb.prepare("UPDATE organizations SET plan=?, comp=?, status='active' WHERE id=?")
+        .run(plan, comp ? 1 : 0, id);
+      res.json({ ok: true, plan, comp: comp ? 1 : 0 });
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 

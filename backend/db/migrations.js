@@ -870,6 +870,8 @@ function runControlMigrations(db) {
   try { db.exec("ALTER TABLE organizations ADD COLUMN email_verified INTEGER DEFAULT 1"); console.log('Migration: added organizations.email_verified'); } catch(_) {}
   try { db.exec("ALTER TABLE organizations ADD COLUMN verify_token TEXT");                console.log('Migration: added organizations.verify_token'); }   catch(_) {}
   try { db.exec("ALTER TABLE organizations ADD COLUMN verify_expires DATETIME");          console.log('Migration: added organizations.verify_expires'); } catch(_) {}
+  // Comp акаунт (безплатен за близки хора) — план без плащане; не се брои в MRR.
+  try { db.exec("ALTER TABLE organizations ADD COLUMN comp INTEGER DEFAULT 0");            console.log('Migration: added organizations.comp'); } catch(_) {}
 
   // Phase 5: платформен команден център — broadcast оферти/новини + leads
   db.exec(`CREATE TABLE IF NOT EXISTS announcements (
