@@ -146,6 +146,17 @@ export default function App() {
     return next
   })
 
+  // Навигация, която гарантира че целевият таб е видим: ако е скрит в Лесен
+  // режим (tier ≠ core/system) → авто-превключва на Разширен. Иначе onboarding
+  // бутони към 'portfolio' и др. „не реагират" (табът липсва от менюто).
+  const navigateTo = (tab) => {
+    const t = ALL_TABS.find(x => x.id === tab)
+    if (t && !SIMPLE_TIERS.has(t.tier)) {
+      setUiMode('advanced'); localStorage.setItem('skyrent_ui_mode', 'advanced')
+    }
+    setActiveTab(tab)
+  }
+
   // 402 (изтекъл trial / спрян абонамент) → отвори таб Абонамент
   useEffect(() => {
     const h = () => setActiveTab('billing')
@@ -359,7 +370,7 @@ export default function App() {
       <AnnouncementBar API={API} />
 
       <main className="max-w-7xl mx-auto px-4 py-6">
-        {role !== 'tenant' && <Onboarding API={API} tab={validTab} onNavigate={setActiveTab} />}
+        {role !== 'tenant' && <Onboarding API={API} tab={validTab} onNavigate={navigateTo} />}
         <ErrorBoundary resetKey={validTab}>
         <Suspense fallback={<TabFallback/>}>
           {validTab === 'dashboard' && <Dashboard API={API} />}
