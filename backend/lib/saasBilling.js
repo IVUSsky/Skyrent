@@ -59,6 +59,7 @@ async function createCheckout(controlDb, org, plan, { success_url, cancel_url, e
     mode: 'subscription', customer,
     line_items: [{ price: prices[plan], quantity: 1 }],
     success_url, cancel_url,
+    allow_promotion_codes: true, // промо кодове (купони от Stripe dashboard) при плащане
     metadata: { kind: 'saas_subscription', organization_id: String(org.id), plan },
     subscription_data: { metadata: { organization_id: String(org.id), plan } },
   });
