@@ -20,6 +20,9 @@ module.exports = function (db) {
     const property = exists('SELECT 1 FROM properties LIMIT 1');
     let dismissed = false;
     try { const d = db.prepare("SELECT value FROM settings WHERE key='onboarding_dismissed'").get(); dismissed = !!d && (d.value === 'true' || d.value === '1' || d.value === '"true"'); } catch (_) {}
+    // setup_done: дали клиентът е минал началния избор на сценарий (welcome wizard)
+    let setup_done = false;
+    try { const su = db.prepare("SELECT value FROM settings WHERE key='setup_done'").get(); setup_done = !!su && (su.value === 'true' || su.value === '"true"'); } catch (_) {}
 
     let steps, complete;
     if (entity_type === 'individual') {
@@ -31,7 +34,7 @@ module.exports = function (db) {
       steps = { company: hasProfile, property, invoice };
       complete = hasProfile && property && invoice;
     }
-    res.json({ entity_type, steps, complete, dismissed });
+    res.json({ entity_type, steps, complete, dismissed, setup_done, has_property: property });
   });
 
   router.post('/dismiss', (req, res) => {
