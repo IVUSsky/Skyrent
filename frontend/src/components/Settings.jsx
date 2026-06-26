@@ -15,6 +15,7 @@ export default function Settings({ API }) {
   const [smtp, setSmtp] = useState({ host: '', port: '587', user: '', pass: '', from_name: '' })
   const [testingSmtp, setTestingSmtp] = useState(false)
   const [issuer, setIssuer] = useState({ name: '', address: '', eik: '', mol: '', vat_number: '', iban: '', bic: '', place: '', email: '', phone: '', vat_rate: '0' })
+  const [entityType, setEntityType] = useState('company') // 'company' | 'individual'
   const [kontrolisiEmail, setKontrolisiEmail] = useState('')
   const [kontrolisiAuto, setKontrolisiAuto] = useState(false)
   const [autoInvoiceActivate, setAutoInvoiceActivate] = useState(false)
@@ -82,6 +83,7 @@ export default function Settings({ API }) {
         setExpenseCats(data.expense_cats || [])
         if (data.smtp) setSmtp(data.smtp)
         if (data.issuer) setIssuer(data.issuer)
+        if (data.entity_type === 'individual' || data.entity_type === 'company') setEntityType(data.entity_type)
         if (data.kontrolisi_email) setKontrolisiEmail(data.kontrolisi_email)
         setKontrolisiAuto(data.kontrolisi_auto === true || data.kontrolisi_auto === 'true' || data.kontrolisi_auto === 1)
         setAutoInvoiceActivate(data.auto_invoice_on_activate === true || data.auto_invoice_on_activate === 'true' || data.auto_invoice_on_activate === 1)
@@ -128,7 +130,7 @@ export default function Settings({ API }) {
     apiFetch(`${API}/api/settings`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tenant_map, expense_cats: expenseCats, smtp, issuer, kontrolisi_email: kontrolisiEmail, kontrolisi_auto: kontrolisiAuto, auto_invoice_on_activate: autoInvoiceActivate }),
+      body: JSON.stringify({ tenant_map, expense_cats: expenseCats, smtp, issuer, entity_type: entityType, kontrolisi_email: kontrolisiEmail, kontrolisi_auto: kontrolisiAuto, auto_invoice_on_activate: autoInvoiceActivate }),
     })
       .then(r => r.json())
       .then(data => {
@@ -430,8 +432,21 @@ export default function Settings({ API }) {
 
       {/* Issuer Details */}
       <div className="bg-white rounded-xl shadow border border-gray-100 p-5 mb-6">
-        <h3 className="text-base font-bold text-gray-800 mb-1">🧾 Данни на издателя (за фактури)</h3>
-        <p className="text-sm text-gray-500 mb-4">Тези данни се отпечатват на всяка фактура като "Доставчик".</p>
+        <h3 className="text-base font-bold text-gray-800 mb-1">🧾 Данни на издателя</h3>
+        <p className="text-sm text-gray-500 mb-3">Отпечатват се на фактури и договори. Изберете типа лице:</p>
+        <div className="flex gap-2 mb-4">
+          {[['company', '🏢 Фирма'], ['individual', '👤 Физическо лице']].map(([v, label]) => (
+            <button key={v} onClick={() => setEntityType(v)}
+              className={`px-3 py-1.5 text-sm font-medium rounded-lg border transition ${entityType === v ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-300 hover:border-gray-400'}`}>
+              {label}
+            </button>
+          ))}
+        </div>
+        {entityType === 'individual' && (
+          <div className="text-xs text-blue-700 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2 mb-4">
+            👤 Физическо лице: не издаваш фактури. Наемният доход се декларира веднъж годишно по чл.50 — виж „Годишна справка за наем" в таб Фактури. (Полето „ЕИК / ЕГН" въведи своя ЕГН.)
+          </div>
+        )}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {[
             { key: 'name',       label: 'Фирма / Име',           placeholder: 'Вашата фирма ООД' },
