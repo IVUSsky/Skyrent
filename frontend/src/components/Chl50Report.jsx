@@ -52,8 +52,31 @@ export default function Chl50Report({ API = '' }) {
               )}
               <button onClick={download}
                 className="px-4 py-2 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg">
-                ⬇ Свали справка (PDF)
+                ⬇ Свали годишна справка (PDF)
               </button>
+
+              {/* Тримесечни авансови вноски */}
+              {Array.isArray(data.quarters) && data.quarters.some(q => q.advance > 0) && (
+                <div className="mt-5 pt-4 border-t border-gray-100">
+                  <h4 className="text-sm font-bold text-gray-800 mb-1">Тримесечни авансови вноски (чл. 67)</h4>
+                  <p className="text-xs text-gray-500 mb-3">Авансов данък за Q1–Q3 (за Q4 няма аванс — изравнява се с годишната декларация).</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    {data.quarters.map(q => (
+                      <div key={q.q} className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+                        <div className="text-xs text-gray-500">Тримесечие {q.q} · срок {q.deadline}</div>
+                        <div className="font-bold text-gray-800 text-lg mt-1">{fmt(q.advance)} €</div>
+                        <div className="text-xs text-gray-400 mb-2">от доход {fmt(q.gross)} €</div>
+                        <button onClick={() => window.open(authUrl(`${API}/api/tax-report/chl55.pdf?year=${year}&quarter=${q.q}`), '_blank')}
+                          className="text-xs font-semibold text-blue-700 hover:underline">⬇ справка чл.55</button>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="text-xs text-gray-500 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2 mt-3">
+                    ℹ️ <b>Кой внася аванса:</b> ако наемателят е <b>фирма/предприятие</b> — тя удържа и внася аванса вместо теб (не подаваш чл.55 за тези доходи). Ако наемателят е <b>физическо лице</b> — ти сам внасяш и подаваш декларация по чл. 55.
+                  </div>
+                </div>
+              )}
+
               <p className="text-xs text-gray-400 mt-3">
                 Ориентировъчно, не е данъчен съвет. Облагаемият доход е след 10% нормативни разходи (чл. 31); данък 10% (чл. 48). Авансово внесеният данък се приспада. Проверете със счетоводител.
               </p>
