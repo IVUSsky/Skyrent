@@ -5,11 +5,14 @@ import { apiFetch } from '../api'
 // Авто-отмята завършените; крие се при готово или „Скрий". Бутоните навигират
 // до съответния таб през event-а skyrent:navigate (App.jsx го слуша).
 
-const STEPS = [
-  { key: 'company',  tab: 'settings',  icon: '🏢', title: 'Попълни фирмените данни', desc: 'Име и ЕИК — за да издаваш фактури и договори със своята фирма.' },
-  { key: 'property', tab: 'portfolio', icon: '🏠', title: 'Добави първия си имот',   desc: 'Адрес, наем, тип — основата на портфолиото ти.' },
-  { key: 'invoice',  tab: 'invoices', icon: '🧾', title: 'Издай първа фактура',      desc: 'За имот с наемател — готова за секунди.' },
-]
+// Метаданни за всяка възможна стъпка; backend-ът решава кои се показват
+// (фирма vs физическо лице — без 'invoice' за физическо лице).
+const STEP_META = {
+  company:  { tab: 'settings',  icon: '🏢', title: 'Попълни фирмените данни', desc: 'Име и ЕИК — за да издаваш фактури и договори със своята фирма.' },
+  profile:  { tab: 'settings',  icon: '👤', title: 'Попълни личните данни',   desc: 'Име и ЕГН — за договори и данъчната справка по чл.50.' },
+  property: { tab: 'portfolio', icon: '🏠', title: 'Добави първия си имот',   desc: 'Адрес, наем, тип — основата на портфолиото ти.' },
+  invoice:  { tab: 'invoices', icon: '🧾', title: 'Издай първа фактура',      desc: 'За имот с наемател — готова за секунди.' },
+}
 
 export default function Onboarding({ API = '', tab, onNavigate }) {
   const [data, setData] = useState(null)
@@ -28,7 +31,8 @@ export default function Onboarding({ API = '', tab, onNavigate }) {
 
   if (!data || hidden || data.complete || data.dismissed) return null
 
-  const done = Object.values(data.steps).filter(Boolean).length
+  const keys = Object.keys(data.steps).filter(k => STEP_META[k])
+  const done = keys.filter(k => data.steps[k]).length
   // Директна навигация (по-сигурно от event); event-ът остава fallback.
   const go = (t) => { if (onNavigate) onNavigate(t); else window.dispatchEvent(new CustomEvent('skyrent:navigate', { detail: t })) }
   const dismiss = () => { setHidden(true); apiFetch(`${API}/api/onboarding/dismiss`, { method: 'POST' }).catch(() => {}) }
@@ -40,13 +44,14 @@ export default function Onboarding({ API = '', tab, onNavigate }) {
           <h3 className="text-base font-bold text-gray-800">👋 Първи стъпки</h3>
           <p className="text-sm text-gray-500">Завърши настройката, за да тръгне бизнесът ти в Skyrent.</p>
         </div>
-        <div className="text-sm font-bold text-amber-700 shrink-0">{done}/3</div>
+        <div className="text-sm font-bold text-amber-700 shrink-0">{done}/{keys.length}</div>
       </div>
       <div className="space-y-2">
-        {STEPS.map(s => {
-          const ok = data.steps[s.key]
+        {keys.map(key => {
+          const s = STEP_META[key]
+          const ok = data.steps[key]
           return (
-            <div key={s.key} className={`flex items-center gap-3 rounded-lg border px-3 py-2.5 ${ok ? 'border-green-200 bg-green-50' : 'border-gray-200 bg-white'}`}>
+            <div key={key} className={`flex items-center gap-3 rounded-lg border px-3 py-2.5 ${ok ? 'border-green-200 bg-green-50' : 'border-gray-200 bg-white'}`}>
               <div className={`w-7 h-7 rounded-full grid place-items-center text-sm flex-shrink-0 ${ok ? 'bg-green-500 text-white' : 'bg-gray-100 text-gray-400'}`}>{ok ? '✓' : s.icon}</div>
               <div className="min-w-0 flex-1">
                 <div className={`text-sm font-semibold ${ok ? 'text-green-800 line-through' : 'text-gray-800'}`}>{s.title}</div>

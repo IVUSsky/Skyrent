@@ -13,12 +13,25 @@ module.exports = function (db) {
   router.get('/', (req, res) => {
     let issuer = {};
     try { const r = db.prepare("SELECT value FROM settings WHERE key='issuer'").get(); if (r) issuer = JSON.parse(r.value) || {}; } catch (_) {}
-    const company = !!(issuer.name && issuer.eik);
+    // Тип лице: 'individual' (физическо, без фактури) | 'company' (по подразбиране)
+    let entity_type = 'company';
+    try { const e = db.prepare("SELECT value FROM settings WHERE key='entity_type'").get(); if (e && String(e.value).replace(/^"|"$/g, '') === 'individual') entity_type = 'individual'; } catch (_) {}
+    const hasProfile = !!(issuer.name && issuer.eik);
     const property = exists('SELECT 1 FROM properties LIMIT 1');
-    const invoice = exists('SELECT 1 FROM rent_invoices LIMIT 1');
     let dismissed = false;
     try { const d = db.prepare("SELECT value FROM settings WHERE key='onboarding_dismissed'").get(); dismissed = !!d && (d.value === 'true' || d.value === '1' || d.value === '"true"'); } catch (_) {}
-    res.json({ steps: { company, property, invoice }, complete: company && property && invoice, dismissed });
+
+    let steps, complete;
+    if (entity_type === 'individual') {
+      // Физическо лице → без стъпка „фактура" (декларира по чл.50, не фактурира)
+      steps = { profile: hasProfile, property };
+      complete = hasProfile && property;
+    } else {
+      const invoice = exists('SELECT 1 FROM rent_invoices LIMIT 1');
+      steps = { company: hasProfile, property, invoice };
+      complete = hasProfile && property && invoice;
+    }
+    res.json({ entity_type, steps, complete, dismissed });
   });
 
   router.post('/dismiss', (req, res) => {
