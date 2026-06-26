@@ -167,11 +167,14 @@ export default function App() {
   // White-label (Phase 4): бранд от org settings.issuer (име + опц. лого).
   // Org 1 (Sky Capital) пада на вграденото лого; нови организации виждат своето.
   const [brand, setBrand] = useState(null) // { name, logo? }
+  // Физическо лице (без ДДС) → скрий издаване на фактури; покажи само данъчна справка.
+  const [entityInfo, setEntityInfo] = useState({ individual: false, vat: false })
   useEffect(() => {
     if (!authenticated || role === 'tenant') return
     apiFetch(`${API}/api/settings`).then(r => r.json())
       .then(s => {
         if (s?.issuer?.name) setBrand({ name: s.issuer.name, logo: s.issuer.logo || null })
+        setEntityInfo({ individual: s?.entity_type === 'individual', vat: Number(s?.issuer?.vat_rate) > 0 })
         // менюта, скрити от собственика (JSON масив от tab id-та)
         try { setHiddenMenus(Array.isArray(s?.menu_hidden) ? s.menu_hidden : JSON.parse(s?.menu_hidden || '[]')) }
         catch { setHiddenMenus([]) }
@@ -308,7 +311,7 @@ export default function App() {
                   validTab === tab.id ? 'shadow font-semibold active' : ''
                 }`}
               >
-                {tab.label}
+                {tab.id === 'invoices' && entityInfo.individual && !entityInfo.vat ? '📑 Доходи и данък' : tab.label}
               </button>
             ))}
           </nav>
@@ -379,7 +382,10 @@ export default function App() {
           {validTab === 'owners'    && <Owners API={API} />}
           {validTab === 'list'      && <List API={API} />}
           {validTab === 'tenants'   && <Tenants API={API} />}
-          {validTab === 'invoices'  && <><Chl50Report API={API} /><Invoices API={API} role={role} /></>}
+          {validTab === 'invoices'  && <>
+            {entityInfo.individual && <Chl50Report API={API} />}
+            {(!entityInfo.individual || entityInfo.vat) && <Invoices API={API} role={role} />}
+          </>}
           {validTab === 'contracts' && <Contracts API={API} role={role} />}
           {validTab === 'addons'    && <Addons API={API} />}
           {validTab === 'internet'  && <Internet API={API} />}
