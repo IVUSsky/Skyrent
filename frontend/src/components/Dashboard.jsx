@@ -3,7 +3,6 @@ import React, { useState, useEffect } from 'react'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell
 } from 'recharts'
-import OnboardingChecklist from './OnboardingChecklist'
 
 const fmt = (n, decimals = 0) => {
   if (n == null || isNaN(n)) return '—'
@@ -184,7 +183,6 @@ export default function Dashboard({ API }) {
 
   return (
     <div className="fin-surface">
-      <OnboardingChecklist API={API} />
       <header className="iv-mast mb-6">
         <div>
           <div className="iv-mast-eyebrow">Sky Capital · преглед</div>

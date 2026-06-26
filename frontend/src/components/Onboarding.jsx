@@ -11,7 +11,7 @@ const STEPS = [
   { key: 'invoice',  tab: 'invoices', icon: '🧾', title: 'Издай първа фактура',      desc: 'За имот с наемател — готова за секунди.' },
 ]
 
-export default function Onboarding({ API = '', tab }) {
+export default function Onboarding({ API = '', tab, onNavigate }) {
   const [data, setData] = useState(null)
   const [hidden, setHidden] = useState(false)
 
@@ -29,7 +29,8 @@ export default function Onboarding({ API = '', tab }) {
   if (!data || hidden || data.complete || data.dismissed) return null
 
   const done = Object.values(data.steps).filter(Boolean).length
-  const go = (tab) => window.dispatchEvent(new CustomEvent('skyrent:navigate', { detail: tab }))
+  // Директна навигация (по-сигурно от event); event-ът остава fallback.
+  const go = (t) => { if (onNavigate) onNavigate(t); else window.dispatchEvent(new CustomEvent('skyrent:navigate', { detail: t })) }
   const dismiss = () => { setHidden(true); apiFetch(`${API}/api/onboarding/dismiss`, { method: 'POST' }).catch(() => {}) }
 
   return (
