@@ -359,7 +359,7 @@ export default function App() {
       <AnnouncementBar API={API} />
 
       <main className="max-w-7xl mx-auto px-4 py-6">
-        {role !== 'tenant' && <Onboarding API={API} tab={validTab} />}
+        {role !== 'tenant' && <Onboarding API={API} tab={validTab} onNavigate={setActiveTab} />}
         <ErrorBoundary resetKey={validTab}>
         <Suspense fallback={<TabFallback/>}>
           {validTab === 'dashboard' && <Dashboard API={API} />}
