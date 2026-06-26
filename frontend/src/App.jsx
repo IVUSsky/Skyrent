@@ -7,6 +7,7 @@ import RentTaxCalculator from './components/RentTaxCalculator'
 import RentalContractGenerator from './components/RentalContractGenerator'
 import NotificationBell from './components/NotificationBell'
 import Onboarding from './components/Onboarding'
+import SetupWizard from './components/SetupWizard'
 import { ThemeProvider } from './components/ThemeProvider'
 import ThemePicker from './components/ThemePicker'
 import ErrorBoundary from './components/ErrorBoundary'
@@ -287,6 +288,7 @@ export default function App() {
   return (
     <ThemeProvider activeTab={validTab}>
     <div className="min-h-screen" style={{ background: 'var(--page-bg)' }}>
+      {orgId !== 1 && <SetupWizard API={API} onDone={(et) => setEntityInfo(i => ({ ...i, individual: et === 'individual' }))} />}
       <header className="shadow-lg" style={{ background: 'var(--shell-bg)' }}>
         <div className="max-w-7xl mx-auto px-4 py-2 flex items-center gap-5 flex-wrap">
           <div className="shrink-0" style={{ background: 'white', borderRadius: '7px', padding: '4px 10px', display: 'inline-flex', alignItems: 'center' }}>
