@@ -14,8 +14,11 @@ const CTRL = new RegExp('[\\u0000-\\u001f\\u007f]', 'g');
 const clean = (s, max = 200) => String(s == null ? '' : s).replace(CTRL, ' ').trim().slice(0, max);
 const fmt = (n) => Number(n || 0).toLocaleString('bg-BG', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-// rows: [{ address, income, estimate }]; year; declarant (име на физ. лице)
-function buildChl50Report({ year, declarant, rows }) {
+// rows: [{ address, income, estimate }]; year; declarant (име на физ. лице).
+// title/subtitle/taxLabel са опционални — за вариант чл.55 (тримесечен аванс).
+function buildChl50Report({ year, declarant, rows,
+  title = 'СПРАВКА ЗА ДОХОДИ ОТ НАЕМ',
+  subtitle, taxLabel = 'Дължим данък върху наема (10%)' }) {
   return new Promise((resolve, reject) => {
     try {
       const doc = new PDFDocument({ size: 'A4', margin: 50 });
@@ -33,9 +36,9 @@ function buildChl50Report({ year, declarant, rows }) {
       const tax = base * 0.10;
 
       // Заглавие
-      doc.font('B').fontSize(14).fillColor('#111').text('СПРАВКА ЗА ДОХОДИ ОТ НАЕМ', { align: 'center' });
+      doc.font('B').fontSize(14).fillColor('#111').text(title, { align: 'center' });
       doc.font('R').fontSize(10).fillColor('#444')
-        .text(`за ГДД по чл. 50 ЗДДФЛ · Приложение № 4 (код 20) · ${year} г.`, { align: 'center' }).moveDown(1);
+        .text(subtitle || `за ГДД по чл. 50 ЗДДФЛ · Приложение № 4 (код 20) · ${year} г.`, { align: 'center' }).moveDown(1);
 
       if (declarant) doc.font('R').fontSize(10).fillColor('#333').text(`Декларатор: ${clean(declarant, 120)}`).moveDown(0.6);
 
@@ -72,7 +75,7 @@ function buildChl50Report({ year, declarant, rows }) {
       kv('Нормативно признати разходи (10%)', '− ' + fmt(deductible) + ' €');
       kv('Облагаем доход (основа)', fmt(base) + ' €');
       doc.moveDown(0.2);
-      kv('Дължим данък върху наема (10%)', fmt(tax) + ' €', true);
+      kv(taxLabel, fmt(tax) + ' €', true);
 
       doc.moveDown(1.2);
       doc.font('R').fontSize(8).fillColor('#888').text(
