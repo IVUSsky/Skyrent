@@ -95,7 +95,7 @@ class MikrotikProvider {
         }
       } catch (_) {}
       // Cutoff правилото: enabled=спрян нет, disabled=пуснат нет
-      const existing = await conn.write('/ip/firewall/filter/print', ['?comment=' + comment]);
+      const existing = (await conn.write('/ip/firewall/filter/print')).filter(x => x.comment === comment);
       if (existing.length) {
         await conn.write('/ip/firewall/filter/set', ['=.id=' + existing[0]['.id'], '=disabled=' + (allow ? 'yes' : 'no')]);
       } else {
@@ -107,7 +107,7 @@ class MikrotikProvider {
         // established-accept → спирането реже и текущите връзки). НЕ преди builtin
         // dynamic правило (move fail-ва с "cannot move builtin").
         try {
-          const added = (await conn.write('/ip/firewall/filter/print', ['?comment=' + comment]))[0];
+          const added = (await conn.write('/ip/firewall/filter/print')).find(x => x.comment === comment);
           const fwd = (await conn.write('/ip/firewall/filter/print'))
             .filter(x => x.chain === 'forward' && x.dynamic !== 'true' && x.comment !== comment);
           if (added && fwd[0] && added['.id'] !== fwd[0]['.id']) {
@@ -130,7 +130,7 @@ class MikrotikProvider {
       const comment = this._markComment(acc);
       if (acc.mac_address) {
         // MAC binding — bypass Hotspot login за това устройство
-        const existing = await conn.write('/ip/hotspot/ip-binding/print', ['?mac-address=' + acc.mac_address]);
+        const existing = (await conn.write('/ip/hotspot/ip-binding/print')).filter(x => x['mac-address'] === acc.mac_address);
         if (existing.length) {
           await conn.write('/ip/hotspot/ip-binding/set', [
             '=.id=' + existing[0]['.id'],
@@ -147,7 +147,7 @@ class MikrotikProvider {
         return { ok: true, provider: 'mikrotik', method: 'mac-binding', router_id: r.id };
       }
       // Обикновен Hotspot user (username/password)
-      const existing = await conn.write('/ip/hotspot/user/print', ['?name=' + acc.username]);
+      const existing = (await conn.write('/ip/hotspot/user/print')).filter(x => x.name === acc.username);
       if (existing.length) {
         await conn.write('/ip/hotspot/user/set', [
           '=.id=' + existing[0]['.id'],
@@ -176,18 +176,18 @@ class MikrotikProvider {
     try {
       // Премахни ip-binding ако има MAC
       if (acc.mac_address) {
-        const existing = await conn.write('/ip/hotspot/ip-binding/print', ['?mac-address=' + acc.mac_address]);
+        const existing = (await conn.write('/ip/hotspot/ip-binding/print')).filter(x => x['mac-address'] === acc.mac_address);
         for (const e of existing) {
           await conn.write('/ip/hotspot/ip-binding/remove', ['=.id=' + e['.id']]);
         }
       }
       // Премахни Hotspot user (винаги опитваме, и в двата случая)
-      const users = await conn.write('/ip/hotspot/user/print', ['?name=' + acc.username]);
+      const users = (await conn.write('/ip/hotspot/user/print')).filter(x => x.name === acc.username);
       for (const u of users) {
         await conn.write('/ip/hotspot/user/remove', ['=.id=' + u['.id']]);
       }
       // Изкарай активните сесии
-      const active = await conn.write('/ip/hotspot/active/print', ['?user=' + acc.username]);
+      const active = (await conn.write('/ip/hotspot/active/print')).filter(x => x.user === acc.username);
       for (const sess of active) {
         try { await conn.write('/ip/hotspot/active/remove', ['=.id=' + sess['.id']]); } catch (_) {}
       }
