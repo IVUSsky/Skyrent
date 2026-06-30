@@ -18,6 +18,7 @@ export default function Deeds({ API = '' }) {
   const [deeds, setDeeds] = useState([])
   const [showText, setShowText] = useState(false)
   const [toast, setToast] = useState(null)
+  const [errorDetail, setErrorDetail] = useState(null)
 
   const showToast = (m, t = 'success') => { setToast({ m, t }); setTimeout(() => setToast(null), 3500) }
   const loadDeeds = () => apiFetch(`${API}/api/deeds`).then(r => r.json()).then(d => setDeeds(Array.isArray(d) ? d : [])).catch(() => {})
@@ -25,12 +26,12 @@ export default function Deeds({ API = '' }) {
 
   const extract = async () => {
     if (!file) { showToast('Избери PDF или снимка на акта', 'error'); return }
-    setExtracting(true); setResult(null); setShowText(false)
+    setExtracting(true); setResult(null); setShowText(false); setErrorDetail(null)
     try {
       const fd = new FormData(); fd.append('file', file)
       const r = await apiFetch(`${API}/api/deeds/extract`, { method: 'POST', body: fd })
       const d = await r.json()
-      if (!r.ok) { showToast(d.error || 'Грешка при извличане', 'error'); return }
+      if (!r.ok) { showToast(d.error || 'Грешка при извличане', 'error'); setErrorDetail(d.debug || { error: d.error }); return }
       setResult(d)
       setPropertyId(d.suggested_property?.id || '')
       const m = d.extracted?.main_unit || {}
@@ -88,6 +89,14 @@ export default function Deeds({ API = '' }) {
         </div>
         <p className="text-xs text-gray-400 mt-2">PDF, JPEG или PNG · до 25 MB · текстът се чете с AI (прегледай преди запазване)</p>
       </div>
+
+      {/* Диагностика при провал — показва реалния отговор на AI */}
+      {errorDetail && (
+        <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-sm">
+          <div className="font-semibold text-red-800 mb-2">⚠️ Диагностика (копирай и прати)</div>
+          <pre className="text-[11px] text-red-900 bg-white border border-red-100 rounded-lg p-3 max-h-72 overflow-auto whitespace-pre-wrap">{JSON.stringify(errorDetail, null, 2)}</pre>
+        </div>
+      )}
 
       {/* Резултат от извличането */}
       {result && (

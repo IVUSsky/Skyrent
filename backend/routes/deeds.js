@@ -112,11 +112,14 @@ module.exports = function (db) {
         try { data = JSON.parse(raw.slice(s, e + 1)); } catch (_) { /* пробваме fallback по-долу */ }
       }
       if (!data) {
-        console.error('deed parse fail — stop_reason=%s, дължина=%d, начало=%s', stopReason, raw.length, raw.slice(0, 200));
+        console.error('deed parse fail — stop_reason=%s, дължина=%d, начало=%s', stopReason, raw.length, raw.slice(0, 400));
         const hint = stopReason === 'max_tokens'
           ? 'Документът е прекалено дълъг — пробвай по-малко страници или го раздели.'
           : 'Не успях да разчета акта — пробвай по-ясен скан/PDF.';
-        return res.status(422).json({ error: hint });
+        return res.status(422).json({
+          error: hint,
+          debug: { stop_reason: stopReason, is_pdf: isPdf, blocks: response.content.length, length: raw.length, ai_response: raw.slice(0, 600) },
+        });
       }
 
       // Съхрани като PDF (снимка → PDF; PDF → както е)
