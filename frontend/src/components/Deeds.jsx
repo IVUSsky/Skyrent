@@ -30,8 +30,16 @@ export default function Deeds({ API = '' }) {
     try {
       const fd = new FormData(); fd.append('file', file)
       const r = await apiFetch(`${API}/api/deeds/extract`, { method: 'POST', body: fd })
-      const d = await r.json()
-      if (!r.ok) { showToast(d.error || 'Грешка при извличане', 'error'); setErrorDetail(d.debug || { error: d.error }); return }
+      const text = await r.text()
+      let d = null
+      try { d = JSON.parse(text) } catch (_) {}
+      if (!r.ok || !d) {
+        setErrorDetail(d
+          ? { http_status: r.status, error: d.error, ...(d.debug || {}) }
+          : { http_status: r.status, raw_response: (text || '(празен отговор)').slice(0, 900) })
+        showToast((d && d.error) || `Грешка (HTTP ${r.status})`, 'error')
+        return
+      }
       setResult(d)
       setPropertyId(d.suggested_property?.id || '')
       const m = d.extracted?.main_unit || {}
@@ -42,7 +50,7 @@ export default function Deeds({ API = '' }) {
         адрес: `${shortAddr}${shortAddr ? ' — ' : ''}${u.description || u.type || 'мазе'}`,
       })))
       showToast('Данните са извлечени — прегледай ги преди запазване')
-    } catch (e) { showToast('Грешка при извличане', 'error') } finally { setExtracting(false) }
+    } catch (e) { setErrorDetail({ network_error: String(e?.message || e) }); showToast('Мрежова грешка: ' + (e?.message || e), 'error') } finally { setExtracting(false) }
   }
 
   const apply = async () => {
