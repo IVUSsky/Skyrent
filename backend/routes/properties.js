@@ -19,6 +19,17 @@ const photoStorage = multer.diskStorage({
 });
 const uploadPhoto = multer({ storage: photoStorage, limits: { fileSize: 10 * 1024 * 1024 }, fileFilter: imagesOnly });
 
+// Финансови полета, скрити от роля „брокер" (недоверен лизинг агент). Той
+// управлява описателните данни/обяви/наематели, но не вижда икономиката.
+const BROKER_HIDDEN_FIELDS = ['покупна', 'ремонт', 'market_val', 'owner_id'];
+const isBroker = (req) => req.user?.role === 'broker';
+const stripForBroker = (req, row) => {
+  if (!isBroker(req) || !row) return row;
+  const r = { ...row };
+  for (const k of BROKER_HIDDEN_FIELDS) delete r[k];
+  return r;
+};
+
 module.exports = function(db) {
   const router = express.Router();
 
@@ -46,7 +57,7 @@ module.exports = function(db) {
 
   router.get('/', (req, res) => {
     const rows = db.prepare('SELECT * FROM properties ORDER BY id').all();
-    res.json(rows);
+    res.json(isBroker(req) ? rows.map(r => stripForBroker(req, r)) : rows);
   });
 
   // Rent payment status for a given month
@@ -347,6 +358,8 @@ module.exports = function(db) {
 
   router.post('/', (req, res) => {
     try {
+      // Брокер не може да задава финансови полета → падат на default (0/null)
+      if (isBroker(req)) for (const k of BROKER_HIDDEN_FIELDS) delete req.body[k];
       const { адрес, район, статус, наем, наемател, площ, тип, покупна, ремонт, market_val, email, телефон, owner_id } = req.body;
       if (!адрес) return res.status(400).json({ error: 'адрес е задължителен' });
       const r = db.prepare(`
@@ -362,7 +375,7 @@ module.exports = function(db) {
         owner_id ? Number(owner_id) : null
       );
       const created = db.prepare('SELECT * FROM properties WHERE id = ?').get(r.lastInsertRowid);
-      res.status(201).json(created);
+      res.status(201).json(stripForBroker(req, created));
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -370,6 +383,8 @@ module.exports = function(db) {
 
   router.put('/:id', (req, res) => {
     try {
+      // Брокер не може да променя финансови полета → запазват текущите стойности
+      if (isBroker(req)) for (const k of BROKER_HIDDEN_FIELDS) delete req.body[k];
       console.log('PUT body:', JSON.stringify(req.body));
       const cols = db.prepare('PRAGMA table_info(properties)').all();
       console.log('Columns:', cols.map(c => c.name));
@@ -418,7 +433,7 @@ module.exports = function(db) {
       const updated = db.prepare('SELECT * FROM properties WHERE id = ?').get(id);
       console.log('Saved тип:', updated.тип, '| покупна:', updated.покупна, '| ремонт:', updated.ремонт);
 
-      res.json({ success: true, property: updated });
+      res.json({ success: true, property: stripForBroker(req, updated) });
     } catch (err) {
       console.error('PUT error:', err.message);
       res.status(500).json({ error: err.message });

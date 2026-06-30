@@ -3,10 +3,10 @@
 export const ALL_TABS = [
   { id: 'dashboard', label: '🏠 Табло',       roles: ['admin'],            tier: 'core' },
   { id: 'tenants',   label: '👥 Наематели',   roles: ['admin'],            tier: 'core' },
-  { id: 'invoices',  label: '🧾 Фактури',     roles: ['admin', 'broker'],  tier: 'core' },
+  { id: 'invoices',  label: '🧾 Фактури',     roles: ['admin'],            tier: 'core' },
   { id: 'contracts', label: '📋 Договори',    roles: ['admin', 'broker'],  tier: 'core' },
   { id: 'expenses',  label: '💸 Разходи',     roles: ['admin'],            tier: 'core' },
-  { id: 'portfolio', label: '🏢 Имоти',       roles: ['admin'],            tier: 'standard' },
+  { id: 'portfolio', label: '🏢 Имоти',       roles: ['admin', 'broker'],  tier: 'standard' },
   { id: 'list',      label: 'Таблица',        roles: ['admin'],            tier: 'standard' },
   { id: 'owners',    label: '👤 Собственици', roles: ['admin'],            tier: 'standard', capability: 'multi_owner' },
   { id: 'addons',    label: '🛍️ Услуги',      roles: ['admin'],            tier: 'standard' },

@@ -103,10 +103,33 @@ async function main() {
   // изрично е под /api/tenant — критично за SaaS multi-tenant изолация.
   const TENANT_ALLOWED = ['/api/tenant', '/api/auth'];
   app.use('/api', (req, res, next) => {
-    if (req.user?.role !== 'tenant') return next();           // admin/broker → пълен достъп
+    if (req.user?.role !== 'tenant') return next();           // admin/broker → продължава
     const url = req.originalUrl.split('?')[0];
     if (TENANT_ALLOWED.some(p => url === p || url.startsWith(p + '/'))) return next();
     return res.status(403).json({ error: 'Forbidden' });
+  });
+
+  // ─── Broker containment (недоверен лизинг агент) ──────────────────────────
+  // Брокерът прави САМО договори/протоколи + управление на имоти (описателно)
+  // + обяви + снимки + наематели. НЕ вижда финанси (покупна/пазарна/собственик,
+  // наеми-плащания, разходи, лични данни). Понеже е недоверен → backend-enforced,
+  // не само скрито в UI. Разрешени префикси + блок на финансовите property routes.
+  const BROKER_ALLOW = ['/api/contracts', '/api/properties', '/api/auth'];
+  const BROKER_BLOCK = [
+    /^\/api\/properties\/rent-status/,
+    /^\/api\/properties\/rent-diagnostics/,
+    /^\/api\/properties\/rent-matrix/,
+    /^\/api\/properties\/[^/]+\/mark-paid/,
+    /^\/api\/properties\/[^/]+\/monthly/,
+    /^\/api\/properties\/[^/]+\/rent-channel/,
+  ];
+  app.use('/api', (req, res, next) => {
+    if (req.user?.role !== 'broker') return next();
+    const url = req.originalUrl.split('?')[0];
+    const allowed = BROKER_ALLOW.some(p => url === p || url.startsWith(p + '/'));
+    if (!allowed) return res.status(403).json({ error: 'Forbidden — брокерска роля' });
+    if (BROKER_BLOCK.some(re => re.test(url))) return res.status(403).json({ error: 'Forbidden — финансови данни' });
+    next();
   });
 
   // ─── Billing enforcement (SaaS Phase 3) ────────────────────────────────────
