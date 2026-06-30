@@ -577,6 +577,13 @@ function runTenantMigrations(db) {
   // без логин; Skyrent пуска/спира целия интернет през firewall cutoff правило)
   try { db.exec("ALTER TABLE routers ADD COLUMN mode TEXT DEFAULT 'hotspot'"); console.log('Migration: added routers.mode'); } catch(_) {}
   try { db.exec("ALTER TABLE routers ADD COLUMN lan_interface TEXT DEFAULT 'bridge'"); console.log('Migration: added routers.lan_interface'); } catch(_) {}
+  // Poll-based контрол: рутерът сам дърпа желаното състояние ИЗХОДЯЩО (някои ISP-та
+  // режат входящия достъп при спрян нет → Skyrent не може да достигне рутера да го
+  // пусне; затова рутерът пита). desired_access=1 пуснат / 0 спрян. poll_token =
+  // споделена тайна в poll URL-а. poll_seen_at = последен contact от рутера.
+  try { db.exec("ALTER TABLE routers ADD COLUMN desired_access INTEGER DEFAULT 1"); console.log('Migration: added routers.desired_access'); } catch(_) {}
+  try { db.exec("ALTER TABLE routers ADD COLUMN poll_token TEXT"); console.log('Migration: added routers.poll_token'); } catch(_) {}
+  try { db.exec("ALTER TABLE routers ADD COLUMN poll_seen_at DATETIME"); console.log('Migration: added routers.poll_seen_at'); } catch(_) {}
 
   db.exec(`CREATE TABLE IF NOT EXISTS internet_plans (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
