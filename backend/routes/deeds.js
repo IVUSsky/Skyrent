@@ -47,10 +47,7 @@ function imageToPdf(imgPath, outPath) {
   });
 }
 
-const FULLTEXT_MARKER = '===ПЪЛЕН ТЕКСТ===';
-const EXTRACT_PROMPT = `Това е български НОТАРИАЛЕН АКТ (PDF или снимка). Прочети целия документ внимателно. Отговори в ТОЧНО ДВЕ части:
-
-ЧАСТ 1 — само компактен JSON обект със структурираните данни (БЕЗ пълния текст), без markdown:
+const EXTRACT_PROMPT = `Това е български НОТАРИАЛЕН АКТ (PDF или снимка). Прочети целия документ внимателно и извлечи СТРУКТУРИРАНИТЕ данни. Върни САМО компактен ВАЛИДЕН JSON, без markdown, без пълния текст на акта:
 {
   "owners": ["имена на собствениците/купувачите на кирилица"],
   "deed": { "number": "акт №, том, рег.№, дело", "date": "ГГГГ-ММ-ДД", "notary": "име на нотариуса" },
@@ -65,9 +62,6 @@ const EXTRACT_PROMPT = `Това е български НОТАРИАЛЕН АК
     { "type": "Мазе/Изба/Таван/Паркомясто/Гараж", "cadastral_id": "идентификатор ако има", "area": число_кв.м, "description": "пояснение (напр. мазе №3 към ап.5)" }
   ]
 }
-
-ЧАСТ 2 — след JSON-а, на нов ред, изпиши точно маркера ${FULLTEXT_MARKER} и под него целия текст на акта ДОСЛОВНО като ОБИКНОВЕН ТЕКСТ (не JSON, без кавички/escape).
-
 ПРАВИЛА:
 - ЧАСТ 1 JSON-ът трябва да е компактен и ВАЛИДЕН (без пълния текст вътре — той е в ЧАСТ 2).
 - Извлечи ВСИЧКИ самостоятелни обекти. Често актът включва основен имот + ПРИНАДЛЕЖНОСТИ (мазе/изба, таван, паркомясто, гараж) — изброй всяка в additional_units.
@@ -103,23 +97,26 @@ module.exports = function (db) {
 
       const response = await client.messages.create({
         model: process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-6',
-        max_tokens: 16000, // актовете са дълги; ниският лимит отрязваше JSON-а
+        max_tokens: 2000, // само структурирани данни → бърз отговор (без timeout)
         messages: [{ role: 'user', content: [block, { type: 'text', text: EXTRACT_PROMPT }] }],
       });
       const stopReason = response.stop_reason;
       let raw = response.content.map(c => c.text || '').join('').trim();
-      // Отдели структурирания JSON (ЧАСТ 1) от пълния текст (ЧАСТ 2 след маркера).
-      // Пълният текст е извън JSON-а → дългият многоредов текст не чупи parse-а.
-      let jsonPart = raw, fullText = '';
-      const mi = raw.indexOf(FULLTEXT_MARKER);
-      if (mi !== -1) { jsonPart = raw.slice(0, mi); fullText = raw.slice(mi + FULLTEXT_MARKER.length).trim(); }
-      jsonPart = jsonPart.replace(/```(?:json)?/gi, '').trim();
+      const jsonPart = raw.replace(/```(?:json)?/gi, '').trim();
       const s = jsonPart.indexOf('{'), e = jsonPart.lastIndexOf('}');
       let data = null;
       if (s !== -1 && e > s) {
         try { data = JSON.parse(jsonPart.slice(s, e + 1)); } catch (_) { /* fallback по-долу */ }
       }
-      if (data) data.full_text = fullText || data.full_text || '';
+      // Пълен текст: от текстовия слой на PDF-а (мигновено, без AI timeout).
+      // За снимки/сканирани PDF без текстов слой → празно (структурата + PDF-ът остават).
+      if (data) {
+        let fullText = '';
+        if (isPdf) {
+          try { const pp = await require('pdf-parse')(fs.readFileSync(f.path)); fullText = (pp.text || '').trim(); } catch (_) {}
+        }
+        data.full_text = fullText;
+      }
       if (!data) {
         console.error('deed parse fail — stop_reason=%s, дължина=%d, начало=%s', stopReason, raw.length, raw.slice(0, 400));
         const hint = stopReason === 'max_tokens'
