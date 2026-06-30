@@ -365,6 +365,7 @@ function RoutersTab({ API, showToast }) {
       <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-sm text-blue-900 space-y-1">
         <div><strong>🏠 Flat режим</strong> — 1 наемател, фиксирана такса. Без логин: наемателят само въвежда WiFi паролата. Skyrent пуска/спира целия интернет (при плащане/изтичане или ръчно от бутоните долу).</div>
         <div><strong>👥 Hotspot режим</strong> — няколко платещи наематели на 1 рутер. Всеки получава отделен достъп през captive portal (login).</div>
+        <div className="pt-1 text-xs text-blue-700"><strong>ℹ️ Два различни статуса:</strong> „🟢 Online" = рутерът е жив и достъпен (здраве). „✅ Нет пуснат / 🛑 Нет спрян" = дали наемателят има интернет в момента. Рутерът може да е Online, а нетът — спрян.</div>
       </div>
 
       <button onClick={startNew} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg">➕ Добави рутер</button>
@@ -455,7 +456,16 @@ function RoutersTab({ API, showToast }) {
                   </td>
                   <td className="px-3 py-2 font-mono text-xs">{r.host}:{r.api_port}{r.use_tls ? ' (TLS)' : ''}</td>
                   <td className="px-3 py-2 text-xs text-gray-500">{r.last_seen_at ? r.last_seen_at.slice(0, 16).replace('T', ' ') : '—'}</td>
-                  <td className="px-3 py-2"><span className={`text-xs ${st.cls}`} title={r.last_error || ''}>{st.text}</span></td>
+                  <td className="px-3 py-2">
+                    <span className={`text-xs ${st.cls}`} title={r.last_error || 'Здраве на рутера (достъпен ли е), не дали наемателят има нет'}>{st.text}</span>
+                    {r.mode === 'flat' && (
+                      <div className="mt-1">
+                        {r.desired_access === 0
+                          ? <span className="inline-block text-xs px-2 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-200" title="Наемателят НЯМА интернет">🛑 Нет спрян</span>
+                          : <span className="inline-block text-xs px-2 py-0.5 rounded-full bg-green-50 text-green-700 border border-green-200" title="Наемателят има интернет">✅ Нет пуснат</span>}
+                      </div>
+                    )}
+                  </td>
                   <td className="px-3 py-2 whitespace-nowrap">
                     {r.mode === 'flat' && (
                       <>
