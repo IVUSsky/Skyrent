@@ -99,14 +99,25 @@ module.exports = function (db) {
 
       const response = await client.messages.create({
         model: process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-6',
-        max_tokens: 4000,
+        max_tokens: 16000, // актовете са дълги; ниският лимит отрязваше JSON-а
         messages: [{ role: 'user', content: [block, { type: 'text', text: EXTRACT_PROMPT }] }],
       });
-      const raw = response.content.map(c => c.text || '').join('').trim();
+      const stopReason = response.stop_reason;
+      let raw = response.content.map(c => c.text || '').join('').trim();
+      // Махни markdown ограждения ако има (```json ... ```)
+      raw = raw.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
       const s = raw.indexOf('{'), e = raw.lastIndexOf('}');
-      let data;
-      try { data = JSON.parse(raw.slice(s, e + 1)); }
-      catch (_) { return res.status(422).json({ error: 'Не успях да разчета акта — опитай с по-ясен скан/PDF' }); }
+      let data = null;
+      if (s !== -1 && e > s) {
+        try { data = JSON.parse(raw.slice(s, e + 1)); } catch (_) { /* пробваме fallback по-долу */ }
+      }
+      if (!data) {
+        console.error('deed parse fail — stop_reason=%s, дължина=%d, начало=%s', stopReason, raw.length, raw.slice(0, 200));
+        const hint = stopReason === 'max_tokens'
+          ? 'Документът е прекалено дълъг — пробвай по-малко страници или го раздели.'
+          : 'Не успях да разчета акта — пробвай по-ясен скан/PDF.';
+        return res.status(422).json({ error: hint });
+      }
 
       // Съхрани като PDF (снимка → PDF; PDF → както е)
       let pdfPath = f.path, originalFormat = 'pdf';
