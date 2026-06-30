@@ -14,7 +14,8 @@ const EMPTY_FORM = { адрес:'', район:'', статус:'✅', наем:
 
 const fmt = (n) => (n || 0).toLocaleString('bg-BG')
 
-export default function Portfolio({ API }) {
+export default function Portfolio({ API, role }) {
+  const broker = role === 'broker' // недоверен лизинг агент — крие финансите (покупна/пазарна/собственик)
   const [properties, setProperties] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -251,7 +252,7 @@ export default function Portfolio({ API }) {
           <table className="min-w-full divide-y divide-gray-200 text-sm">
             <thead className="bg-gray-50 sticky top-0 z-10">
               <tr>
-                {['#', 'Адрес', 'Район', 'Статус', 'Наемател', 'Наем (EUR €)', 'Площ м²', 'Тип', 'Покупна+Ремонт (EUR €)', 'Пазарна стойност (EUR €)', ''].map(h => (
+                {['#', 'Адрес', 'Район', 'Статус', 'Наемател', 'Наем (EUR €)', 'Площ м²', 'Тип', ...(broker ? [] : ['Покупна+Ремонт (EUR €)', 'Пазарна стойност (EUR €)']), ''].map(h => (
                   <th key={h} className="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap bg-gray-50">
                     {h}
                   </th>
@@ -275,8 +276,8 @@ export default function Portfolio({ API }) {
                     <td className="px-3 py-2 text-right font-semibold text-gray-800">{p['наем'] ? fmt(p['наем']) : '—'}</td>
                     <td className="px-3 py-2 text-right text-gray-600">{p['площ']}</td>
                     <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{p['тип']}</td>
-                    <td className="px-3 py-2 text-right text-gray-600">{cost > 0 ? fmt(cost) : '—'}</td>
-                    <td className="px-3 py-2 text-right text-gray-600">{p.market_val ? fmt(p.market_val) : '—'}</td>
+                    {!broker && <td className="px-3 py-2 text-right text-gray-600">{cost > 0 ? fmt(cost) : '—'}</td>}
+                    {!broker && <td className="px-3 py-2 text-right text-gray-600">{p.market_val ? fmt(p.market_val) : '—'}</td>}
                     <td className="px-3 py-2" onClick={e => e.stopPropagation()}>
                       <div className="flex gap-1">
                         <button
@@ -348,7 +349,7 @@ export default function Portfolio({ API }) {
                 { label: 'Покупна цена (EUR €)', key: 'покупна', type: 'number' },
                 { label: 'Ремонт (EUR €)', key: 'ремонт', type: 'number' },
                 { label: 'Пазарна стойност (EUR €)', key: 'market_val', type: 'number', placeholder: 'По избор' },
-              ].map(({ label, key, type, placeholder }) => (
+              ].filter(f => !broker || !['покупна', 'ремонт', 'market_val'].includes(f.key)).map(({ label, key, type, placeholder }) => (
                 <div key={key}>
                   <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
                   <input
@@ -370,7 +371,7 @@ export default function Portfolio({ API }) {
                   ))}
                 </select>
               </div>
-              {owners.length > 0 && (
+              {!broker && owners.length > 0 && (
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">👤 Собственик</label>
                   <select value={newForm.owner_id} onChange={e => setNewForm(f => ({ ...f, owner_id: e.target.value }))}
@@ -585,6 +586,7 @@ export default function Portfolio({ API }) {
                   step="1"
                 />
               </div>
+              {!broker && (
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Пазарна стойност (EUR €)</label>
                 <input
@@ -597,6 +599,7 @@ export default function Portfolio({ API }) {
                   placeholder="Оставете празно за използване на покупна цена"
                 />
               </div>
+              )}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Тип имот</label>
                 <select
@@ -609,7 +612,7 @@ export default function Portfolio({ API }) {
                   ))}
                 </select>
               </div>
-              {owners.length > 0 && (
+              {!broker && owners.length > 0 && (
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">👤 Собственик</label>
                   <select value={editForm.owner_id || ''} onChange={e => setEditForm(f => ({ ...f, owner_id: e.target.value }))}
@@ -631,6 +634,7 @@ export default function Portfolio({ API }) {
                   placeholder="кв. метра"
                 />
               </div>
+              {!broker && (<>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Покупна цена (EUR €)</label>
                 <input
@@ -653,6 +657,7 @@ export default function Portfolio({ API }) {
                   step="1"
                 />
               </div>
+              </>)}
 
               {/* Utility account numbers */}
               <div className="border-t pt-4">

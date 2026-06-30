@@ -230,7 +230,7 @@ export default function App() {
       setMustChangePwd(false)
     }
     setAuthenticated(true)
-    setActiveTab(data?.role === 'admin' ? 'dashboard' : 'invoices')
+    setActiveTab(data?.role === 'admin' ? 'dashboard' : 'contracts')
   }
 
   const handleLogout = () => {
@@ -278,7 +278,7 @@ export default function App() {
       && planAllowsTier(orgPlan, orgPlatform, t.tier)        // план-гейтинг (starter без advanced)
       && planAllowsCapability(orgCaps, orgPlatform, t)        // capability-гейтинг (план без функцията)
       && (t.tier === 'system' || !hiddenMenus.includes(t.id)) // собственик-скрити (без системните)
-      && (uiMode === 'advanced' || SIMPLE_TIERS.has(t.tier))), // Лесен/Разширен
+      && (uiMode === 'advanced' || SIMPLE_TIERS.has(t.tier) || role === 'broker')), // Лесен/Разширен (брокер вижда табовете си винаги)
     ...(isSuper ? [{ id: 'platform', label: '🛸 Платформа', roles: ['admin'], tier: 'system' }] : []),
   ]
 
@@ -380,7 +380,7 @@ export default function App() {
         <Suspense fallback={<TabFallback/>}>
           {validTab === 'dashboard' && <Dashboard API={API} />}
           {validTab === 'investor'  && <InvestorView API={API} />}
-          {validTab === 'portfolio' && <Portfolio API={API} />}
+          {validTab === 'portfolio' && <Portfolio API={API} role={role} />}
           {validTab === 'owners'    && <Owners API={API} />}
           {validTab === 'list'      && <List API={API} />}
           {validTab === 'tenants'   && <Tenants API={API} />}
