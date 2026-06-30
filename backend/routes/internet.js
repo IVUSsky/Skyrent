@@ -253,13 +253,15 @@ module.exports = function(db) {
       const pollUrl = `${base}/api/public/router-poll/${orgId}/${id}?token=${token}`;
       const lanIf = r.lan_interface || 'bridge';
       // RouterOS 7 скрипт: дърпа желаното състояние и прилага cutoff правилото.
+      // ВАЖНО: тегли във ФАЙЛ, не output=user/as-value — Cloudflare ползва chunked
+      // transfer-encoding (без Content-Length) и as-value не хваща тялото (data=празно,
+      // downloaded=0), докато тегленето във файл хваща "1"/"0" коректно.
       const script =
 `:local url "${pollUrl}"
-:local res
 :do {
-  :set res [/tool fetch url=$url mode=https http-method=get check-certificate=no output=user as-value]
+  /tool fetch url=$url mode=https http-method=get check-certificate=no dst-path=skyrent_poll.txt
 } on-error={ :log warning "skyrent-poll: fetch failed"; :return }
-:local allow ($res->"data")
+:local allow [/file get [find name="skyrent_poll.txt"] contents]
 :local cut [/ip firewall filter find comment="skyrent-flat-cutoff"]
 :if ([:len $cut] = 0) do={
   /ip firewall filter add chain=forward in-interface=${lanIf} action=drop comment="skyrent-flat-cutoff" disabled=yes
