@@ -716,6 +716,29 @@ function runTenantMigrations(db) {
   )`);
   console.log('tenant_directory table ready');
 
+  // Нотариални актове — качени документи (PDF/JPEG→PDF) + извлечен текст/данни.
+  // Свързват се с имот; могат да обновят данните му и да открият допълнителни
+  // единици (мазета/паркоместа) за добавяне в портфолиото.
+  db.exec(`CREATE TABLE IF NOT EXISTS property_deeds (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    property_id INTEGER REFERENCES properties(id),
+    pdf_path TEXT NOT NULL,
+    original_format TEXT,
+    cadastral_id TEXT,
+    deed_number TEXT,
+    deed_date TEXT,
+    notary TEXT,
+    area REAL,
+    owner_name TEXT,
+    extracted_text TEXT,
+    extracted_json TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+  try { db.exec("CREATE INDEX IF NOT EXISTS idx_property_deeds_property ON property_deeds(property_id)"); } catch(_) {}
+  console.log('property_deeds table ready');
+  // Кадастрален идентификатор на имота (от нотариалния акт)
+  try { db.exec("ALTER TABLE properties ADD COLUMN cadastral_id TEXT"); console.log('Migration: added properties.cadastral_id'); } catch(_) {}
+
   // Property inventory (furniture, appliances) + files (photos, manuals)
   db.exec(`CREATE TABLE IF NOT EXISTS property_inventory (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

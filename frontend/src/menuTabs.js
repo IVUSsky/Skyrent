@@ -7,6 +7,7 @@ export const ALL_TABS = [
   { id: 'contracts', label: '📋 Договори',    roles: ['admin', 'broker'],  tier: 'core' },
   { id: 'expenses',  label: '💸 Разходи',     roles: ['admin'],            tier: 'core' },
   { id: 'portfolio', label: '🏢 Имоти',       roles: ['admin', 'broker'],  tier: 'standard' },
+  { id: 'deeds',     label: '📜 Актове',      roles: ['admin'],            tier: 'standard' },
   { id: 'list',      label: 'Таблица',        roles: ['admin'],            tier: 'standard' },
   { id: 'owners',    label: '👤 Собственици', roles: ['admin'],            tier: 'standard', capability: 'multi_owner' },
   { id: 'addons',    label: '🛍️ Услуги',      roles: ['admin'],            tier: 'standard' },
