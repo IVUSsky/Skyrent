@@ -51,6 +51,28 @@ module.exports = function (getOrgDb, controlDb) {
     try { return getOrgDb(id); } catch { return null; }
   };
 
+  // ── Рутер poll (интернет препродажба) ─────────────────────────────────
+  // Рутерът пита ИЗХОДЯЩО какво е желаното състояние на нета. Нужно е, защото
+  // някои ISP-та режат входящия достъп до публичния IP при спрян нет → Skyrent
+  // не може да достигне рутера да го пусне обратно. Изходящото винаги минава.
+  // Без JWT (рутерът не може) — авторизация чрез poll_token в URL-а.
+  // Връща чист текст "1" (пуснат) или "0" (спрян) — лесно за RouterOS /tool/fetch.
+  router.get('/router-poll/:org/:id', (req, res) => {
+    res.set('Content-Type', 'text/plain');
+    try {
+      const org = Number(req.params.org), id = Number(req.params.id);
+      const token = req.query.token || req.get('X-Poll-Token');
+      if (!org || !id || !token) return res.status(400).send('0');
+      const odb = openOrg(org);
+      if (!odb) return res.status(404).send('0');
+      const r = odb.prepare('SELECT id, poll_token, desired_access FROM routers WHERE id=?').get(id);
+      if (!r || !r.poll_token || r.poll_token !== token) return res.status(403).send('0');
+      odb.prepare("UPDATE routers SET poll_seen_at=datetime('now'), status='online', last_seen_at=datetime('now') WHERE id=?").run(id);
+      const allow = (r.desired_access == null || r.desired_access) ? '1' : '0';
+      return res.send(allow);
+    } catch (e) { return res.status(500).send('0'); }
+  });
+
   // Каталог — събира публикуваните обяви от ВСИЧКИ организации (cross-org).
   // Филтри: ?city= &type= &min= &max=. За малък мащаб iterира org базите;
   // при растеж → материализиран индекс.

@@ -161,15 +161,16 @@ module.exports = function(db) {
     try {
       const b = req.body;
       if (!b.property_id || !b.host) return res.status(400).json({ error: 'property_id и host са задължителни' });
+      const pollToken = require('crypto').randomBytes(24).toString('hex');
       const r = db.prepare(`
-        INSERT INTO routers (property_id, name, model, host, api_port, api_user, api_pass, use_tls, notes, mode, lan_interface)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO routers (property_id, name, model, host, api_port, api_user, api_pass, use_tls, notes, mode, lan_interface, poll_token, desired_access)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
       `).run(
         Number(b.property_id), b.name || '', b.model || 'MikroTik',
         b.host, Number(b.api_port) || 8728,
         b.api_user || 'admin', b.api_pass || '',
         b.use_tls ? 1 : 0, b.notes || '',
-        b.mode === 'flat' ? 'flat' : 'hotspot', b.lan_interface || 'bridge'
+        b.mode === 'flat' ? 'flat' : 'hotspot', b.lan_interface || 'bridge', pollToken
       );
       res.json({ ok: true, id: r.lastInsertRowid });
     } catch (err) {
@@ -211,12 +212,70 @@ module.exports = function(db) {
     catch (err) { res.status(500).json({ error: err.message }); }
   });
 
-  // Ръчно пускане/спиране на интернета за имота (flat mode)
+  // Ръчно пускане/спиране на интернета за имота (flat mode).
+  // 1) Записва ЖЕЛАНОТО състояние (desired_access) — рутерът го дърпа при poll
+  //    (ISP-имунно: работи дори когато входящият достъп до рутера е отрязан).
+  // 2) Best-effort директен push с кратък timeout — instant ефект АКО рутерът е
+  //    достъпен; ако не е (спрян нет / flaky WAN), не блокира — poll-ът ще приложи.
   router.post('/routers/:id/access', async (req, res) => {
     try {
       const allow = !!req.body.allow;
-      const result = await getRouterProvider().setPropertyAccess(db, Number(req.params.id), allow);
-      res.json({ ok: true, ...result });
+      const id = Number(req.params.id);
+      db.prepare('UPDATE routers SET desired_access=? WHERE id=?').run(allow ? 1 : 0, id);
+      let direct = null;
+      try {
+        direct = await Promise.race([
+          getRouterProvider().setPropertyAccess(db, id, allow),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 7000)),
+        ]);
+      } catch (e) { direct = { ok: false, deferred: true, error: e.message }; }
+      res.json({
+        ok: true, allow, desired_saved: true, direct,
+        note: direct && direct.ok ? 'приложено веднага' : 'записано — рутерът ще го приложи при следващия poll (до ~3 мин)',
+      });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  // Setup за poll контрол: връща токена, poll URL-а и готовия RouterOS скрипт.
+  // Генерира poll_token ако липсва (за рутери създадени преди тази функция).
+  router.get('/routers/:id/poll-setup', (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const r = db.prepare('SELECT * FROM routers WHERE id=?').get(id);
+      if (!r) return res.status(404).json({ error: 'Рутерът не е намерен' });
+      let token = r.poll_token;
+      if (!token) {
+        token = require('crypto').randomBytes(24).toString('hex');
+        db.prepare('UPDATE routers SET poll_token=? WHERE id=?').run(token, id);
+      }
+      const orgId = db.orgId;
+      const base = process.env.PUBLIC_API_URL || 'https://api.skycapital.pro';
+      const pollUrl = `${base}/api/public/router-poll/${orgId}/${id}?token=${token}`;
+      const lanIf = r.lan_interface || 'bridge';
+      // RouterOS 7 скрипт: дърпа желаното състояние и прилага cutoff правилото.
+      const script =
+`:local url "${pollUrl}"
+:local res
+:do {
+  :set res [/tool fetch url=$url mode=https http-method=get check-certificate=no output=user as-value]
+} on-error={ :log warning "skyrent-poll: fetch failed"; :return }
+:local allow ($res->"data")
+:local cut [/ip firewall filter find comment="skyrent-flat-cutoff"]
+:if ([:len $cut] = 0) do={
+  /ip firewall filter add chain=forward in-interface=${lanIf} action=drop comment="skyrent-flat-cutoff" disabled=yes
+  :set cut [/ip firewall filter find comment="skyrent-flat-cutoff"]
+}
+:if ([:pick $allow 0 1] = "1") do={
+  /ip firewall filter set $cut disabled=yes
+} else={
+  /ip firewall filter set $cut disabled=no
+}`;
+      res.json({
+        ok: true, router_id: id, poll_token: token, poll_url: pollUrl,
+        poll_seen_at: r.poll_seen_at, desired_access: r.desired_access,
+        routeros_script: script,
+        install_hint: 'Създай /system script "skyrent-poll" с този source + /system scheduler "skyrent-poll" interval=2m on-event="/system script run skyrent-poll".',
+      });
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
 
