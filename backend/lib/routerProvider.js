@@ -12,6 +12,28 @@
 //   disableUser(db, account) → деактивира
 //   testRouter(db, routerId) → health-check на 1 рутер от admin UI
 
+// ── RouterOS 7 / node-routeros кръпка ────────────────────────────────────
+// RouterOS 7.x връща `!empty` (последвано от `!done`) за print на празна
+// таблица. node-routeros няма case за `!empty` в processPacket → пада в
+// default → onUnknown хвърля UNKNOWNREPLY вътре в socket data handler-а →
+// promise-ът никога не се resolve-ва → заявката виси завинаги (Cloudflare 524).
+// Това чупеше flat-mode спиране/пускане, защото `/ip/hotspot/print` и др. са
+// празни в flat режим. Кръпката игнорира `!empty` и изчаква нормалния `!done`.
+// Идемпотентна, защитена с try/catch ако вътрешната структура се промени.
+try {
+  const { Channel } = require('node-routeros/dist/Channel');
+  if (Channel && Channel.prototype && !Channel.prototype.__skyrentEmptyPatch) {
+    const origProcessPacket = Channel.prototype.processPacket;
+    Channel.prototype.processPacket = function (packet) {
+      if (packet && packet[0] === '!empty') return; // игнорирай; чакай `!done`
+      return origProcessPacket.call(this, packet);
+    };
+    Channel.prototype.__skyrentEmptyPatch = true;
+  }
+} catch (e) {
+  console.warn('[routerProvider] node-routeros !empty кръпка не приложена:', e.message);
+}
+
 function getRouterForAccount(db, account) {
   if (!account.property_id) return null;
   return db.prepare('SELECT * FROM routers WHERE property_id=?').get(account.property_id);
