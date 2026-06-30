@@ -364,6 +364,8 @@ export default function Contracts({ API }) {
   const [idFront, setIdFront] = useState(null)
   const [idBack, setIdBack] = useState(null)
   const [extractingId, setExtractingId] = useState(false)
+  const [directory, setDirectory] = useState([])   // указател на наематели
+  const [savingParty, setSavingParty] = useState(false)
 
   // Извличане на данни от снимки на лична карта (Claude Vision) → попълва полетата
   const extractId = async () => {
@@ -393,6 +395,39 @@ export default function Contracts({ API }) {
     } catch (e) {
       showToast('Грешка при извличане', 'error')
     } finally { setExtractingId(false) }
+  }
+
+  // Указател на наематели — преизползваеми контакти
+  const loadDirectory = () => apiFetch(`${API}/api/contracts/parties`)
+    .then(r => r.ok ? r.json() : []).then(d => setDirectory(Array.isArray(d) ? d : [])).catch(() => {})
+
+  const applyParty = (id) => {
+    const p = directory.find(x => x.id === Number(id))
+    if (!p) return
+    setNewForm(f => ({
+      ...f,
+      tenant_name: p.name || '', tenant_egn: p.egn || '', tenant_address: p.address || '',
+      tenant_phone: p.phone || '', tenant_email: p.email || '', tenant_dob: p.dob || '',
+      tenant_doc: p.doc_type || f.tenant_doc, tenant_doc_date: p.doc_date || '',
+      tenant_doc_country: p.doc_country || f.tenant_doc_country,
+    }))
+  }
+
+  const saveParty = async () => {
+    if (!newForm.tenant_name) { showToast('Първо въведи име на наемател', 'error'); return }
+    setSavingParty(true)
+    try {
+      const body = {
+        name: newForm.tenant_name, egn: newForm.tenant_egn, address: newForm.tenant_address,
+        phone: newForm.tenant_phone, email: newForm.tenant_email, doc_type: newForm.tenant_doc,
+        doc_date: newForm.tenant_doc_date, doc_country: newForm.tenant_doc_country, dob: newForm.tenant_dob,
+      }
+      const r = await apiFetch(`${API}/api/contracts/parties`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      const d = await r.json()
+      if (!r.ok) { showToast(d.error || 'Грешка', 'error'); return }
+      showToast('Наемателят е запазен в указателя ✓')
+      loadDirectory()
+    } catch (e) { showToast('Грешка', 'error') } finally { setSavingParty(false) }
   }
 
   // Actions
@@ -427,6 +462,7 @@ export default function Contracts({ API }) {
   }, [API, filterStatus, search])
 
   useEffect(() => { load() }, [load])
+  useEffect(() => { loadDirectory() }, [])
 
   // Auto-fill form fields when property is selected
   const onPropertyChange = (propId) => {
@@ -795,6 +831,23 @@ export default function Contracts({ API }) {
               {/* Tenant */}
               <div className="bg-white rounded-xl shadow border border-gray-100 p-5">
                 <h3 className="font-bold text-gray-800 mb-3">Наемател</h3>
+
+                {/* Указател на наематели — избор на съществуващ + запазване */}
+                <div className="mb-4 flex flex-wrap items-end gap-2 rounded-lg border border-emerald-200 bg-emerald-50 p-3">
+                  <div className="flex-1 min-w-[200px]">
+                    <label className="block text-xs font-semibold text-emerald-900 mb-1">📇 Избери от указателя</label>
+                    <select defaultValue="" onChange={e => { applyParty(e.target.value); e.target.value = '' }}
+                      className="w-full border border-emerald-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                      <option value="">— нов наемател —</option>
+                      {directory.map(p => <option key={p.id} value={p.id}>{p.name}{p.egn ? ` (${p.egn})` : ''}</option>)}
+                    </select>
+                  </div>
+                  <button type="button" onClick={saveParty} disabled={savingParty || !newForm.tenant_name}
+                    className="px-3 py-2 text-sm bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-lg whitespace-nowrap"
+                    title="Запази въведения наемател за бъдеща употреба">
+                    {savingParty ? 'Запазва…' : '💾 Запази в указателя'}
+                  </button>
+                </div>
 
                 {/* Авто-попълване от лична карта */}
                 <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 p-3">

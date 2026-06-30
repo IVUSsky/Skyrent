@@ -697,6 +697,25 @@ function runTenantMigrations(db) {
   )`);
   console.log('tenant_history table ready');
 
+  // Указател на наематели — преизползваеми контактни данни за договори (без финанси).
+  // Брокерът създава наемател веднъж и го избира при нов договор.
+  db.exec(`CREATE TABLE IF NOT EXISTS tenant_directory (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    egn TEXT,
+    address TEXT,
+    phone TEXT,
+    email TEXT,
+    doc_type TEXT,
+    doc_date TEXT,
+    doc_country TEXT,
+    dob TEXT,
+    notes TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+  console.log('tenant_directory table ready');
+
   // Property inventory (furniture, appliances) + files (photos, manuals)
   db.exec(`CREATE TABLE IF NOT EXISTS property_inventory (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -960,6 +960,44 @@ module.exports = function(db) {
     res.json({ ok: true, logo_path: req.file.filename });
   });
 
+  // ── Указател на наематели (преизползваеми контакти за договори) ─────────
+  // Чисто контактни данни (без финанси) — брокерът създава наемател веднъж,
+  // после го избира при нов договор. ВАЖНО: преди /:id route-а (иначе го хваща).
+  router.get('/parties', (req, res) => {
+    res.json(db.prepare('SELECT * FROM tenant_directory ORDER BY name COLLATE NOCASE').all());
+  });
+
+  const PARTY_FIELDS = ['name', 'egn', 'address', 'phone', 'email', 'doc_type', 'doc_date', 'doc_country', 'dob', 'notes'];
+  router.post('/parties', (req, res) => {
+    try {
+      const b = req.body || {};
+      if (!b.name) return res.status(400).json({ error: 'Името е задължително' });
+      const vals = PARTY_FIELDS.map(k => b[k] != null && b[k] !== '' ? String(b[k]) : null);
+      const r = db.prepare(
+        `INSERT INTO tenant_directory (${PARTY_FIELDS.join(',')}) VALUES (${PARTY_FIELDS.map(() => '?').join(',')})`
+      ).run(...vals);
+      res.status(201).json(db.prepare('SELECT * FROM tenant_directory WHERE id=?').get(r.lastInsertRowid));
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  router.put('/parties/:id', (req, res) => {
+    try {
+      const cur = db.prepare('SELECT * FROM tenant_directory WHERE id=?').get(req.params.id);
+      if (!cur) return res.status(404).json({ error: 'Не е намерен' });
+      const b = req.body || {};
+      const vals = PARTY_FIELDS.map(k => (b[k] !== undefined ? (b[k] === '' ? null : String(b[k])) : cur[k]));
+      db.prepare(
+        `UPDATE tenant_directory SET ${PARTY_FIELDS.map(k => k + '=?').join(',')}, updated_at=CURRENT_TIMESTAMP WHERE id=?`
+      ).run(...vals, req.params.id);
+      res.json(db.prepare('SELECT * FROM tenant_directory WHERE id=?').get(req.params.id));
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  router.delete('/parties/:id', (req, res) => {
+    try { db.prepare('DELETE FROM tenant_directory WHERE id=?').run(req.params.id); res.json({ ok: true }); }
+    catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
   // ── Contracts ──────────────────────────────────────────────────────────
 
   router.get('/', (req, res) => {
