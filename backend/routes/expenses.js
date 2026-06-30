@@ -311,7 +311,7 @@ async function runAiExtract(db, ids) {
         : fp.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg';
 
       const response = await client.messages.create({
-        model: 'claude-sonnet-4-20250514',
+        model: process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-6',
         max_tokens: 1000,
         messages: [{
           role: 'user',
