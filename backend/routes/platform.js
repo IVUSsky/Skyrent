@@ -162,6 +162,25 @@ module.exports = function (controlDb, getOrgDb) {
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
+  // DELETE /api/platform/orgs/:id — трие организация напълно (за тестови/спам).
+  // Маха потребителите + org-скоуп редовете от control.db + org базата (файл).
+  router.delete('/orgs/:id', (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (id === 1) return res.status(400).json({ error: 'Платформеният акаунт (org 1) не се трие' });
+      const org = controlDb.prepare('SELECT id, name FROM organizations WHERE id=?').get(id);
+      if (!org) return res.status(404).json({ error: 'Организацията не съществува' });
+      // Изтрий org-скоуп редовете от control.db (defensive — прескача липсващи таблици/колони)
+      for (const [table, col] of [['users', 'organization_id'], ['announcement_leads', 'organization_id'], ['announcement_dismissals', 'organization_id'], ['login_audit', 'organization_id']]) {
+        try { controlDb.prepare(`DELETE FROM ${table} WHERE ${col}=?`).run(id); } catch (_) {}
+      }
+      controlDb.prepare('DELETE FROM organizations WHERE id=?').run(id);
+      // Затвори + изтрий org базата (файл)
+      try { require('../db/db').deleteOrgDb(id); } catch (e) { console.warn('[platform] deleteOrgDb:', e.message); }
+      res.json({ ok: true, deleted: id, name: org.name });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
   // PATCH /api/platform/orgs/:id — статус (active|suspended)
   router.patch('/orgs/:id', (req, res) => {
     try {

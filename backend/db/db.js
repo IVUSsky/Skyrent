@@ -118,6 +118,16 @@ function runWithOrg(orgId, fn) {
   return als.run({ orgDb, orgId: Number(orgId) }, fn);
 }
 
+// Затваря кешираната връзка и трие файла на org базата (за изтриване на
+// организация от платформата). Org 1 е защитен.
+function deleteOrgDb(orgId) {
+  const id = Number(orgId);
+  if (!id || id === 1) throw new Error('deleteOrgDb: невалиден или защитен orgId: ' + orgId);
+  if (orgCache.has(id)) { try { orgCache.get(id).close(); } catch (_) {} orgCache.delete(id); }
+  const file = path.join(ORGS_DIR, id + '.db');
+  for (const suf of ['', '-wal', '-shm']) { try { fs.unlinkSync(file + suf); } catch (_) {} }
+}
+
 // Express middleware: re-establish org контекста СЛЕД multer/stream middleware.
 // Multer (busboy) завършва в socket-root async контекст → ALS store-ът от
 // authMiddleware се губи → 'No org context' при db.prepare. req.user винаги
@@ -199,6 +209,6 @@ async function initDb() {
 
 module.exports = {
   initDb, initControlDb, getOrgDb, setTenantMigrator, bootstrap,
-  dbProxy, runWithOrg, orgContext, als,
+  dbProxy, runWithOrg, orgContext, als, deleteOrgDb,
   DATA_DIR, ORGS_DIR, CONTROL_PATH, DB_PATH,
 };

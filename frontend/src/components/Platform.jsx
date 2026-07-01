@@ -12,17 +12,30 @@ export default function Platform({ API = '' }) {
   const [orgs, setOrgs] = useState([])
   const [anns, setAnns] = useState([])
   const [leads, setLeads] = useState([])
-  const [tab, setTab] = useState('clients') // clients | offers | leads
+  const [tab, setTab] = useState('clients') // clients | users | offers | leads
   const [form, setForm] = useState({ type: 'service', title: '', body: '', cta_label: 'Интересувам се' })
   const [msg, setMsg] = useState(null)
+  const [users, setUsers] = useState([])
+  const [delConfirm, setDelConfirm] = useState(null)
 
   const load = () => {
     apiFetch(`${API}/api/platform/stats`).then(r => r.json()).then(setStats).catch(() => {})
     apiFetch(`${API}/api/platform/orgs`).then(r => r.json()).then(d => setOrgs(Array.isArray(d) ? d : [])).catch(() => {})
     apiFetch(`${API}/api/platform/announcements`).then(r => r.json()).then(d => setAnns(Array.isArray(d) ? d : [])).catch(() => {})
     apiFetch(`${API}/api/platform/leads`).then(r => r.json()).then(d => setLeads(Array.isArray(d) ? d : [])).catch(() => {})
+    apiFetch(`${API}/api/platform/users`).then(r => r.json()).then(d => setUsers(Array.isArray(d) ? d : [])).catch(() => {})
   }
   useEffect(load, [])
+
+  // Изтрий организация напълно (тестови/спам)
+  const doDelete = (id) => {
+    apiFetch(`${API}/api/platform/orgs/${id}`, { method: 'DELETE' })
+      .then(r => r.json()).then(d => {
+        setDelConfirm(null)
+        if (d.ok) { setOrgs(o => o.filter(x => x.id !== id)); setUsers(u => u.filter(x => x.organization_id !== id)); setMsg(`Изтрита организация #${id}`) }
+        else setMsg(d.error || 'Грешка')
+      }).catch(() => setMsg('Грешка'))
+  }
 
   // Задай план / comp (безплатен) на организация
   const setPlan = (id, plan, comp) => {
@@ -83,7 +96,7 @@ export default function Platform({ API = '' }) {
       </div>
 
       <div className="flex gap-2 mb-5">
-        {[['clients', '👥 Клиенти'], ['offers', '📣 Оферти'], ['leads', '🎯 Leads']].map(([k, l]) => (
+        {[['clients', '👥 Клиенти'], ['users', '👤 Потребители'], ['offers', '📣 Оферти'], ['leads', '🎯 Leads']].map(([k, l]) => (
           <button key={k} onClick={() => setTab(k)}
             className={`px-3 py-1.5 rounded-lg text-sm font-medium ${tab === k ? 'bg-amber-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>{l}</button>
         ))}
@@ -110,8 +123,8 @@ export default function Platform({ API = '' }) {
         <div className="bg-white rounded-xl shadow overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200 text-sm">
             <thead className="bg-gray-50"><tr>
-              {['#', 'Организация', 'План', 'Статус', 'Имоти', 'Потр.', 'Owner имейл', 'Trial до', 'Последен вход'].map(h =>
-                <th key={h} className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">{h}</th>)}
+              {['#', 'Организация', 'План', 'Статус', 'Имоти', 'Потр.', 'Owner имейл', 'Trial до', 'Последен вход', ''].map((h, i) =>
+                <th key={i} className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">{h}</th>)}
             </tr></thead>
             <tbody className="divide-y divide-gray-100">
               {orgs.map(o => (
@@ -138,12 +151,55 @@ export default function Platform({ API = '' }) {
                   <td className="px-3 py-2 text-gray-600">{o.owner_email || '—'}</td>
                   <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{o.id === 1 ? '—' : (o.trial_ends_at || '—')}</td>
                   <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{o.last_login ? String(o.last_login).slice(0, 16) : '—'}</td>
+                  <td className="px-3 py-2 whitespace-nowrap">
+                    {o.id !== 1 && (
+                      delConfirm === o.id ? (
+                        <span className="inline-flex items-center gap-1">
+                          <button onClick={() => doDelete(o.id)} className="text-xs px-2 py-0.5 bg-red-600 text-white rounded">Изтрий</button>
+                          <button onClick={() => setDelConfirm(null)} className="text-xs text-gray-500">не</button>
+                        </span>
+                      ) : (
+                        <button onClick={() => setDelConfirm(o.id)} className="text-red-400 hover:text-red-600 text-sm" title="Изтрий организацията (необратимо)">🗑</button>
+                      )
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
         </>
+      )}
+
+      {tab === 'users' && (
+        <div className="bg-white rounded-xl shadow overflow-x-auto">
+          <div className="px-4 py-3 text-sm text-gray-500 border-b">
+            Всички акаунти ({users.length}) — наематели, брокери и admin-и по организация.
+            <span className="text-gray-400"> Наемателите/брокерите са потребители ВЪТРЕ в организация, не отделни регистрации на платформата.</span>
+          </div>
+          <table className="min-w-full divide-y divide-gray-200 text-sm">
+            <thead className="bg-gray-50"><tr>
+              {['Организация', 'Роля', 'Потребител', 'Имейл', 'Последен вход'].map(h =>
+                <th key={h} className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">{h}</th>)}
+            </tr></thead>
+            <tbody className="divide-y divide-gray-100">
+              {users.map(u => {
+                const org = orgs.find(o => o.id === u.organization_id)
+                const badge = { admin: 'bg-blue-100 text-blue-700', tenant: 'bg-green-100 text-green-700', broker: 'bg-purple-100 text-purple-700' }[u.role] || 'bg-gray-100 text-gray-600'
+                return (
+                  <tr key={u.id} className="hover:bg-gray-50">
+                    <td className="px-3 py-2">{org ? org.name : `org ${u.organization_id}`}</td>
+                    <td className="px-3 py-2"><span className={`px-2 py-0.5 rounded-full text-xs ${badge}`}>{u.role}</span></td>
+                    <td className="px-3 py-2 font-medium">{u.username}</td>
+                    <td className="px-3 py-2 text-gray-600">{u.email || '—'}</td>
+                    <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{u.last_login_at ? String(u.last_login_at).slice(0, 16) : '—'}</td>
+                  </tr>
+                )
+              })}
+              {!users.length && <tr><td colSpan={5} className="px-3 py-6 text-center text-gray-400">Няма потребители</td></tr>}
+            </tbody>
+          </table>
+        </div>
       )}
 
       {tab === 'offers' && (
