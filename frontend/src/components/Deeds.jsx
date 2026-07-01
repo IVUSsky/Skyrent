@@ -19,10 +19,25 @@ export default function Deeds({ API = '' }) {
   const [showText, setShowText] = useState(false)
   const [toast, setToast] = useState(null)
   const [errorDetail, setErrorDetail] = useState(null)
+  const [props, setProps] = useState([])         // за име на свързания имот
+  const [detail, setDetail] = useState(null)      // преглед на запазен акт
 
   const showToast = (m, t = 'success') => { setToast({ m, t }); setTimeout(() => setToast(null), 3500) }
   const loadDeeds = () => apiFetch(`${API}/api/deeds`).then(r => r.json()).then(d => setDeeds(Array.isArray(d) ? d : [])).catch(() => {})
-  useEffect(() => { loadDeeds() }, [])
+  useEffect(() => {
+    loadDeeds()
+    apiFetch(`${API}/api/properties`).then(r => r.json()).then(d => setProps(Array.isArray(d) ? d : [])).catch(() => {})
+  }, [])
+  const propName = (id) => props.find(p => p.id === id)?.['адрес'] || (id ? `имот #${id}` : '—')
+
+  const openDetail = async (d) => {
+    setDetail({ ...d, loading: true })
+    try {
+      const r = await apiFetch(`${API}/api/deeds/${d.id}/text`)
+      const t = await r.json()
+      setDetail({ ...d, loading: false, text: t.text || '', data: t.data || null })
+    } catch (e) { setDetail({ ...d, loading: false, text: '', data: null }) }
+  }
 
   const extract = async () => {
     if (!file) { showToast('Избери PDF или снимка на акта', 'error'); return }
@@ -191,25 +206,61 @@ export default function Deeds({ API = '' }) {
       <div className="bg-white rounded-xl shadow border border-gray-100 overflow-x-auto">
         <table className="min-w-full divide-y divide-gray-100 text-sm">
           <thead className="bg-gray-50">
-            <tr>{['Дата на акта', 'Акт №', 'Нотариус', 'Идентификатор', 'Площ', 'Собственик', 'PDF', ''].map(h => <th key={h} className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">{h}</th>)}</tr>
+            <tr>{['Дата на акта', 'Акт №', 'Нотариус', 'Идентификатор', 'Площ', 'Имот', 'Собственик', 'PDF', ''].map(h => <th key={h} className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">{h}</th>)}</tr>
           </thead>
           <tbody className="divide-y divide-gray-50">
-            {deeds.length === 0 ? <tr><td colSpan={8} className="px-3 py-6 text-center text-gray-400 text-sm">Няма качени актове още</td></tr>
+            {deeds.length === 0 ? <tr><td colSpan={9} className="px-3 py-6 text-center text-gray-400 text-sm">Няма качени актове още</td></tr>
               : deeds.map(d => (
-                <tr key={d.id} className="hover:bg-gray-50">
+                <tr key={d.id} onClick={() => openDetail(d)} className="hover:bg-blue-50 cursor-pointer" title="Виж детайлите">
                   <td className="px-3 py-2 text-xs">{d.deed_date || '—'}</td>
                   <td className="px-3 py-2 text-xs max-w-[160px] truncate">{d.deed_number || '—'}</td>
                   <td className="px-3 py-2 text-xs max-w-[140px] truncate">{d.notary || '—'}</td>
                   <td className="px-3 py-2 font-mono text-xs">{d.cadastral_id || '—'}</td>
                   <td className="px-3 py-2 text-xs text-right">{d.area ? fmt(d.area) + ' м²' : '—'}</td>
+                  <td className="px-3 py-2 text-xs max-w-[160px] truncate">{propName(d.property_id)}</td>
                   <td className="px-3 py-2 text-xs max-w-[160px] truncate">{d.owner_name || '—'}</td>
-                  <td className="px-3 py-2"><a href={authUrl(`${API}/api/deeds/${d.id}/pdf`)} target="_blank" rel="noreferrer" className="text-amber-700 hover:underline text-xs">📄</a></td>
-                  <td className="px-3 py-2"><button onClick={() => delDeed(d.id)} className="text-red-500 hover:text-red-700 text-xs">🗑</button></td>
+                  <td className="px-3 py-2" onClick={e => e.stopPropagation()}><a href={authUrl(`${API}/api/deeds/${d.id}/pdf`)} target="_blank" rel="noreferrer" className="text-amber-700 hover:underline text-xs">📄</a></td>
+                  <td className="px-3 py-2" onClick={e => e.stopPropagation()}><button onClick={() => delDeed(d.id)} className="text-red-500 hover:text-red-700 text-xs">🗑</button></td>
                 </tr>
               ))}
           </tbody>
         </table>
       </div>
+
+      {/* Детайли на запазен акт */}
+      {detail && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" onClick={() => setDetail(null)}>
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="px-6 py-4 border-b flex items-center justify-between">
+              <h3 className="font-bold text-gray-900">📜 Акт {detail.deed_number || ''}</h3>
+              <button onClick={() => setDetail(null)} className="text-gray-400 hover:text-gray-700 text-2xl leading-none">×</button>
+            </div>
+            <div className="px-6 py-4 overflow-y-auto space-y-3 text-sm">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                <Info label="Дата" val={detail.deed_date} />
+                <Info label="Нотариус" val={detail.notary} />
+                <Info label="Свързан имот" val={propName(detail.property_id)} />
+                <Info label="Идентификатор" val={detail.cadastral_id} />
+                <Info label="Площ" val={detail.area ? fmt(detail.area) + ' м²' : ''} />
+                <Info label="Собственик" val={detail.owner_name} />
+              </div>
+              {detail.data?.additional_units?.length > 0 && (
+                <div>
+                  <div className="text-xs font-semibold text-gray-600 mb-1">Допълнителни единици</div>
+                  {detail.data.additional_units.map((u, i) => (
+                    <div key={i} className="text-xs text-gray-700">• {u.type}{u.area ? ` · ${fmt(u.area)} м²` : ''}{u.cadastral_id ? ` · ${u.cadastral_id}` : ''}{u.description ? ` — ${u.description}` : ''}</div>
+                  ))}
+                </div>
+              )}
+              <div>
+                <div className="text-xs font-semibold text-gray-600 mb-1">Пълен текст {detail.loading ? '(зареждане…)' : ''}</div>
+                <pre className="text-[11px] text-gray-600 bg-gray-50 border rounded-lg p-3 max-h-72 overflow-auto whitespace-pre-wrap">{detail.loading ? '…' : (detail.text || '(няма извлечен текст — напр. сканиран PDF без текстов слой)')}</pre>
+              </div>
+              <a href={authUrl(`${API}/api/deeds/${detail.id}/pdf`)} target="_blank" rel="noreferrer" className="inline-block text-sm text-amber-700 hover:underline">📄 Отвори съхранения PDF</a>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
