@@ -39,11 +39,32 @@ export default function Deeds({ API = '' }) {
     } catch (e) { setDetail({ ...d, loading: false, text: '', data: null }) }
   }
 
+  // Смалява снимка в браузъра преди качване (телефонните са 5-8MB → връзката се
+  // къса при няколко наведнъж). PDF-ите минават без промяна.
+  const resizeImage = (file) => new Promise((resolve) => {
+    if (!file.type || !file.type.startsWith('image/')) return resolve(file)
+    const url = URL.createObjectURL(file)
+    const img = new Image()
+    img.onload = () => {
+      URL.revokeObjectURL(url)
+      const max = 2200
+      let { width, height } = img
+      if (Math.max(width, height) > max) { const s = max / Math.max(width, height); width = Math.round(width * s); height = Math.round(height * s) }
+      const canvas = document.createElement('canvas')
+      canvas.width = width; canvas.height = height
+      canvas.getContext('2d').drawImage(img, 0, 0, width, height)
+      canvas.toBlob(b => resolve(b ? new File([b], (file.name || 'photo').replace(/\.\w+$/, '') + '.jpg', { type: 'image/jpeg' }) : file), 'image/jpeg', 0.82)
+    }
+    img.onerror = () => { URL.revokeObjectURL(url); resolve(file) }
+    img.src = url
+  })
+
   const extract = async () => {
     if (!files.length) { showToast('Избери PDF или снимки на акта', 'error'); return }
     setExtracting(true); setResult(null); setShowText(false); setErrorDetail(null)
     try {
-      const fd = new FormData(); files.forEach(f => fd.append('files', f))
+      const fd = new FormData()
+      for (const f of files) { const small = await resizeImage(f); fd.append('files', small) }
       const r = await apiFetch(`${API}/api/deeds/extract`, { method: 'POST', body: fd })
       const text = await r.text()
       let d = null
