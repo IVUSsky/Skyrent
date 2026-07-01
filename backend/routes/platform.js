@@ -169,6 +169,12 @@ module.exports = function (controlDb, getOrgDb) {
       const u = controlDb.prepare('SELECT id, username, organization_id, is_superadmin FROM users WHERE id=?').get(uid);
       if (!u) return res.status(404).json({ error: 'Потребителят не съществува' });
       if (u.is_superadmin) return res.status(400).json({ error: 'Суперадмин не може да се трие' });
+      // Изчисти редовете, които СОЧАТ към потребителя (login_audit.user_id и др. FK)
+      const tables = controlDb.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT IN ('users','sqlite_sequence')").all();
+      for (const t of tables) {
+        const cols = controlDb.prepare(`PRAGMA table_info("${t.name}")`).all();
+        if (cols.some(c => c.name === 'user_id')) { try { controlDb.prepare(`DELETE FROM "${t.name}" WHERE user_id=?`).run(uid); } catch (_) {} }
+      }
       controlDb.prepare('DELETE FROM users WHERE id=?').run(uid);
       res.json({ ok: true, deleted: uid, username: u.username });
     } catch (e) { res.status(500).json({ error: e.message }); }
@@ -183,8 +189,15 @@ module.exports = function (controlDb, getOrgDb) {
       const org = controlDb.prepare('SELECT id, name FROM organizations WHERE id=?').get(id);
       if (!org) return res.status(404).json({ error: 'Организацията не съществува' });
       // Зависимите редове ПЪРВО, потребителите ПОСЛЕДНИ (за FK безопасност).
-      for (const [table, col] of [['announcement_leads', 'organization_id'], ['announcement_dismissals', 'organization_id'], ['login_audit', 'organization_id']]) {
-        try { controlDb.prepare(`DELETE FROM ${table} WHERE ${col}=?`).run(id); } catch (_) {}
+      // Чисти генерично: org-скоуп (organization_id) + сочещи към потребителите (user_id).
+      const userIds = controlDb.prepare('SELECT id FROM users WHERE organization_id=?').all(id).map(r => r.id);
+      const tables = controlDb.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT IN ('organizations','users','sqlite_sequence')").all();
+      for (const t of tables) {
+        const cols = controlDb.prepare(`PRAGMA table_info("${t.name}")`).all();
+        if (cols.some(c => c.name === 'organization_id')) { try { controlDb.prepare(`DELETE FROM "${t.name}" WHERE organization_id=?`).run(id); } catch (_) {} }
+        if (userIds.length && cols.some(c => c.name === 'user_id')) {
+          try { controlDb.prepare(`DELETE FROM "${t.name}" WHERE user_id IN (${userIds.map(() => '?').join(',')})`).run(...userIds); } catch (_) {}
+        }
       }
       let usersRemoved = 0;
       try { usersRemoved = controlDb.prepare('DELETE FROM users WHERE organization_id=?').run(id).changes; }
