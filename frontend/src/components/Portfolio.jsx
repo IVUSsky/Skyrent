@@ -28,6 +28,7 @@ export default function Portfolio({ API, role }) {
   const [mergeTarget, setMergeTarget] = useState('')
   const [merging, setMerging] = useState(false)
   const [mergeMsg, setMergeMsg] = useState(null)
+  const [propDeeds, setPropDeeds] = useState([])   // нотариални актове на редактирания имот
   const [newForm, setNewForm] = useState(EMPTY_FORM)
   const tableScrollRef = useRef()
   const topScrollRef   = useRef()
@@ -121,9 +122,12 @@ export default function Portfolio({ API, role }) {
       абонат_тец:  prop['абонат_тец']  || '',
       абонат_вход: prop['абонат_вход'] || '',
     })
+    // Нотариални актове на имота (admin only — брокерът няма достъп до /api/deeds)
+    setPropDeeds([])
+    if (!broker) apiFetch(`${API}/api/deeds?property_id=${prop.id}`).then(r => r.ok ? r.json() : []).then(d => setPropDeeds(Array.isArray(d) ? d : [])).catch(() => {})
   }
 
-  const closeEdit = () => { setEditingProp(null); setEditForm({}) }
+  const closeEdit = () => { setEditingProp(null); setEditForm({}); setPropDeeds([]) }
 
   const saveNew = () => {
     if (!newForm.адрес) return alert('Адресът е задължителен')
@@ -757,6 +761,22 @@ export default function Portfolio({ API, role }) {
                   ))}
                 </div>
               </div>
+
+              {!broker && (
+                <div className="border-t pt-4 mt-4">
+                  <div className="text-sm font-semibold text-gray-700 mb-2">📜 Нотариални актове</div>
+                  {propDeeds.length === 0
+                    ? <div className="text-xs text-gray-400">Няма закачени актове. Качи в таб 📜 Актове.</div>
+                    : <div className="space-y-1">
+                        {propDeeds.map(d => (
+                          <div key={d.id} className="flex items-center justify-between text-xs bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5">
+                            <span className="truncate">{d.deed_number || 'Акт'}{d.deed_date ? ` · ${d.deed_date}` : ''}{d.cadastral_id ? ` · ${d.cadastral_id}` : ''}</span>
+                            <a href={authUrl(`${API}/api/deeds/${d.id}/pdf`)} target="_blank" rel="noreferrer" className="text-amber-700 hover:underline ml-2 flex-shrink-0">📄 PDF</a>
+                          </div>
+                        ))}
+                      </div>}
+                </div>
+              )}
             </div>
 
             {/* Fixed footer with buttons */}
