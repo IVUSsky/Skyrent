@@ -23,6 +23,11 @@ export default function Portfolio({ API, role }) {
   const [editForm, setEditForm] = useState({})
   const [saving, setSaving] = useState(false)
   const [addingNew, setAddingNew] = useState(false)
+  const [mergeOpen, setMergeOpen] = useState(false)   // обединяване на дубликати
+  const [mergeSource, setMergeSource] = useState('')
+  const [mergeTarget, setMergeTarget] = useState('')
+  const [merging, setMerging] = useState(false)
+  const [mergeMsg, setMergeMsg] = useState(null)
   const [newForm, setNewForm] = useState(EMPTY_FORM)
   const tableScrollRef = useRef()
   const topScrollRef   = useRef()
@@ -57,6 +62,23 @@ export default function Portfolio({ API, role }) {
       .then(r => r.json())
       .then(data => { setProperties(data); setLoading(false) })
       .catch(e => { setError(e.message); setLoading(false) })
+  }
+
+  // Обединяване на дубликат (source) в имот за запазване (target)
+  const doMerge = async () => {
+    if (!mergeSource || !mergeTarget || mergeSource === mergeTarget) { setMergeMsg({ type: 'error', text: 'Избери два различни имота' }); return }
+    setMerging(true); setMergeMsg(null)
+    try {
+      const r = await apiFetch(`${API}/api/properties/merge`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source_id: Number(mergeSource), target_id: Number(mergeTarget) }),
+      })
+      const d = await r.json()
+      if (!r.ok) { setMergeMsg({ type: 'error', text: d.error || 'Грешка' }); return }
+      setMergeMsg({ type: 'success', text: `Обединено ✓${d.copied_fields?.length ? ` (копирани: ${d.copied_fields.join(', ')})` : ''}` })
+      load()
+      setTimeout(() => { setMergeOpen(false); setMergeSource(''); setMergeTarget(''); setMergeMsg(null) }, 1600)
+    } catch (e) { setMergeMsg({ type: 'error', text: 'Грешка' }) } finally { setMerging(false) }
   }
 
   useEffect(() => { load(); loadInquiries() }, [])
@@ -230,12 +252,65 @@ export default function Portfolio({ API, role }) {
             </span>
           )}
         </button>
+        {!broker && (
+          <button
+            onClick={() => { setMergeOpen(true); setMergeSource(''); setMergeTarget(''); setMergeMsg(null) }}
+            className="px-4 py-2 text-sm font-medium text-purple-800 bg-purple-50 border border-purple-300 hover:bg-purple-100 rounded-lg transition-colors"
+            title="Обедини дубликати (напр. от нотариален акт)"
+          >
+            🔀 Обедини
+          </button>
+        )}
         <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-2 text-sm">
           <span className="text-gray-500">Общ месечен наем: </span>
           <span className="font-bold text-blue-700 text-base">{fmt(totalRent)} €</span>
         </div>
         </div>
       </header>
+
+      {/* Обединяване на дубликати (напр. мазе, добавено два пъти от акт) */}
+      {mergeOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg">
+            <div className="px-6 py-4 border-b border-gray-200">
+              <h3 className="text-lg font-bold text-gray-900">🔀 Обедини имоти</h3>
+              <p className="text-xs text-gray-500 mt-1">За дубликати (напр. мазе, добавено два пъти от нотариален акт).</p>
+            </div>
+            <div className="px-6 py-4 space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-red-700 mb-1">Имот за ПРЕМАХВАНЕ (дубликат)</label>
+                <select value={mergeSource} onChange={e => setMergeSource(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                  <option value="">— избери —</option>
+                  {properties.map(p => <option key={p.id} value={p.id}>#{p.id} · {p['адрес']}{p['тип'] ? ` (${p['тип']})` : ''}</option>)}
+                </select>
+              </div>
+              <div className="text-center text-gray-400">↓ слива се в ↓</div>
+              <div>
+                <label className="block text-sm font-medium text-green-700 mb-1">Имот за ЗАПАЗВАНЕ</label>
+                <select value={mergeTarget} onChange={e => setMergeTarget(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                  <option value="">— избери —</option>
+                  {properties.filter(p => String(p.id) !== String(mergeSource)).map(p => <option key={p.id} value={p.id}>#{p.id} · {p['адрес']}{p['тип'] ? ` (${p['тип']})` : ''}</option>)}
+                </select>
+              </div>
+              <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                ⚠️ Празните полета на запазвания се допълват от премахвания (площ, кадастрален идентификатор, абонатни №...). Всички връзки (актове, договори, снимки, история) се преместват. Дубликатът се <b>изтрива</b> — необратимо.
+              </div>
+              {mergeMsg && (
+                <div className={`text-sm rounded-lg px-3 py-2 ${mergeMsg.type === 'error' ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-green-50 text-green-700 border border-green-200'}`}>{mergeMsg.text}</div>
+              )}
+            </div>
+            <div className="px-6 py-4 border-t border-gray-200 flex gap-2">
+              <button onClick={doMerge} disabled={merging || !mergeSource || !mergeTarget}
+                className="px-4 py-2 text-sm font-semibold text-white bg-purple-600 hover:bg-purple-700 disabled:opacity-50 rounded-lg">
+                {merging ? 'Обединява…' : '🔀 Обедини'}
+              </button>
+              <button onClick={() => setMergeOpen(false)} className="px-4 py-2 text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg">Отказ</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="bg-white rounded-xl shadow overflow-hidden">
         {/* Top scrollbar */}
