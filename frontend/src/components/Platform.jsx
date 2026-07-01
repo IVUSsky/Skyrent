@@ -37,6 +37,16 @@ export default function Platform({ API = '' }) {
       }).catch(() => setMsg('Грешка'))
   }
 
+  const [delUser, setDelUser] = useState(null)
+  const doDeleteUser = (uid) => {
+    apiFetch(`${API}/api/platform/users/${uid}`, { method: 'DELETE' })
+      .then(r => r.json()).then(d => {
+        setDelUser(null)
+        if (d.ok) { setUsers(u => u.filter(x => x.id !== uid)); setMsg(`Изтрит потребител ${d.username}`) }
+        else setMsg(d.error || 'Грешка')
+      }).catch(() => setMsg('Грешка'))
+  }
+
   // Задай план / comp (безплатен) на организация
   const setPlan = (id, plan, comp) => {
     apiFetch(`${API}/api/platform/orgs/${id}/plan`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ plan, comp: comp ? 1 : 0 }) })
@@ -179,8 +189,8 @@ export default function Platform({ API = '' }) {
           </div>
           <table className="min-w-full divide-y divide-gray-200 text-sm">
             <thead className="bg-gray-50"><tr>
-              {['Организация', 'Роля', 'Потребител', 'Имейл', 'Последен вход'].map(h =>
-                <th key={h} className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">{h}</th>)}
+              {['Организация', 'Роля', 'Потребител', 'Имейл', 'Последен вход', ''].map((h, i) =>
+                <th key={i} className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">{h}</th>)}
             </tr></thead>
             <tbody className="divide-y divide-gray-100">
               {users.map(u => {
@@ -193,6 +203,16 @@ export default function Platform({ API = '' }) {
                     <td className="px-3 py-2 font-medium">{u.username}</td>
                     <td className="px-3 py-2 text-gray-600">{u.email || '—'}</td>
                     <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{u.last_login_at ? String(u.last_login_at).slice(0, 16) : '—'}</td>
+                    <td className="px-3 py-2 whitespace-nowrap">
+                      {delUser === u.id ? (
+                        <span className="inline-flex items-center gap-1">
+                          <button onClick={() => doDeleteUser(u.id)} className="text-xs px-2 py-0.5 bg-red-600 text-white rounded">Изтрий</button>
+                          <button onClick={() => setDelUser(null)} className="text-xs text-gray-500">не</button>
+                        </span>
+                      ) : (
+                        <button onClick={() => setDelUser(u.id)} className="text-red-400 hover:text-red-600 text-sm" title="Изтрий потребителя">🗑</button>
+                      )}
+                    </td>
                   </tr>
                 )
               })}

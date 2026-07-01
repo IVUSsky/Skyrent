@@ -162,6 +162,18 @@ module.exports = function (controlDb, getOrgDb) {
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
+  // DELETE /api/platform/users/:id — трие отделен потребител (orphan/тестови/спам)
+  router.delete('/users/:id', (req, res) => {
+    try {
+      const uid = Number(req.params.id);
+      const u = controlDb.prepare('SELECT id, username, organization_id, is_superadmin FROM users WHERE id=?').get(uid);
+      if (!u) return res.status(404).json({ error: 'Потребителят не съществува' });
+      if (u.is_superadmin) return res.status(400).json({ error: 'Суперадмин не може да се трие' });
+      controlDb.prepare('DELETE FROM users WHERE id=?').run(uid);
+      res.json({ ok: true, deleted: uid, username: u.username });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
   // DELETE /api/platform/orgs/:id — трие организация напълно (за тестови/спам).
   // Маха потребителите + org-скоуп редовете от control.db + org базата (файл).
   router.delete('/orgs/:id', (req, res) => {
@@ -170,14 +182,17 @@ module.exports = function (controlDb, getOrgDb) {
       if (id === 1) return res.status(400).json({ error: 'Платформеният акаунт (org 1) не се трие' });
       const org = controlDb.prepare('SELECT id, name FROM organizations WHERE id=?').get(id);
       if (!org) return res.status(404).json({ error: 'Организацията не съществува' });
-      // Изтрий org-скоуп редовете от control.db (defensive — прескача липсващи таблици/колони)
-      for (const [table, col] of [['users', 'organization_id'], ['announcement_leads', 'organization_id'], ['announcement_dismissals', 'organization_id'], ['login_audit', 'organization_id']]) {
+      // Зависимите редове ПЪРВО, потребителите ПОСЛЕДНИ (за FK безопасност).
+      for (const [table, col] of [['announcement_leads', 'organization_id'], ['announcement_dismissals', 'organization_id'], ['login_audit', 'organization_id']]) {
         try { controlDb.prepare(`DELETE FROM ${table} WHERE ${col}=?`).run(id); } catch (_) {}
       }
+      let usersRemoved = 0;
+      try { usersRemoved = controlDb.prepare('DELETE FROM users WHERE organization_id=?').run(id).changes; }
+      catch (e) { console.warn('[platform] delete org users:', e.message); }
       controlDb.prepare('DELETE FROM organizations WHERE id=?').run(id);
       // Затвори + изтрий org базата (файл)
       try { require('../db/db').deleteOrgDb(id); } catch (e) { console.warn('[platform] deleteOrgDb:', e.message); }
-      res.json({ ok: true, deleted: id, name: org.name });
+      res.json({ ok: true, deleted: id, name: org.name, users_removed: usersRemoved });
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
