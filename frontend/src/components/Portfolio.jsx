@@ -19,6 +19,8 @@ export default function Portfolio({ API, role }) {
   const [properties, setProperties] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [sort, setSort] = useState({ key: 'id', dir: 'asc' })   // сортиране на таблицата
+  const [delConfirmProp, setDelConfirmProp] = useState(null)     // потвърждение за триене на имот
   const [editingProp, setEditingProp] = useState(null)
   const [editForm, setEditForm] = useState({})
   const [saving, setSaving] = useState(false)
@@ -227,6 +229,41 @@ export default function Portfolio({ API, role }) {
 
   const totalRent = properties.filter(p => p['статус'] === '✅').reduce((s, p) => s + (p['наем'] || 0), 0)
 
+  // Изтриване на имот (+ свързаните данни). Admin only.
+  const deleteProperty = (id) => {
+    apiFetch(`${API}/api/properties/${id}`, { method: 'DELETE' })
+      .then(r => r.json()).then(d => {
+        setDelConfirmProp(null)
+        if (d.ok) setProperties(ps => ps.filter(p => p.id !== id))
+        else setError(d.error || 'Грешка при триене')
+      }).catch(() => setError('Грешка при триене'))
+  }
+
+  // Колони + сортиране (клик на заглавие)
+  const NUM_KEYS = new Set(['id', 'наем', 'площ', 'cost', 'market_val'])
+  const COLS = [
+    { label: '#', key: 'id' },
+    { label: 'Адрес', key: 'адрес' },
+    { label: 'Район', key: 'район' },
+    { label: 'Статус', key: 'статус' },
+    { label: 'Наемател', key: 'наемател' },
+    { label: 'Наем (EUR €)', key: 'наем' },
+    { label: 'Площ м²', key: 'площ' },
+    { label: 'Тип', key: 'тип' },
+    ...(broker ? [] : [{ label: 'Покупна+Ремонт (EUR €)', key: 'cost' }, { label: 'Пазарна стойност (EUR €)', key: 'market_val' }]),
+    { label: '', key: null },
+  ]
+  const sortVal = (p, k) => k === 'cost' ? (p['покупна'] || 0) + (p['ремонт'] || 0) : p[k]
+  const sortedProps = [...properties].sort((a, b) => {
+    const k = sort.key; if (!k) return 0
+    let va = sortVal(a, k), vb = sortVal(b, k)
+    let cmp
+    if (NUM_KEYS.has(k)) cmp = (Number(va) || 0) - (Number(vb) || 0)
+    else cmp = String(va ?? '').localeCompare(String(vb ?? ''), 'bg')
+    return sort.dir === 'asc' ? cmp : -cmp
+  })
+  const onSort = (k) => k && setSort(s => ({ key: k, dir: s.key === k && s.dir === 'asc' ? 'desc' : 'asc' }))
+
   if (loading) return <div className="flex justify-center py-16 text-gray-500 text-lg">Зарежда...</div>
   if (error) return <div className="bg-red-50 text-red-700 p-4 rounded-lg">Грешка: {error}</div>
 
@@ -331,15 +368,16 @@ export default function Portfolio({ API, role }) {
           <table className="min-w-full divide-y divide-gray-200 text-sm">
             <thead className="bg-gray-50 sticky top-0 z-10">
               <tr>
-                {['#', 'Адрес', 'Район', 'Статус', 'Наемател', 'Наем (EUR €)', 'Площ м²', 'Тип', ...(broker ? [] : ['Покупна+Ремонт (EUR €)', 'Пазарна стойност (EUR €)']), ''].map(h => (
-                  <th key={h} className="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap bg-gray-50">
-                    {h}
+                {COLS.map(c => (
+                  <th key={c.label} onClick={() => onSort(c.key)}
+                    className={`px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap bg-gray-50 ${c.key ? 'cursor-pointer hover:text-gray-700 select-none' : ''}`}>
+                    {c.label}{sort.key === c.key && c.key ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : ''}
                   </th>
                 ))}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {properties.map((p, i) => {
+              {sortedProps.map((p, i) => {
                 const cost = (p['покупна'] || 0) + (p['ремонт'] || 0)
                 return (
                   <tr key={p.id} onClick={() => openPhotos(p)} className={`cursor-pointer ${i % 2 === 0 ? 'bg-white hover:bg-blue-50' : 'bg-gray-50 hover:bg-blue-50'}`}>
@@ -393,6 +431,17 @@ export default function Portfolio({ API, role }) {
                           className="text-yellow-500 hover:text-yellow-700 hover:bg-yellow-50 p-1 rounded transition-colors"
                           title="База знания за AI асистент"
                         >💡</button>
+                        {!broker && (
+                          delConfirmProp === p.id ? (
+                            <span className="inline-flex items-center gap-1 ml-1">
+                              <button onClick={e => { e.stopPropagation(); deleteProperty(p.id) }} className="text-xs px-1.5 py-0.5 bg-red-600 text-white rounded">Изтрий</button>
+                              <button onClick={e => { e.stopPropagation(); setDelConfirmProp(null) }} className="text-xs text-gray-500">не</button>
+                            </span>
+                          ) : (
+                            <button onClick={e => { e.stopPropagation(); setDelConfirmProp(p.id) }}
+                              className="text-red-400 hover:text-red-600 hover:bg-red-50 p-1 rounded transition-colors" title="Изтрий имота (+ данните му)">🗑</button>
+                          )
+                        )}
                       </div>
                     </td>
                   </tr>

@@ -104,6 +104,27 @@ module.exports = function(db) {
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
 
+  // Изтриване на имот + всичките му свързани данни (снимки, история, актове,
+  // транзакции...). Admin-only (разрушително — брокерът няма достъп).
+  router.delete('/:id', (req, res) => {
+    if (isBroker(req)) return res.status(403).json({ error: 'Само администратор може да трие имоти' });
+    try {
+      const id = Number(req.params.id);
+      const p = db.prepare('SELECT id FROM properties WHERE id=?').get(id);
+      if (!p) return res.status(404).json({ error: 'Имотът не е намерен' });
+      // Изчисти свързаните редове (всяка таблица с колона property_id)
+      const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT IN ('properties','sqlite_sequence')").all();
+      const removed = [];
+      for (const t of tables) {
+        const cols = db.prepare(`PRAGMA table_info("${t.name}")`).all();
+        if (!cols.some(c => c.name === 'property_id')) continue;
+        try { const r = db.prepare(`DELETE FROM "${t.name}" WHERE property_id=?`).run(id); if (r.changes) removed.push(`${t.name}:${r.changes}`); } catch (_) {}
+      }
+      db.prepare('DELETE FROM properties WHERE id=?').run(id);
+      res.json({ ok: true, deleted: id, removed });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
   // Rent payment status for a given month
   router.get('/rent-status', (req, res) => {
     const month = req.query.month || new Date().toISOString().slice(0, 7);
