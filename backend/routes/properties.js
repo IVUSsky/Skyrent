@@ -60,6 +60,50 @@ module.exports = function(db) {
     res.json(isBroker(req) ? rows.map(r => stripForBroker(req, r)) : rows);
   });
 
+  // Обединяване на дубликати: source (премахва се) → target (запазва се).
+  // Празните полета на target се допълват от source; всички връзки (актове,
+  // договори, история, снимки, транзакции...) се преместват към target; source
+  // се изтрива. Admin-only (обединяването е разрушително).
+  router.post('/merge', (req, res) => {
+    if (isBroker(req)) return res.status(403).json({ error: 'Само администратор може да обединява имоти' });
+    try {
+      const sourceId = Number(req.body.source_id), targetId = Number(req.body.target_id);
+      if (!sourceId || !targetId || sourceId === targetId) return res.status(400).json({ error: 'Избери два различни имота' });
+      const source = db.prepare('SELECT * FROM properties WHERE id=?').get(sourceId);
+      const target = db.prepare('SELECT * FROM properties WHERE id=?').get(targetId);
+      if (!source || !target) return res.status(404).json({ error: 'Имот не е намерен' });
+
+      // 1) Допълни празните описателни полета на target от source
+      const isEmpty = v => v === null || v === undefined || v === '' || v === 0;
+      const COPYABLE = ['площ', 'тип', 'cadastral_id', 'район', 'адрес', 'наемател', 'абонат_ток', 'абонат_вода', 'абонат_тец', 'абонат_вход', 'email', 'телефон'];
+      const sets = [], vals = [], copied = [];
+      for (const k of COPYABLE) {
+        if (isEmpty(target[k]) && !isEmpty(source[k])) { sets.push(`"${k}"=?`); vals.push(source[k]); copied.push(k); }
+      }
+      if (sets.length) { vals.push(targetId); db.prepare(`UPDATE properties SET ${sets.join(',')} WHERE id=?`).run(...vals); }
+
+      // 2) Премести всички връзки: всяка таблица с колона property_id
+      const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT IN ('properties','sqlite_sequence')").all();
+      const repointed = [];
+      for (const t of tables) {
+        const cols = db.prepare(`PRAGMA table_info("${t.name}")`).all();
+        if (!cols.some(c => c.name === 'property_id')) continue;
+        try {
+          const r = db.prepare(`UPDATE "${t.name}" SET property_id=? WHERE property_id=?`).run(targetId, sourceId);
+          if (r.changes) repointed.push(`${t.name}:${r.changes}`);
+        } catch (_) {
+          // UNIQUE конфликт (target вече има реда) → премахни дубликата от source
+          try { db.prepare(`DELETE FROM "${t.name}" WHERE property_id=?`).run(sourceId); } catch (_) {}
+        }
+      }
+
+      // 3) Изтрий дубликата
+      db.prepare('DELETE FROM properties WHERE id=?').run(sourceId);
+
+      res.json({ ok: true, merged_into: targetId, copied_fields: copied, repointed });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
   // Rent payment status for a given month
   router.get('/rent-status', (req, res) => {
     const month = req.query.month || new Date().toISOString().slice(0, 7);
