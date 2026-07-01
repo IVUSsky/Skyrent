@@ -8,7 +8,7 @@ import { apiFetch, authUrl } from '../api'
 const fmt = (n) => Number(n || 0).toLocaleString('bg-BG', { maximumFractionDigits: 2 })
 
 export default function Deeds({ API = '' }) {
-  const [file, setFile] = useState(null)
+  const [files, setFiles] = useState([])
   const [extracting, setExtracting] = useState(false)
   const [result, setResult] = useState(null)
   const [propertyId, setPropertyId] = useState('')
@@ -40,10 +40,10 @@ export default function Deeds({ API = '' }) {
   }
 
   const extract = async () => {
-    if (!file) { showToast('Избери PDF или снимка на акта', 'error'); return }
+    if (!files.length) { showToast('Избери PDF или снимки на акта', 'error'); return }
     setExtracting(true); setResult(null); setShowText(false); setErrorDetail(null)
     try {
-      const fd = new FormData(); fd.append('file', file)
+      const fd = new FormData(); files.forEach(f => fd.append('files', f))
       const r = await apiFetch(`${API}/api/deeds/extract`, { method: 'POST', body: fd })
       const text = await r.text()
       let d = null
@@ -82,7 +82,7 @@ export default function Deeds({ API = '' }) {
       const d = await r.json()
       if (!r.ok) { showToast(d.error || 'Грешка', 'error'); return }
       showToast(`Запазено ✓${d.added?.length ? ` — добавени ${d.added.length} нови единици` : ''}`)
-      setResult(null); setFile(null); loadDeeds()
+      setResult(null); setFiles([]); loadDeeds()
     } catch (e) { showToast('Грешка', 'error') } finally { setApplying(false) }
   }
 
@@ -103,14 +103,15 @@ export default function Deeds({ API = '' }) {
       <div className="bg-white rounded-xl shadow border border-gray-100 p-5">
         <h3 className="font-bold text-gray-800 mb-3">Качи акт</h3>
         <div className="flex flex-wrap items-center gap-3">
-          <input type="file" accept=".pdf,image/jpeg,image/png" onChange={e => setFile(e.target.files[0] || null)}
+          <input type="file" multiple accept=".pdf,image/jpeg,image/png" onChange={e => setFiles([...e.target.files])}
             className="text-sm file:mr-2 file:px-3 file:py-1.5 file:rounded-lg file:border-0 file:bg-amber-100 file:text-amber-800" />
-          <button onClick={extract} disabled={extracting || !file}
+          {files.length > 0 && <span className="text-xs text-gray-600">{files.length} файл{files.length > 1 ? 'а' : ''} избран{files.length > 1 ? 'и' : ''}</span>}
+          <button onClick={extract} disabled={extracting || !files.length}
             className="px-4 py-2 text-sm font-semibold text-white bg-amber-600 hover:bg-amber-700 disabled:opacity-50 rounded-lg">
             {extracting ? '⏳ Извличане…' : '✨ Извлечи данните'}
           </button>
         </div>
-        <p className="text-xs text-gray-400 mt-2">PDF, JPEG или PNG · до 25 MB · текстът се чете с AI (прегледай преди запазване)</p>
+        <p className="text-xs text-gray-400 mt-2">PDF или няколко снимки (страници на един акт) · до 25 MB всяка · четат се заедно с AI (прегледай преди запазване)</p>
       </div>
 
       {/* Диагностика при провал — показва реалния отговор на AI */}
@@ -197,7 +198,7 @@ export default function Deeds({ API = '' }) {
               className="px-4 py-2 text-sm font-semibold text-white bg-green-600 hover:bg-green-700 disabled:opacity-50 rounded-lg">
               {applying ? 'Запазва…' : '✓ Потвърди и запази'}
             </button>
-            <button onClick={() => { setResult(null); setFile(null) }} className="px-4 py-2 text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg">Отказ</button>
+            <button onClick={() => { setResult(null); setFiles([]) }} className="px-4 py-2 text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg">Отказ</button>
           </div>
         </div>
       )}

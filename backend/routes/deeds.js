@@ -30,16 +30,18 @@ const upload = multer({
   },
 });
 
-// Изображение → PDF (вгражда снимката като страница с размер по изображението).
-function imageToPdf(imgPath, outPath) {
+// Изображения → един многостраничен PDF (по страница на снимка).
+function imagesToPdf(imgPaths, outPath) {
   return new Promise((resolve, reject) => {
     try {
       const doc = new PDFDocument({ autoFirstPage: false });
       const stream = fs.createWriteStream(outPath);
       doc.pipe(stream);
-      const img = doc.openImage(imgPath);
-      doc.addPage({ size: [img.width, img.height], margin: 0 });
-      doc.image(img, 0, 0);
+      for (const p of imgPaths) {
+        const img = doc.openImage(p);
+        doc.addPage({ size: [img.width, img.height], margin: 0 });
+        doc.image(img, 0, 0);
+      }
       doc.end();
       stream.on('finish', resolve);
       stream.on('error', reject);
@@ -47,93 +49,107 @@ function imageToPdf(imgPath, outPath) {
   });
 }
 
-const EXTRACT_PROMPT = `Това е български НОТАРИАЛЕН АКТ (PDF или снимка). Прочети целия документ внимателно и извлечи СТРУКТУРИРАНИТЕ данни. Върни САМО компактен ВАЛИДЕН JSON, без markdown, без пълния текст на акта:
-{
-  "owners": ["имена на собствениците/купувачите на кирилица"],
-  "deed": { "number": "акт №, том, рег.№, дело", "date": "ГГГГ-ММ-ДД", "notary": "име на нотариуса" },
-  "main_unit": {
-    "type": "вид на основния обект (Апартамент/Къща/Ателие/Студио/Магазин и др.)",
-    "address": "пълен адрес (град, ж.к./улица, бл./№, вход, етаж, ап.)",
-    "cadastral_id": "кадастрален идентификатор (формат XXXXX.XXXX.X.X.X)",
-    "area": число_площ_в_кв.м,
-    "floor": "етаж"
-  },
-  "additional_units": [
-    { "type": "Мазе/Изба/Таван/Паркомясто/Гараж", "cadastral_id": "идентификатор ако има", "area": число_кв.м, "description": "пояснение (напр. мазе №3 към ап.5)" }
-  ]
-}
+const EXTRACT_PROMPT = `Това е български НОТАРИАЛЕН АКТ (PDF или снимка). Прочети целия документ внимателно и извлечи данните. Върни ги като ПРОСТИ РЕДОВЕ във формат „КЛЮЧ: стойност" (НЕ JSON), точно с тези ключове, всеки на нов ред:
+СОБСТВЕНИЦИ: имена на собствениците/купувачите, разделени със запетая
+АКТ: акт №, том, рег.№, дело
+ДАТА: ГГГГ-ММ-ДД
+НОТАРИУС: име на нотариуса
+ВИД: вид на основния обект (Апартамент/Къща/Ателие/Студио/Магазин и др.)
+АДРЕС: пълен адрес (град, район, ж.к./улица, бл./№, вход, етаж, ап.)
+ИДЕНТИФИКАТОР: кадастрален идентификатор (формат XXXXX.XXXX.X.X.X)
+ПЛОЩ: само число в кв.м (или празно)
+ЕТАЖ: етаж
+За ВСЯКА допълнителна единица (мазе/изба/таван/паркомясто/гараж) добави ОТДЕЛЕН ред:
+ЕДИНИЦА: вид | площ(число) | идентификатор | кратко описание
+
 ПРАВИЛА:
-- ЧАСТ 1 JSON-ът трябва да е компактен и ВАЛИДЕН (без пълния текст вътре — той е в ЧАСТ 2).
-- Извлечи ВСИЧКИ самостоятелни обекти. Често актът включва основен имот + ПРИНАДЛЕЖНОСТИ (мазе/изба, таван, паркомясто, гараж) — изброй всяка в additional_units.
-- Кадастрален идентификатор: препиши ТОЧНО, цифра по цифра. Площ: само число. Имена на кирилица.
-- Ако поле липсва/нечетимо → "" или [] или null. НЕ измисляй.`;
+- Извлечи ВСИЧКИ обекти. Актът често включва основен имот + принадлежности (мазе/изба/таван/паркомясто/гараж) — по един ред „ЕДИНИЦА:" за всяка.
+- Кадастрален идентификатор: препиши ТОЧНО, цифра по цифра. Имена на кирилица.
+- НЕ използвай кавички за имена (пиши Младост 4, не „Младост 4").
+- Ако поле липсва → остави стойността празна. НЕ измисляй.`;
 
 module.exports = function (db) {
   const router = express.Router();
 
   // Качване + извличане. Запазва PDF + deed запис (несвързан още), връща данните
   // + предложено съответствие с имот + допълнителните единици за потвърждение.
-  router.post('/extract', upload.single('file'), orgContext, async (req, res) => {
+  router.post('/extract', upload.array('files', 25), orgContext, async (req, res) => {
     try {
       const apiKey = process.env.ANTHROPIC_API_KEY;
       if (!apiKey) return res.status(400).json({ error: 'ANTHROPIC_API_KEY не е конфигуриран' });
-      const f = req.file;
-      if (!f) return res.status(400).json({ error: 'Качи PDF или снимка на акта' });
-      const isPdf = /pdf$/i.test(f.originalname) || f.mimetype === 'application/pdf';
+      const files = req.files || [];
+      if (!files.length) return res.status(400).json({ error: 'Качи PDF или снимки на акта' });
+      const isPdfFile = (x) => /pdf$/i.test(x.originalname) || x.mimetype === 'application/pdf';
+      const pdfFiles = files.filter(isPdfFile);
+      const imgFiles = files.filter(x => !isPdfFile(x));
+      const anyPdf = pdfFiles.length > 0;
 
       let Anthropic;
       try { Anthropic = require('@anthropic-ai/sdk'); }
       catch (e) { return res.status(500).json({ error: '@anthropic-ai/sdk липсва: ' + e.message }); }
       const client = new Anthropic.default({ apiKey });
 
-      // Подготви блока за Claude (PDF → document; снимка → image, мащабирана за лимити)
-      let block;
-      if (isPdf) {
-        block = { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: fs.readFileSync(f.path).toString('base64') } };
-      } else {
-        const buf = await sharp(f.path).rotate().resize({ width: 2500, height: 2500, fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 85 }).toBuffer();
-        block = { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: buf.toString('base64') } };
+      // Блокове за Claude — ВСИЧКИ файлове заедно (PDF → document; снимка → image,
+      // мащабирана за лимити). Много снимки = страници на един акт → четат се заедно.
+      const blocks = [];
+      for (const pf of pdfFiles) {
+        blocks.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: fs.readFileSync(pf.path).toString('base64') } });
+      }
+      for (const im of imgFiles) {
+        const buf = await sharp(im.path).rotate().resize({ width: 2500, height: 2500, fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 85 }).toBuffer();
+        blocks.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: buf.toString('base64') } });
       }
 
       const response = await client.messages.create({
         model: process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-6',
         max_tokens: 2000, // само структурирани данни → бърз отговор (без timeout)
-        messages: [{ role: 'user', content: [block, { type: 'text', text: EXTRACT_PROMPT }] }],
+        messages: [{ role: 'user', content: [...blocks, { type: 'text', text: EXTRACT_PROMPT }] }],
       });
       const stopReason = response.stop_reason;
-      let raw = response.content.map(c => c.text || '').join('').trim();
-      const jsonPart = raw.replace(/```(?:json)?/gi, '').trim();
-      const s = jsonPart.indexOf('{'), e = jsonPart.lastIndexOf('}');
-      let data = null;
-      if (s !== -1 && e > s) {
-        try { data = JSON.parse(jsonPart.slice(s, e + 1)); } catch (_) { /* fallback по-долу */ }
+      const raw = response.content.map(c => c.text || '').join('').trim();
+      // Line-based parsing „КЛЮЧ: стойност" — толерира кавички/специални знаци в
+      // стойностите (за разлика от JSON, който се чупи на неескейпната кавичка).
+      const lines = raw.split(/\r?\n/);
+      const lineKey = (x) => { const i = x.indexOf(':'); return i < 0 ? '' : x.slice(0, i).trim().toUpperCase(); };
+      const lineVal = (x) => { const i = x.indexOf(':'); return i < 0 ? '' : x.slice(i + 1).trim(); };
+      const getVal = (key) => { const l = lines.find(x => lineKey(x) === key); return l ? lineVal(l) : ''; };
+      const toNum = (v) => { const n = parseFloat(String(v || '').replace(',', '.').replace(/[^\d.]/g, '')); return isNaN(n) ? null : n; };
+      const data = {
+        owners: getVal('СОБСТВЕНИЦИ').split(/[,;]/).map(s => s.trim()).filter(Boolean),
+        deed: { number: getVal('АКТ'), date: getVal('ДАТА'), notary: getVal('НОТАРИУС') },
+        main_unit: {
+          type: getVal('ВИД'), address: getVal('АДРЕС'), cadastral_id: getVal('ИДЕНТИФИКАТОР'),
+          area: toNum(getVal('ПЛОЩ')), floor: getVal('ЕТАЖ'),
+        },
+        additional_units: lines.filter(x => lineKey(x) === 'ЕДИНИЦА').map(l => {
+          const parts = lineVal(l).split('|').map(s => s.trim());
+          return { type: parts[0] || '', area: toNum(parts[1]), cadastral_id: parts[2] || '', description: parts[3] || '' };
+        }),
+      };
+      const parsedOk = !!(data.main_unit.type || data.main_unit.address || data.main_unit.cadastral_id || data.deed.number);
+      if (!parsedOk) {
+        console.error('deed parse fail — stop_reason=%s, дължина=%d, начало=%s', stopReason, raw.length, raw.slice(0, 400));
+        return res.status(422).json({
+          error: 'Не успях да разчета акта — пробвай по-ясен скан/снимки.',
+          debug: { stop_reason: stopReason, files: files.length, images: imgFiles.length, pdfs: pdfFiles.length, length: raw.length, ai_response: raw.slice(0, 600) },
+        });
       }
       // Пълен текст: от текстовия слой на PDF-а (мигновено, без AI timeout).
       // За снимки/сканирани PDF без текстов слой → празно (структурата + PDF-ът остават).
-      if (data) {
-        let fullText = '';
-        if (isPdf) {
-          try { const pp = await require('pdf-parse')(fs.readFileSync(f.path)); fullText = (pp.text || '').trim(); } catch (_) {}
-        }
-        data.full_text = fullText;
-      }
-      if (!data) {
-        console.error('deed parse fail — stop_reason=%s, дължина=%d, начало=%s', stopReason, raw.length, raw.slice(0, 400));
-        const hint = stopReason === 'max_tokens'
-          ? 'Документът е прекалено дълъг — пробвай по-малко страници или го раздели.'
-          : 'Не успях да разчета акта — пробвай по-ясен скан/PDF.';
-        return res.status(422).json({
-          error: hint,
-          debug: { stop_reason: stopReason, is_pdf: isPdf, blocks: response.content.length, length: raw.length, ai_response: raw.slice(0, 600) },
-        });
-      }
+      let fullText = '';
+      if (anyPdf) { try { const pp = await require('pdf-parse')(fs.readFileSync(pdfFiles[0].path)); fullText = (pp.text || '').trim(); } catch (_) {} }
+      data.full_text = fullText;
 
-      // Съхрани като PDF (снимка → PDF; PDF → както е)
-      let pdfPath = f.path, originalFormat = 'pdf';
-      if (!isPdf) {
-        originalFormat = (path.extname(f.originalname).replace('.', '') || 'jpg').toLowerCase();
-        pdfPath = f.path + '.pdf';
-        await imageToPdf(f.path, pdfPath);
+      // Съхрани като ЕДИН PDF: снимки → многостраничен PDF; единичен PDF → както е.
+      let pdfPath, originalFormat;
+      if (pdfFiles.length === 1 && imgFiles.length === 0) {
+        pdfPath = pdfFiles[0].path; originalFormat = 'pdf';
+      } else if (imgFiles.length > 0) {
+        pdfPath = imgFiles[0].path + '.deed.pdf';
+        await imagesToPdf(imgFiles.map(i => i.path), pdfPath);
+        originalFormat = imgFiles.length > 1 ? `${imgFiles.length} снимки` : 'снимка';
+      } else {
+        pdfPath = pdfFiles[0].path; originalFormat = 'pdf'; // няколко PDF (рядко) → първия
       }
 
       const main = data.main_unit || {};
