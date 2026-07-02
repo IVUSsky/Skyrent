@@ -7,6 +7,7 @@ import RentTaxCalculator from './components/RentTaxCalculator'
 import RentalContractGenerator from './components/RentalContractGenerator'
 import NotificationBell from './components/NotificationBell'
 import Onboarding from './components/Onboarding'
+import TaxSeasonReminder from './components/TaxSeasonReminder'
 import SetupWizard from './components/SetupWizard'
 import { ThemeProvider } from './components/ThemeProvider'
 import ThemePicker from './components/ThemePicker'
@@ -377,6 +378,7 @@ export default function App() {
 
       <main className="max-w-7xl mx-auto px-4 py-6">
         {role !== 'tenant' && <Onboarding API={API} tab={validTab} onNavigate={navigateTo} />}
+        {role !== 'tenant' && entityInfo.individual && <TaxSeasonReminder onGoToTax={() => setActiveTab('invoices')} />}
         <ErrorBoundary resetKey={validTab}>
         <Suspense fallback={<TabFallback/>}>
           {validTab === 'dashboard' && <Dashboard API={API} />}
