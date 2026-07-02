@@ -129,9 +129,11 @@ module.exports = function (db) {
       const parsedOk = !!(data.main_unit.type || data.main_unit.address || data.main_unit.cadastral_id || data.deed.number);
       if (!parsedOk) {
         console.error('deed parse fail — stop_reason=%s, дължина=%d, начало=%s', stopReason, raw.length, raw.slice(0, 400));
+        // Изчисти качените файлове преди изход (иначе остават на диска)
+        for (const f of files) { try { fs.unlinkSync(f.path); } catch (_) {} }
         return res.status(422).json({
           error: 'Не успях да разчета акта — пробвай по-ясен скан/снимки.',
-          debug: { stop_reason: stopReason, files: files.length, images: imgFiles.length, pdfs: pdfFiles.length, length: raw.length, ai_response: raw.slice(0, 600) },
+          debug: { stop_reason: stopReason, files: files.length, images: imgFiles.length, pdfs: pdfFiles.length, length: raw.length },
         });
       }
       // Пълен текст: от текстовия слой на PDF-а (мигновено, без AI timeout).
@@ -151,6 +153,9 @@ module.exports = function (db) {
       } else {
         pdfPath = pdfFiles[0].path; originalFormat = 'pdf'; // няколко PDF (рядко) → първия
       }
+      // Изчисти оригиналните качени файлове, които НЕ са финалния PDF (снимките са
+      // вече вградени в PDF-а) — иначе се трупат на диска.
+      for (const f of files) { if (f.path !== pdfPath) { try { fs.unlinkSync(f.path); } catch (_) {} } }
 
       const main = data.main_unit || {};
       const deed = data.deed || {};
