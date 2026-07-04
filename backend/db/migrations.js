@@ -921,6 +921,14 @@ function runControlMigrations(db) {
   try { db.exec("ALTER TABLE organizations ADD COLUMN verify_expires DATETIME");          console.log('Migration: added organizations.verify_expires'); } catch(_) {}
   // Comp акаунт (безплатен за близки хора) — план без плащане; не се брои в MRR.
   try { db.exec("ALTER TABLE organizations ADD COLUMN comp INTEGER DEFAULT 0");            console.log('Migration: added organizations.comp'); } catch(_) {}
+  // Phase 3+: Stripe Connect — наемодателят приема наеми ДИРЕКТНО в собствената
+  // си банкова сметка (Express акаунт + direct charges). Различно от billing по-горе
+  // (там платформата таксува org-а). connect_account_id = acct_...; charges_enabled
+  // = готов да приема плащания; payouts_enabled = банковата сметка е потвърдена.
+  try { db.exec("ALTER TABLE organizations ADD COLUMN connect_account_id TEXT");                     console.log('Migration: added organizations.connect_account_id'); }        catch(_) {}
+  try { db.exec("ALTER TABLE organizations ADD COLUMN connect_charges_enabled INTEGER DEFAULT 0");    console.log('Migration: added organizations.connect_charges_enabled'); }   catch(_) {}
+  try { db.exec("ALTER TABLE organizations ADD COLUMN connect_payouts_enabled INTEGER DEFAULT 0");    console.log('Migration: added organizations.connect_payouts_enabled'); }   catch(_) {}
+  try { db.exec("ALTER TABLE organizations ADD COLUMN connect_details_submitted INTEGER DEFAULT 0");  console.log('Migration: added organizations.connect_details_submitted'); } catch(_) {}
 
   // Phase 5: платформен команден център — broadcast оферти/новини + leads
   db.exec(`CREATE TABLE IF NOT EXISTS announcements (

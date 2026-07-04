@@ -2,6 +2,7 @@
 // собствения си абонамент. Org 1 = платформен акаунт (без абонамент).
 const express = require('express');
 const { PLANS, createCheckout, createPortal } = require('../lib/saasBilling');
+const connect = require('../lib/saasConnect');
 const { planCapabilities, ALL_CAPABILITIES, planConfig } = require('../lib/plans');
 
 module.exports = function (db, controlDb) {
@@ -63,6 +64,58 @@ module.exports = function (db, controlDb) {
       const org = orgRow(req);
       const base = process.env.FRONTEND_URL || 'http://localhost:5173';
       const url = await createPortal(org, base + '/?billing=portal_return');
+      res.json({ url });
+    } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+  });
+
+  // ─── Stripe Connect — наемодателят приема наеми директно в сметката си ──────
+
+  // GET /api/billing/connect → статус на свързването
+  router.get('/connect', adminOnly, (req, res) => {
+    try {
+      const org = orgRow(req);
+      if (!org) return res.status(404).json({ error: 'Org missing' });
+      res.json({
+        platform: org.id === 1,
+        connected: !!org.connect_account_id,
+        charges_enabled: !!org.connect_charges_enabled,
+        payouts_enabled: !!org.connect_payouts_enabled,
+        details_submitted: !!org.connect_details_submitted,
+      });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // POST /api/billing/connect/onboard → създава/продължава Express onboarding
+  router.post('/connect/onboard', adminOnly, async (req, res) => {
+    try {
+      const org = orgRow(req);
+      if (org.id === 1) return res.status(400).json({ error: 'Платформеният акаунт приема плащания централно' });
+      const email = controlDb.prepare('SELECT email FROM users WHERE id=?').get(req.user.id)?.email;
+      const acctId = await connect.ensureConnectAccount(controlDb, org, email);
+      const base = process.env.FRONTEND_URL || 'http://localhost:5173';
+      const url = await connect.createOnboardingLink(acctId, {
+        refresh_url: base + '/?connect=refresh',
+        return_url: base + '/?connect=return',
+      });
+      res.json({ url });
+    } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+  });
+
+  // POST /api/billing/connect/refresh → пре-дърпва статуса от Stripe (при return)
+  router.post('/connect/refresh', adminOnly, async (req, res) => {
+    try {
+      const org = orgRow(req);
+      const status = await connect.refreshConnectStatus(controlDb, org);
+      res.json(status);
+    } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+  });
+
+  // POST /api/billing/connect/dashboard → Express dashboard login link
+  router.post('/connect/dashboard', adminOnly, async (req, res) => {
+    try {
+      const org = orgRow(req);
+      if (!org.connect_account_id) return res.status(400).json({ error: 'Няма свързан акаунт' });
+      const url = await connect.createDashboardLink(org.connect_account_id);
       res.json({ url });
     } catch (e) { res.status(e.status || 500).json({ error: e.message }); }
   });

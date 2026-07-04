@@ -3,6 +3,7 @@ const { applyPurchase } = require('../lib/internetService');
 const { getRouterProvider } = require('../lib/routerProvider');
 const { notifyTenant } = require('../lib/notify');
 const { createSimpleInvoice } = require('./invoices');
+const { getOrgDb } = require('../db/db');
 
 // Stripe SDK is lazy-loaded — only initialized if STRIPE_SECRET_KEY is set,
 // so the app still boots in environments without Stripe configured.
@@ -115,11 +116,24 @@ function tenantPaymentsRouter(db) {
     }
     const user = db.prepare('SELECT email FROM users WHERE id=?').get(req.user.id);
 
+    // Определи къде отиват парите: свързан акаунт на наемодателя (Stripe Connect)
+    // → директно в неговата сметка; org 1 (платформа) → централно. Друг org без
+    // свързан акаунт → плащането с карта още не е активирано от наемодателя.
+    const orgId = db.orgId;
+    const org = db.control.prepare(
+      'SELECT id, connect_account_id, connect_charges_enabled FROM organizations WHERE id=?'
+    ).get(orgId);
+    const useConnect = !!(org && org.connect_account_id && org.connect_charges_enabled);
+    const isPlatform = orgId === 1;
+    if (!useConnect && !isPlatform) {
+      return res.status(403).json({ error: 'Плащане с карта още не е активирано от наемодателя. Моля, платете по банков път.' });
+    }
+
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
     const amountCents = Math.round(Number(inv.total) * 100);
 
     try {
-      const session = await s.checkout.sessions.create({
+      const sessionParams = {
         mode: 'payment',
         payment_method_types: ['card'],
         customer_email: user?.email || undefined,
@@ -138,10 +152,21 @@ function tenantPaymentsRouter(db) {
           invoice_id: String(inv.id),
           invoice_number: inv.invoice_number,
           tenant_user_id: String(req.user.id),
+          organization_id: String(orgId),
         },
         success_url: `${frontendUrl}/?stripe_success=1&invoice=${inv.id}&session_id={CHECKOUT_SESSION_ID}`,
         cancel_url:  `${frontendUrl}/?stripe_cancel=1&invoice=${inv.id}`,
-      });
+      };
+      // Direct charge на свързания акаунт: парите падат при наемодателя. По избор
+      // платформата удържа application fee (PLATFORM_FEE_BPS, default 0).
+      const opts = {};
+      if (useConnect) {
+        const { platformFeeAmount } = require('../lib/saasConnect');
+        const fee = platformFeeAmount(amountCents);
+        if (fee > 0) sessionParams.payment_intent_data = { application_fee_amount: fee };
+        opts.stripeAccount = org.connect_account_id;
+      }
+      const session = await s.checkout.sessions.create(sessionParams, opts);
 
       // Record session as pending
       db.prepare(`
@@ -328,6 +353,23 @@ function webhookHandler(db) {
         if (handleBillingEvent(db.control, event)) return res.json({ received: true });
       } catch (e) { console.error('[billing webhook]', e.message); }
 
+      // Stripe Connect: account.updated за свързаните акаунти на наемодателите.
+      try {
+        const { handleConnectEvent } = require('../lib/saasConnect');
+        if (handleConnectEvent(db.control, event)) return res.json({ received: true });
+      } catch (e) { console.error('[connect webhook]', e.message); }
+
+      // Маршрутизирай tenant-rent събитията към правилната org база. Direct charges
+      // на свързан акаунт пристигат с event.account = acct_... → намираме наемодателя.
+      // Без event.account (централни плащания на org 1) → orgDb = db (org 1).
+      let orgDb = db;
+      if (event.account) {
+        try {
+          const o = db.control.prepare('SELECT id FROM organizations WHERE connect_account_id=?').get(event.account);
+          if (o) orgDb = getOrgDb(o.id);
+        } catch (e) { console.error('[webhook org routing]', e.message); }
+      }
+
       switch (event.type) {
         case 'checkout.session.completed': {
           const session = event.data.object;
@@ -399,12 +441,12 @@ function webhookHandler(db) {
             console.warn('checkout.session.completed without invoice_id metadata:', session.id);
             break;
           }
-          db.prepare(`
+          orgDb.prepare(`
             UPDATE stripe_payments
             SET status='succeeded', payment_intent_id=?, paid_at=datetime('now')
             WHERE session_id=?
           `).run(session.payment_intent || null, session.id);
-          db.prepare(`
+          orgDb.prepare(`
             UPDATE rent_invoices
             SET paid_at=COALESCE(paid_at, datetime('now')),
                 payment_method=COALESCE(payment_method, 'stripe')
@@ -413,7 +455,7 @@ function webhookHandler(db) {
           console.log(`Stripe: invoice ${invoiceId} marked as paid (session ${session.id})`);
 
           // Email notifications (fire-and-forget, don't block webhook response)
-          const inv = db.prepare(`
+          const inv = orgDb.prepare(`
             SELECT i.*, p.адрес AS property_address
             FROM rent_invoices i LEFT JOIN properties p ON p.id=i.property_id
             WHERE i.id=?
@@ -450,7 +492,7 @@ function webhookHandler(db) {
                 <li>Имот: ${inv.property_address || '—'}</li>
                 <li>Stripe session: ${session.id}</li>
               </ul>`;
-            for (const adminEmail of getAdminEmails(db)) {
+            for (const adminEmail of getAdminEmails(orgDb)) {
               sendPaymentEmail({
                 to: adminEmail,
                 subject: `Skyrent: получено плащане ${fmtMoney(inv.total)} EUR (№ ${inv.invoice_number})`,
@@ -466,12 +508,12 @@ function webhookHandler(db) {
           const pi = event.data.object;
           const invoiceId = pi.metadata?.invoice_id;
           if (invoiceId) {
-            db.prepare(`
+            orgDb.prepare(`
               UPDATE stripe_payments
               SET status='succeeded', paid_at=COALESCE(paid_at, datetime('now'))
               WHERE payment_intent_id=?
             `).run(pi.id);
-            db.prepare(`
+            orgDb.prepare(`
               UPDATE rent_invoices
               SET paid_at=COALESCE(paid_at, datetime('now')),
                   payment_method=COALESCE(payment_method, ?)
@@ -483,12 +525,12 @@ function webhookHandler(db) {
         }
         case 'payment_intent.payment_failed': {
           const pi = event.data.object;
-          db.prepare(`UPDATE stripe_payments SET status='failed' WHERE payment_intent_id=?`).run(pi.id);
+          orgDb.prepare(`UPDATE stripe_payments SET status='failed' WHERE payment_intent_id=?`).run(pi.id);
           console.log(`Stripe: payment failed for intent ${pi.id}`);
 
           // Find associated invoice via stripe_payments
-          const sp = db.prepare('SELECT * FROM stripe_payments WHERE payment_intent_id=?').get(pi.id);
-          const inv = sp ? db.prepare('SELECT * FROM rent_invoices WHERE id=?').get(sp.invoice_id) : null;
+          const sp = orgDb.prepare('SELECT * FROM stripe_payments WHERE payment_intent_id=?').get(pi.id);
+          const inv = sp ? orgDb.prepare('SELECT * FROM rent_invoices WHERE id=?').get(sp.invoice_id) : null;
           const failureMsg = pi.last_payment_error?.message || 'unknown';
           const adminBody = `
             <p style="color:#991b1b;"><strong>⚠️ Неуспешно плащане</strong></p>
@@ -500,7 +542,7 @@ function webhookHandler(db) {
               <li>PaymentIntent: ${pi.id}</li>
             </ul>
             <p>Наемателят може да опита отново от tenant портала.</p>`;
-          for (const adminEmail of getAdminEmails(db)) {
+          for (const adminEmail of getAdminEmails(orgDb)) {
             sendPaymentEmail({
               to: adminEmail,
               subject: `Skyrent: неуспешно плащане (№ ${inv?.invoice_number || pi.id})`,
@@ -512,7 +554,7 @@ function webhookHandler(db) {
         case 'charge.refunded': {
           const charge = event.data.object;
           if (charge.payment_intent) {
-            db.prepare(`UPDATE stripe_payments SET status='refunded' WHERE payment_intent_id=?`).run(charge.payment_intent);
+            orgDb.prepare(`UPDATE stripe_payments SET status='refunded' WHERE payment_intent_id=?`).run(charge.payment_intent);
             console.log(`Stripe: charge refunded for intent ${charge.payment_intent}`);
           }
           break;
