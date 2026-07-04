@@ -158,6 +158,51 @@ export default function LandingPage({ onEnter }) {
         </div>
       </section>
 
+      {/* За нас — доверие: наемодатели, не софтуерна фирма */}
+      <section className="lp-sec">
+        <div className="lp-sec-head">
+          <span className="lp-kick">Кои сме ние</span>
+          <h2 className="lp-h2">Наемодатели, не софтуерна фирма.</h2>
+        </div>
+        <div className="lp-about">
+          <p>
+            Sky Capital управлява <b>38 собствени имота</b> в София — апартаменти, гаражи, складове.
+            Години наред ги следяхме както всички: Excel, папки с договори, банкови извлечения на ръка.
+          </p>
+          <p>
+            После си построихме система. Банков импорт, защото ни писна да сверяваме. Портал за наематели,
+            защото телефонът не спираше. Готова данъчна справка, защото април идваше все изневиделица.
+          </p>
+          <p>
+            Skyrent е тази система. Ползваме я всеки ден — със собствените си пари и собствените си наематели.
+            Ако тя се счупи, нашият бизнес спира пръв.
+          </p>
+          <p className="lp-about-punch"><em>Това е разликата от софтуер, писан от хора, които никога не са гонили закъснял наем.</em></p>
+        </div>
+      </section>
+
+      {/* За заети професионалисти — лекари, адвокати, мениджъри */}
+      <section className="lp-sec">
+        <div className="lp-sec-head">
+          <span className="lp-kick">За заети професионалисти</span>
+          <h2 className="lp-h2">Вие работите. Кой гледа наемите?</h2>
+        </div>
+        <div className="lp-busy">
+          {[
+            ['Кой е платил — без да питате', 'Системата чете банковото извлечение и ви казва само ако нещо липсва. Не отваряте банкирането „да проверите".'],
+            ['Наемателят не звъни на вас', '„Тече кранчето" отива в портала, не на личния ви телефон в неделя вечер.'],
+            ['Договор за 2 минути', 'Нов наемател между два ангажимента: попълвате, сваляте договор + приемо-предавателен протокол.'],
+            ['Април без стрес', 'Данъчната справка за наемите се смята цяла година. Вие само я сваляте. 30 секунди.'],
+          ].map(([t, d]) => (
+            <div className="lp-cap" key={t}>
+              <div className="lp-cap-dot" />
+              <div><b>{t}</b><span>{d}</span></div>
+            </div>
+          ))}
+        </div>
+        <div className="lp-busy-note">10 минути месечно. Толкова е ангажиментът ви — за всичките ви имоти.</div>
+      </section>
+
       {/* Pricing */}
       <section className="lp-sec">
         <div className="lp-sec-head">
@@ -346,6 +391,12 @@ const CSS = `
 .lp-plan button{width:100%;}
 
 /* Final */
+.lp-about{max-width:680px;}
+.lp-about p{font-size:16px;line-height:1.75;color:var(--text);margin-bottom:18px;font-weight:300;}
+.lp-about p b{color:var(--cream);font-weight:600;}
+.lp-about-punch em{font-family:var(--disp);font-style:italic;color:var(--brass2);font-size:17px;}
+.lp-busy{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:18px;}
+.lp-busy-note{margin-top:28px;font-size:14px;letter-spacing:.04em;color:var(--brass2);font-family:var(--disp);font-style:italic;}
 .lp-final{max-width:760px;margin:0 auto;padding:90px 28px 70px;text-align:center;}
 .lp-final-note{margin-top:20px;font-size:13px;color:var(--text);letter-spacing:.02em;}
 
