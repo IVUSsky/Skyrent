@@ -47,21 +47,24 @@ export default function Support({ API }) {
   const showToast = (msg, type = 'success') => { setToast({ msg, type }); setTimeout(() => setToast(null), 4000) }
 
   const openCompose = () => {
-    setCompose({ user_id: '', title: '', message: '' })
+    setCompose({ user_id: '', title: '', message: '', all: false })
     apiFetch(`${API}/api/support/recipients`).then(r => r.json())
       .then(d => setRecipients(Array.isArray(d) ? d : [])).catch(() => setRecipients([]))
   }
   const sendCompose = async () => {
-    if (!compose.user_id || !compose.message.trim()) { showToast('Избери наемател и напиши съобщение', 'error'); return }
+    if (!compose.message.trim()) { showToast('Напиши съобщение', 'error'); return }
+    if (!compose.all && !compose.user_id) { showToast('Избери наемател (или „до всички")', 'error'); return }
     setSending(true)
     try {
-      const r = await apiFetch(`${API}/api/support`, {
+      const url = compose.all ? `${API}/api/support/broadcast` : `${API}/api/support`
+      const r = await apiFetch(url, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(compose),
       })
       const d = await r.json()
       if (!r.ok) { showToast(d.error || 'Грешка', 'error'); setSending(false); return }
-      setCompose(null); setSending(false); showToast('Съобщението е изпратено')
+      setCompose(null); setSending(false)
+      showToast(compose.all ? `Изпратено до ${d.count} наематели` : 'Съобщението е изпратено')
       setStatusFilter('all'); load(); if (d.id) loadDetail(d.id)
     } catch (e) { showToast('Сървърна грешка', 'error'); setSending(false) }
   }
@@ -105,17 +108,29 @@ export default function Support({ API }) {
           <div className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-md" onClick={e => e.stopPropagation()}>
             <h3 className="text-base font-bold text-gray-800 mb-4">✉️ Ново съобщение до наемател</h3>
             <div className="space-y-3">
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">Наемател *</label>
-                <select value={compose.user_id} onChange={e => setCompose({ ...compose, user_id: e.target.value })}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400">
-                  <option value="">— избери —</option>
-                  {recipients.map(r => (
-                    <option key={r.id} value={r.id}>{r.name || r.username}{r.property_address ? ` · ${r.property_address}` : ''}</option>
-                  ))}
-                </select>
-                {recipients.length === 0 && <div className="text-[11px] text-gray-400 mt-1">Няма наематели с портал акаунт.</div>}
-              </div>
+              <label className="flex items-center gap-2 text-sm text-gray-700 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 cursor-pointer">
+                <input type="checkbox" checked={compose.all}
+                  onChange={e => setCompose({ ...compose, all: e.target.checked, user_id: '' })} />
+                📢 До всички наематели{recipients.length ? ` (${recipients.length})` : ''}
+              </label>
+              {!compose.all && (
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">Наемател *</label>
+                  <select value={compose.user_id} onChange={e => setCompose({ ...compose, user_id: e.target.value })}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400">
+                    <option value="">— избери —</option>
+                    {recipients.map(r => (
+                      <option key={r.id} value={r.id}>{r.name || r.username}{r.property_address ? ` · ${r.property_address}` : ''}</option>
+                    ))}
+                  </select>
+                  {recipients.length === 0 && <div className="text-[11px] text-gray-400 mt-1">Няма наематели с портал акаунт.</div>}
+                </div>
+              )}
+              {compose.all && (
+                <div className="text-[11px] text-gray-500 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2">
+                  🔒 Всеки наемател получава <b>личен</b> разговор. Наемателите не се виждат и не си пишат помежду си.
+                </div>
+              )}
               <div>
                 <label className="block text-xs text-gray-500 mb-1">Тема</label>
                 <input value={compose.title} onChange={e => setCompose({ ...compose, title: e.target.value })}

@@ -142,6 +142,55 @@ module.exports = function(db) {
     }
   });
 
+  // Съобщение до ВСИЧКИ наематели наведнъж (broadcast). Създава отделен разговор
+  // за всеки, за да може всеки да отговори лично (не групов чат).
+  router.post('/broadcast', (req, res) => {
+    try {
+      const b = req.body || {};
+      const message = (b.message || '').trim();
+      const title = (b.title || '').trim() || 'Съобщение от управителя';
+      if (!message) return res.status(400).json({ error: 'Съобщението е задължително' });
+      const tenants = db.prepare("SELECT id FROM users WHERE role='tenant'").all();
+      if (!tenants.length) return res.status(400).json({ error: 'Няма наематели' });
+
+      const insTicket = db.prepare(`
+        INSERT INTO support_tickets (user_id, property_id, category, priority, title, description, status, last_admin_read_at)
+        VALUES (?, ?, 'message', 'normal', ?, ?, 'in_progress', datetime('now'))
+      `);
+      const insMsg = db.prepare(`
+        INSERT INTO support_messages (ticket_id, author_role, author_user_id, message) VALUES (?, 'admin', ?, ?)
+      `);
+      const propOf = db.prepare(`
+        SELECT property_id FROM contracts WHERE tenant_user_id=? AND status='active' AND property_id IS NOT NULL
+        ORDER BY created_at DESC LIMIT 1
+      `);
+      const created = [];
+      const tx = db.transaction(() => {
+        for (const t of tenants) {
+          const pid = propOf.get(t.id)?.property_id || null;
+          const r = insTicket.run(t.id, pid, title, message);
+          insMsg.run(r.lastInsertRowid, req.user.id, message);
+          created.push({ user_id: t.id, ticket_id: r.lastInsertRowid });
+        }
+      });
+      tx();
+      // Известия извън транзакцията (best-effort, да не блокира при имейл проблем)
+      for (const c of created) {
+        try {
+          notifyTenant(db, c.user_id, {
+            kind: 'ticket_reply', title: 'Ново съобщение от управителя',
+            body: message.slice(0, 120), link: `tickets/${c.ticket_id}`,
+            ref_type: 'ticket', ref_id: c.ticket_id,
+          });
+        } catch (_) {}
+      }
+      res.status(201).json({ ok: true, count: created.length });
+    } catch (err) {
+      console.error('broadcast error:', err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   router.get('/:id', (req, res) => {
     const t = fetchTicketWithDetails(db, req.params.id);
     if (!t) return res.status(404).json({ error: 'Не е намерен' });
