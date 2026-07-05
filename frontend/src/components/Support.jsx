@@ -40,8 +40,34 @@ export default function Support({ API }) {
   const [detail, setDetail] = useState(null)
   const [loading, setLoading] = useState(true)
   const [toast, setToast] = useState(null)
+  const [compose, setCompose] = useState(null)   // null | { user_id, title, message }
+  const [recipients, setRecipients] = useState([])
+  const [sending, setSending] = useState(false)
 
   const showToast = (msg, type = 'success') => { setToast({ msg, type }); setTimeout(() => setToast(null), 4000) }
+
+  const openCompose = () => {
+    setCompose({ user_id: '', title: '', message: '', all: false })
+    apiFetch(`${API}/api/support/recipients`).then(r => r.json())
+      .then(d => setRecipients(Array.isArray(d) ? d : [])).catch(() => setRecipients([]))
+  }
+  const sendCompose = async () => {
+    if (!compose.message.trim()) { showToast('Напиши съобщение', 'error'); return }
+    if (!compose.all && !compose.user_id) { showToast('Избери наемател (или „до всички")', 'error'); return }
+    setSending(true)
+    try {
+      const url = compose.all ? `${API}/api/support/broadcast` : `${API}/api/support`
+      const r = await apiFetch(url, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(compose),
+      })
+      const d = await r.json()
+      if (!r.ok) { showToast(d.error || 'Грешка', 'error'); setSending(false); return }
+      setCompose(null); setSending(false)
+      showToast(compose.all ? `Изпратено до ${d.count} наематели` : 'Съобщението е изпратено')
+      setStatusFilter('all'); load(); if (d.id) loadDetail(d.id)
+    } catch (e) { showToast('Сървърна грешка', 'error'); setSending(false) }
+  }
 
   const load = () => {
     setLoading(true)
@@ -76,10 +102,66 @@ export default function Support({ API }) {
         </div>
       )}
 
+      {/* Ново съобщение до наемател (landlord-initiated разговор) */}
+      {compose && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={() => setCompose(null)}>
+          <div className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-md" onClick={e => e.stopPropagation()}>
+            <h3 className="text-base font-bold text-gray-800 mb-4">✉️ Ново съобщение до наемател</h3>
+            <div className="space-y-3">
+              <label className="flex items-center gap-2 text-sm text-gray-700 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 cursor-pointer">
+                <input type="checkbox" checked={compose.all}
+                  onChange={e => setCompose({ ...compose, all: e.target.checked, user_id: '' })} />
+                📢 До всички наематели{recipients.length ? ` (${recipients.length})` : ''}
+              </label>
+              {!compose.all && (
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">Наемател *</label>
+                  <select value={compose.user_id} onChange={e => setCompose({ ...compose, user_id: e.target.value })}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400">
+                    <option value="">— избери —</option>
+                    {recipients.map(r => (
+                      <option key={r.id} value={r.id}>{r.name || r.username}{r.property_address ? ` · ${r.property_address}` : ''}</option>
+                    ))}
+                  </select>
+                  {recipients.length === 0 && <div className="text-[11px] text-gray-400 mt-1">Няма наематели с портал акаунт.</div>}
+                </div>
+              )}
+              {compose.all && (
+                <div className="text-[11px] text-gray-500 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2">
+                  🔒 Всеки наемател получава <b>личен</b> разговор. Наемателите не се виждат и не си пишат помежду си.
+                </div>
+              )}
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Тема</label>
+                <input value={compose.title} onChange={e => setCompose({ ...compose, title: e.target.value })}
+                  placeholder="напр. Напомняне за наема"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Съобщение *</label>
+                <textarea value={compose.message} onChange={e => setCompose({ ...compose, message: e.target.value })} rows={4}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 mt-5">
+              <button onClick={() => setCompose(null)} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Отказ</button>
+              <button onClick={sendCompose} disabled={sending}
+                className="px-4 py-2 text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 rounded-lg disabled:opacity-60">
+                {sending ? 'Изпращане…' : 'Изпрати'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* List */}
       <div className="bg-white rounded-xl shadow border border-gray-100 overflow-hidden">
         <div className="px-4 py-3 border-b">
-          <h2 className="text-lg font-bold text-gray-800 mb-2">🛟 Сигнали</h2>
+          <div className="flex items-center justify-between mb-2">
+            <h2 className="text-lg font-bold text-gray-800">💬 Разговори</h2>
+            <button onClick={openCompose}
+              className="text-xs px-3 py-1.5 rounded-lg font-semibold bg-blue-600 text-white hover:bg-blue-700">✉️ Ново</button>
+          </div>
           <div className="flex flex-wrap gap-1">
             {['open', 'in_progress', 'resolved', 'closed', 'all'].map(s => (
               <button key={s} onClick={() => setStatusFilter(s)}
