@@ -4,6 +4,36 @@ const multer  = require('multer');
 const path    = require('path');
 const fs      = require('fs');
 const { notifyAdmin, notifyTenant } = require('../lib/notify');
+const { getIssuer, brandEmailHtml } = require('../lib/branding');
+
+// Имейл до наемателя при съобщение от управителя (fire-and-forget). Съдържа
+// самото съобщение + линк към портала за отговор. Брандиран с данните на
+// организацията-наемодател (не платформата).
+async function sendTenantMessageEmail(db, { toEmail, toName, title, message }) {
+  const key = process.env.RESEND_API_KEY;
+  if (!key || !toEmail) return;
+  const esc = (s) => String(s == null ? '' : s).replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
+  const issuer = getIssuer(db);
+  const fromName = issuer.name || 'Skyrent';
+  const fromEmail = process.env.RESEND_FROM_EMAIL || 'info@skycapital.pro';
+  const portal = process.env.TENANT_PORTAL_URL || process.env.FRONTEND_URL || 'https://app.skycapital.pro';
+  const subject = title || 'Ново съобщение от управителя';
+  const body = `
+    <p>Здравейте${toName ? ' ' + esc(toName) : ''},</p>
+    <p>Имате ново съобщение от управителя${title ? ` — <strong>${esc(title)}</strong>` : ''}:</p>
+    <table cellpadding="0" cellspacing="0" style="margin:14px 0;border-collapse:collapse;width:100%;">
+      <tr><td style="background:#f4f6fb;border-left:3px solid #1a1a2e;padding:14px 18px;color:#1a1a2e;font-size:14px;line-height:1.6;border-radius:0 6px 6px 0;">${esc(message).replace(/\n/g, '<br>')}</td></tr>
+    </table>
+    <p style="margin:22px 0;"><a href="${portal}" style="background:#1a1a2e;color:#ffffff;text-decoration:none;padding:11px 22px;border-radius:8px;font-size:14px;font-weight:bold;display:inline-block;">Отговорете в портала →</a></p>
+    <p style="font-size:12px;color:#6b7280;">Влезте в портала, за да отговорите и да продължите разговора.</p>`;
+  try {
+    await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ from: `${fromName} <${fromEmail}>`, to: [toEmail], subject, html: brandEmailHtml(body, issuer) }),
+    });
+  } catch (e) { console.warn('tenant message email failed:', e.message); }
+}
 
 const DATA_DIR     = process.env.DATA_DIR || path.join(__dirname, '../data');
 const TICKETS_DIR  = path.join(DATA_DIR, 'tickets');
@@ -108,7 +138,7 @@ module.exports = function(db) {
       const message = (b.message || '').trim();
       const title = (b.title || '').trim() || 'Съобщение от управителя';
       if (!userId || !message) return res.status(400).json({ error: 'Получател и съобщение са задължителни' });
-      const tenant = db.prepare("SELECT id FROM users WHERE id=? AND role='tenant'").get(userId);
+      const tenant = db.prepare("SELECT id, name, email FROM users WHERE id=? AND role='tenant'").get(userId);
       if (!tenant) return res.status(404).json({ error: 'Наемателят не е намерен' });
       // Авто-свързване с активния имот на наемателя (ако има), освен ако е подаден изрично
       let propertyId = b.property_id ? Number(b.property_id) : null;
@@ -135,6 +165,7 @@ module.exports = function(db) {
         link: `tickets/${t.lastInsertRowid}`,
         ref_type: 'ticket', ref_id: t.lastInsertRowid,
       });
+      sendTenantMessageEmail(db, { toEmail: tenant.email, toName: tenant.name, title, message });
       res.status(201).json({ ok: true, id: t.lastInsertRowid });
     } catch (err) {
       console.error('admin new conversation error:', err);
@@ -150,7 +181,7 @@ module.exports = function(db) {
       const message = (b.message || '').trim();
       const title = (b.title || '').trim() || 'Съобщение от управителя';
       if (!message) return res.status(400).json({ error: 'Съобщението е задължително' });
-      const tenants = db.prepare("SELECT id FROM users WHERE role='tenant'").all();
+      const tenants = db.prepare("SELECT id, name, email FROM users WHERE role='tenant'").all();
       if (!tenants.length) return res.status(400).json({ error: 'Няма наематели' });
 
       const insTicket = db.prepare(`
@@ -170,11 +201,11 @@ module.exports = function(db) {
           const pid = propOf.get(t.id)?.property_id || null;
           const r = insTicket.run(t.id, pid, title, message);
           insMsg.run(r.lastInsertRowid, req.user.id, message);
-          created.push({ user_id: t.id, ticket_id: r.lastInsertRowid });
+          created.push({ user_id: t.id, ticket_id: r.lastInsertRowid, name: t.name, email: t.email });
         }
       });
       tx();
-      // Известия извън транзакцията (best-effort, да не блокира при имейл проблем)
+      // Известия + имейли извън транзакцията (best-effort, да не блокират при проблем)
       for (const c of created) {
         try {
           notifyTenant(db, c.user_id, {
@@ -183,6 +214,7 @@ module.exports = function(db) {
             ref_type: 'ticket', ref_id: c.ticket_id,
           });
         } catch (_) {}
+        sendTenantMessageEmail(db, { toEmail: c.email, toName: c.name, title, message });
       }
       res.status(201).json({ ok: true, count: created.length });
     } catch (err) {
@@ -260,6 +292,10 @@ module.exports = function(db) {
         link: `tickets/${ticket.id}`,
         ref_type: 'ticket', ref_id: ticket.id,
       });
+      if (message) {
+        const tn = db.prepare("SELECT name, email FROM users WHERE id=?").get(ticket.user_id);
+        sendTenantMessageEmail(db, { toEmail: tn?.email, toName: tn?.name, title: ticket.title, message });
+      }
 
       res.json({ ok: true, id: r.lastInsertRowid });
     } catch (err) {
