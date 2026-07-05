@@ -36,6 +36,7 @@ const Investments    = lazy(() => import('./components/Investments'))
 const PersonalBudget = lazy(() => import('./components/PersonalBudget'))
 const Addons         = lazy(() => import('./components/Addons'))
 const Support        = lazy(() => import('./components/Support'))
+const Contacts       = lazy(() => import('./components/Contacts'))
 const Internet       = lazy(() => import('./components/Internet'))
 const TenantApp      = lazy(() => import('./components/TenantApp'))
 const ChatLearning   = lazy(() => import('./components/ChatLearning'))
@@ -396,6 +397,7 @@ export default function App() {
           {validTab === 'addons'    && <Addons API={API} />}
           {validTab === 'internet'  && <Internet API={API} />}
           {validTab === 'support'   && <Support API={API} />}
+          {validTab === 'contacts'  && <Contacts API={API} />}
           {validTab === 'loans'     && <Loans API={API} />}
           {validTab === 'history'   && <History API={API} />}
           {validTab === 'expenses'  && <Expenses API={API} />}

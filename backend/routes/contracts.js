@@ -998,6 +998,41 @@ module.exports = function(db) {
     catch (e) { res.status(500).json({ error: e.message }); }
   });
 
+  // Експорт на контактите за външни мейл инструменти (Resend/Brevo/Gmail/…).
+  // Admin-only — брокерът НЕ може да сваля цялата PII директория.
+  const csvCell = (v) => {
+    const s = v == null ? '' : String(v);
+    return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  };
+  router.get('/parties/export.csv', (req, res) => {
+    if (req.user?.role === 'broker') return res.status(403).json({ error: 'Само за администратори' });
+    const rows = db.prepare('SELECT * FROM tenant_directory ORDER BY name COLLATE NOCASE').all();
+    const cols = ['name', 'email', 'phone', 'address', 'egn', 'doc_type', 'doc_date', 'doc_country', 'dob', 'notes'];
+    const header = ['Име', 'Имейл', 'Телефон', 'Адрес', 'ЕГН/ЕИК', 'Документ', 'Дата док.', 'Държава', 'Дата на раждане', 'Бележки'];
+    const lines = [header.join(','), ...rows.map(r => cols.map(c => csvCell(r[c])).join(','))];
+    // BOM за коректна кирилица в Excel
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="kontakti.csv"');
+    res.send('﻿' + lines.join('\r\n'));
+  });
+  router.get('/parties/export.vcf', (req, res) => {
+    if (req.user?.role === 'broker') return res.status(403).json({ error: 'Само за администратори' });
+    const rows = db.prepare('SELECT * FROM tenant_directory ORDER BY name COLLATE NOCASE').all();
+    const esc = (v) => String(v == null ? '' : v).replace(/([,;\\])/g, '\\$1').replace(/\n/g, '\\n');
+    const cards = rows.map(r => {
+      const L = ['BEGIN:VCARD', 'VERSION:3.0', `FN:${esc(r.name)}`];
+      if (r.email)   L.push(`EMAIL:${esc(r.email)}`);
+      if (r.phone)   L.push(`TEL:${esc(r.phone)}`);
+      if (r.address) L.push(`ADR:;;${esc(r.address)};;;;`);
+      if (r.notes)   L.push(`NOTE:${esc(r.notes)}`);
+      L.push('END:VCARD');
+      return L.join('\r\n');
+    });
+    res.setHeader('Content-Type', 'text/vcard; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="kontakti.vcf"');
+    res.send(cards.join('\r\n'));
+  });
+
   // ── Contracts ──────────────────────────────────────────────────────────
 
   router.get('/', (req, res) => {

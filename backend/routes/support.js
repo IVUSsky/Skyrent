@@ -86,6 +86,62 @@ module.exports = function(db) {
     res.json(rows);
   });
 
+  // Списък наематели-получатели за ново съобщение (landlord-initiated разговор).
+  // ВАЖНО: преди /:id, иначе param рутът го хваща.
+  router.get('/recipients', (req, res) => {
+    const rows = db.prepare(`
+      SELECT u.id, u.name, u.username, u.email,
+        (SELECT p.адрес FROM contracts c JOIN properties p ON p.id=c.property_id
+         WHERE c.tenant_user_id=u.id AND c.status='active' AND c.property_id IS NOT NULL
+         ORDER BY c.created_at DESC LIMIT 1) AS property_address
+      FROM users u WHERE u.role='tenant'
+      ORDER BY u.name COLLATE NOCASE, u.username COLLATE NOCASE
+    `).all();
+    res.json(rows);
+  });
+
+  // Наемодателят започва нов разговор с наемател (не само отговаря на тикет).
+  router.post('/', (req, res) => {
+    try {
+      const b = req.body || {};
+      const userId = Number(b.user_id);
+      const message = (b.message || '').trim();
+      const title = (b.title || '').trim() || 'Съобщение от управителя';
+      if (!userId || !message) return res.status(400).json({ error: 'Получател и съобщение са задължителни' });
+      const tenant = db.prepare("SELECT id FROM users WHERE id=? AND role='tenant'").get(userId);
+      if (!tenant) return res.status(404).json({ error: 'Наемателят не е намерен' });
+      // Авто-свързване с активния имот на наемателя (ако има), освен ако е подаден изрично
+      let propertyId = b.property_id ? Number(b.property_id) : null;
+      if (!propertyId) {
+        const pr = db.prepare(`
+          SELECT property_id FROM contracts
+          WHERE tenant_user_id=? AND status='active' AND property_id IS NOT NULL
+          ORDER BY created_at DESC LIMIT 1
+        `).get(userId);
+        propertyId = pr?.property_id || null;
+      }
+      const t = db.prepare(`
+        INSERT INTO support_tickets (user_id, property_id, category, priority, title, description, status, last_admin_read_at)
+        VALUES (?, ?, 'message', 'normal', ?, ?, 'in_progress', datetime('now'))
+      `).run(userId, propertyId, title, message);
+      db.prepare(`
+        INSERT INTO support_messages (ticket_id, author_role, author_user_id, message)
+        VALUES (?, 'admin', ?, ?)
+      `).run(t.lastInsertRowid, req.user.id, message);
+      notifyTenant(db, userId, {
+        kind: 'ticket_reply',
+        title: 'Ново съобщение от управителя',
+        body: message.slice(0, 120),
+        link: `tickets/${t.lastInsertRowid}`,
+        ref_type: 'ticket', ref_id: t.lastInsertRowid,
+      });
+      res.status(201).json({ ok: true, id: t.lastInsertRowid });
+    } catch (err) {
+      console.error('admin new conversation error:', err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   router.get('/:id', (req, res) => {
     const t = fetchTicketWithDetails(db, req.params.id);
     if (!t) return res.status(404).json({ error: 'Не е намерен' });
