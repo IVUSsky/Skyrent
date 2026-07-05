@@ -72,10 +72,13 @@ function handleConnectEvent(controlDb, event) {
   return true;
 }
 
-// Такса на платформата от наема (в стотинки). Default 0 → не се удържа нищо
-// (валидационна фаза). Задава се с PLATFORM_FEE_BPS (базисни точки, 50 = 0.5%).
+// Комисионна на платформата от всеки наем (application fee, в стотинки).
+// Default 30 базисни точки = 0.3% на превод. Override през PLATFORM_FEE_BPS
+// (напр. 0 = без комисионна, 50 = 0.5%). Удържа се автоматично от direct charge-а
+// и влиза в платформения акаунт.
 function platformFeeAmount(amountCents) {
-  const bps = parseInt(process.env.PLATFORM_FEE_BPS || '0', 10);
+  const raw = process.env.PLATFORM_FEE_BPS;
+  const bps = raw != null && raw !== '' ? parseInt(raw, 10) : 30;
   if (!bps || bps <= 0) return 0;
   return Math.round(amountCents * bps / 10000);
 }
