@@ -330,19 +330,28 @@ function webhookHandler(db) {
     const s = getStripe();
     if (!s) return res.status(500).send('Stripe not configured');
 
-    const secret = process.env.STRIPE_WEBHOOK_SECRET;
-    if (!secret) {
+    // Приемаме няколко signing secret-а: основния (Your account: наеми на org 1 +
+    // SaaS billing) и по избор отделен за Connected accounts (Stripe Connect наеми).
+    // Stripe UI-ят прави отделен destination per източник, всеки със свой secret —
+    // затова пробваме всеки, докато някой верифицира подписа.
+    const secrets = [
+      process.env.STRIPE_WEBHOOK_SECRET,
+      process.env.STRIPE_CONNECT_WEBHOOK_SECRET,
+    ].filter(Boolean);
+    if (!secrets.length) {
       console.error('STRIPE_WEBHOOK_SECRET not set — refusing to process webhook');
       return res.status(500).send('Webhook secret missing');
     }
 
     const sig = req.headers['stripe-signature'];
-    let event;
-    try {
-      event = s.webhooks.constructEvent(req.body, sig, secret);
-    } catch (err) {
-      console.error('Stripe webhook signature verification failed:', err.message);
-      return res.status(400).send(`Webhook Error: ${err.message}`);
+    let event = null, lastErr = null;
+    for (const secret of secrets) {
+      try { event = s.webhooks.constructEvent(req.body, sig, secret); break; }
+      catch (err) { lastErr = err; }
+    }
+    if (!event) {
+      console.error('Stripe webhook signature verification failed:', lastErr?.message);
+      return res.status(400).send(`Webhook Error: ${lastErr?.message}`);
     }
 
     try {
