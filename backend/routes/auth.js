@@ -176,10 +176,12 @@ module.exports = function(controlDb, getOrgDb) {
   // блок на disposable имейли + email верификация преди първи вход.
   router.post('/signup', signupLimiter, async (req, res) => {
     try {
-      const { signup_code, org_name, username, password, email, name, company } = req.body || {};
+      const { signup_code, org_name, username, password, email, name, company, terms_accepted } = req.body || {};
       // honeypot — ботове попълват скритото поле 'company'; тихо "успяваме"
       if (company) return res.status(201).json({ ok: true, pending_verification: true });
       if (process.env.SIGNUP_DISABLED === '1') return res.status(403).json({ error: 'Регистрацията е временно затворена' });
+      // Приемане на Общите условия — задължително (правно съгласие при регистрация)
+      if (!terms_accepted) return res.status(400).json({ error: 'Трябва да приемете Общите условия и Политиката за поверителност' });
 
       const inviteCode = process.env.SIGNUP_CODE;
       const invited = !!inviteCode && String(signup_code || '') === inviteCode;
@@ -207,6 +209,8 @@ module.exports = function(controlDb, getOrgDb) {
         owner_email: email, owner_name: name,
         email_verified: invited ? 1 : 0, verify_token: verifyToken, verify_expires: verifyExpires,
       });
+      // Запис на приемането на Общите условия (дата + IP като доказателство)
+      try { db.control.prepare("UPDATE organizations SET terms_accepted_at=datetime('now') WHERE id=?").run(r.organization_id); } catch (_) {}
 
       if (invited) {
         // Доверен invite → auto-login + welcome (запазено поведение от бетата)

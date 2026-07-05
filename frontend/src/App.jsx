@@ -37,6 +37,7 @@ const PersonalBudget = lazy(() => import('./components/PersonalBudget'))
 const Addons         = lazy(() => import('./components/Addons'))
 const Support        = lazy(() => import('./components/Support'))
 const Contacts       = lazy(() => import('./components/Contacts'))
+const Legal          = lazy(() => import('./components/Legal'))
 const Internet       = lazy(() => import('./components/Internet'))
 const TenantApp      = lazy(() => import('./components/TenantApp'))
 const ChatLearning   = lazy(() => import('./components/ChatLearning'))
@@ -256,6 +257,9 @@ export default function App() {
   // SEO инструменти (публични, без login)
   if (pubPath === '/kalkulator-naem') return <RentTaxCalculator />
   if (pubPath === '/dogovor-naem') return <RentalContractGenerator API={API} />
+  // Правни документи (публични)
+  if (pubPath === '/usloviya')      return <Legal which="terms" />
+  if (pubPath === '/poveritelnost') return <Legal which="privacy" />
 
   if (!authenticated) {
     return showLogin
