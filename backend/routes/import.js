@@ -666,10 +666,15 @@ module.exports = function(db) {
 
   router.patch('/transactions/:id/category', (req, res) => {
     try {
-      const { категория, property_id } = req.body;
+      const { категория, property_id, scope } = req.body;
       if (!категория) return res.status(400).json({ error: 'категория е задължителна' });
 
-      const newScope = PERSONAL_CATS.has(категория) ? 'personal' : 'business';
+      // scope override: неутрални категории (напр. 'инвестиция') съществуват и в
+      // двата свята — личен T212 депозит и бизнес покупка на имот. Подаден scope
+      // печели пред извода от категорията.
+      const newScope = (scope === 'personal' || scope === 'business')
+        ? scope
+        : (PERSONAL_CATS.has(категория) ? 'personal' : 'business');
 
       // Update this transaction (including scope)
       db.prepare('UPDATE transactions SET категория=?, property_id=COALESCE(?,property_id), scope=?, validated=1 WHERE id=?')
