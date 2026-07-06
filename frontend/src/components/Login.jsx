@@ -54,6 +54,7 @@ export default function Login({ API, onLogin, onBack }) {
   const [email, setEmail]           = useState('')
   const [fullName, setFullName]     = useState('')
   const [honeypot, setHoneypot]     = useState('')        // анти-бот скрито поле
+  const [acceptTerms, setAcceptTerms] = useState(false)   // приемане на Общи условия (задължително)
   const [unverifiedEmail, setUnverifiedEmail] = useState(null) // вход блокиран — непотвърден
   const [notice, setNotice]         = useState(null)      // банер от ?verify= в имейл линка
   const codeRef = useRef(null)
@@ -132,11 +133,12 @@ export default function Login({ API, onLogin, onBack }) {
 
   const submitSignup = (e) => {
     e.preventDefault()
+    if (!acceptTerms) { setError('Трябва да приемете Общите условия и Политиката за поверителност'); return }
     setLoading(true); setError(null)
     fetch(`${API}/api/auth/signup`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ org_name: orgName, username, password, email, name: fullName, company: honeypot }),
+      body: JSON.stringify({ org_name: orgName, username, password, email, name: fullName, company: honeypot, terms_accepted: true }),
     })
       .then(r => r.json())
       .then(data => {
@@ -271,6 +273,10 @@ export default function Login({ API, onLogin, onBack }) {
                   <Field id="em" label="Имейл" type="email" value={email} onChange={setEmail} />
                   <Field id="su" label="Потребителско име" value={username} onChange={setUsername} />
                   <Field id="sp" label="Парола (мин. 8 знака)" type="password" value={password} onChange={setPassword} />
+                  <label className="sky-terms">
+                    <input type="checkbox" checked={acceptTerms} onChange={e => setAcceptTerms(e.target.checked)} />
+                    <span>Приемам <a href="/usloviya" target="_blank" rel="noopener">Общите условия</a> и <a href="/poveritelnost" target="_blank" rel="noopener">Политиката за поверителност</a></span>
+                  </label>
                   {error && <div className="sky-error">{error}</div>}
                   <SubmitBtn loading={loading} idle="Създай акаунт" busy="Създаване…" />
                   <button type="button" onClick={goBack} className="sky-back">← обратно към вход</button>
@@ -426,6 +432,10 @@ const LOGIN_CSS = `
 
 .sky-error{font-size:13.5px;color:#E8927C;background:rgba(232,146,124,.08);
   border:1px solid rgba(232,146,124,.22);border-radius:10px;padding:10px 12px;}
+.sky-terms{display:flex;align-items:flex-start;gap:9px;font-size:12.5px;line-height:1.5;
+  color:${C.boneDim};cursor:pointer;margin-top:2px;}
+.sky-terms input{margin-top:2px;flex-shrink:0;cursor:pointer;}
+.sky-terms a{color:${C.bone};text-decoration:underline;}
 
 .sky-submit{margin-top:4px;width:100%;display:flex;align-items:center;justify-content:center;gap:10px;
   background:linear-gradient(180deg,${C.brass},${C.brassDeep});color:${C.ink};

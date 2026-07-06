@@ -219,6 +219,8 @@ export default function LandingPage({ onEnter }) {
           <a href="/dogovor-naem" style={{ color: 'inherit', textDecoration: 'none' }}>Договор за наем</a>
           <a href="/kalkulator-naem" style={{ color: 'inherit', textDecoration: 'none' }}>Калкулатор данък наем</a>
           <a href="/imoti" style={{ color: 'inherit', textDecoration: 'none' }}>Имоти под наем</a>
+          <a href="/usloviya" style={{ color: 'inherit', textDecoration: 'none' }}>Общи условия</a>
+          <a href="/poveritelnost" style={{ color: 'inherit', textDecoration: 'none' }}>Поверителност</a>
         </span>
         <span>© {new Date().getFullYear()} · Управление на наемния бизнес</span>
       </footer>

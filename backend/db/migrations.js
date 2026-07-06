@@ -929,6 +929,8 @@ function runControlMigrations(db) {
   try { db.exec("ALTER TABLE organizations ADD COLUMN connect_charges_enabled INTEGER DEFAULT 0");    console.log('Migration: added organizations.connect_charges_enabled'); }   catch(_) {}
   try { db.exec("ALTER TABLE organizations ADD COLUMN connect_payouts_enabled INTEGER DEFAULT 0");    console.log('Migration: added organizations.connect_payouts_enabled'); }   catch(_) {}
   try { db.exec("ALTER TABLE organizations ADD COLUMN connect_details_submitted INTEGER DEFAULT 0");  console.log('Migration: added organizations.connect_details_submitted'); } catch(_) {}
+  // Приемане на Общите условия при регистрация (правно доказателство за съгласие).
+  try { db.exec("ALTER TABLE organizations ADD COLUMN terms_accepted_at DATETIME"); console.log('Migration: added organizations.terms_accepted_at'); } catch(_) {}
 
   // Phase 5: платформен команден център — broadcast оферти/новини + leads
   db.exec(`CREATE TABLE IF NOT EXISTS announcements (
