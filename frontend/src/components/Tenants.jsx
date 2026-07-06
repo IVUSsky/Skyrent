@@ -501,7 +501,9 @@ function TenantTable({
                 <td className="px-3 py-3 text-right font-medium whitespace-nowrap">
                   {prop.is_paid ? (
                     <div className="flex flex-col items-end">
-                      <span className="text-green-700 font-bold">{(prop.paid_amount || 0).toLocaleString('bg-BG')} €</span>
+                      {prop.prepaid && !(prop.paid_amount > 0)
+                        ? <span className="text-emerald-700 font-bold">⏩ предплатено</span>
+                        : <span className="text-green-700 font-bold">{(prop.paid_amount || 0).toLocaleString('bg-BG')} €</span>}
                       {prop.tx_count >= 2 && (
                         <span
                           className="mt-0.5 text-[10px] text-amber-700 bg-amber-100 border border-amber-300 px-1.5 py-0.5 rounded-full cursor-help"
@@ -523,6 +525,8 @@ function TenantTable({
                     ? <span className="inline-block bg-purple-50 text-purple-700 border border-purple-200 text-xs px-2 py-0.5 rounded-full">
                         {prop.manual_payment.payment_type === 'брой' ? '💵 В брой' : '🏦 Друга сметка'}
                       </span>
+                    : prop.prepaid
+                      ? <span className="inline-block bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs px-2 py-0.5 rounded-full">⏩ Предплатено</span>
                     : prop.is_paid
                       ? <span className="inline-block bg-blue-50 text-blue-700 border border-blue-200 text-xs px-2 py-0.5 rounded-full">🏛️ Банков импорт</span>
                       : <span className="inline-block bg-red-50 text-red-700 border border-red-200 text-xs px-2 py-0.5 rounded-full">❌ Не е платил</span>
@@ -673,12 +677,12 @@ function YearMatrix({ matrix, loading, onCellClick }) {
 
   const cellClass = (c) => {
     if (c.is_future) return 'bg-gray-50 text-gray-300'
-    if (c.is_paid) return c.manual ? 'bg-purple-100 text-purple-700' : 'bg-green-100 text-green-700'
+    if (c.is_paid) return c.prepaid ? 'bg-emerald-50 text-emerald-600' : c.manual ? 'bg-purple-100 text-purple-700' : 'bg-green-100 text-green-700'
     return 'bg-red-50 text-red-700'
   }
   const cellIcon = (c) => {
     if (c.is_future) return '·'
-    if (c.is_paid)   return c.manual ? '💵' : '✓'
+    if (c.is_paid)   return c.prepaid ? '⏩' : c.manual ? '💵' : '✓'
     return '✗'
   }
 
