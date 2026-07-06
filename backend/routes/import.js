@@ -169,7 +169,11 @@ module.exports = function(db) {
       }
     }
 
-    const currency = rawTx.currency || (дата >= '2026-01-01' ? 'EUR' : 'BGN');
+    // От 01.01.2026 България е на евро — датата е авторитетна. По време на прехода
+    // ProBanking извлеченията понякога отбелязват валутната колона като „BGN",
+    // макар сумата да е в евро → форсираме EUR за 2026+ дати (иначе справките
+    // делят на 1.95583 и показват половината реална сума).
+    const currency = дата >= '2026-01-01' ? 'EUR' : (rawTx.currency || 'BGN');
     const месец    = rawTx.месец || дата.slice(0, 7);
 
     return {
@@ -597,6 +601,31 @@ module.exports = function(db) {
       if (!property_id) return res.status(400).json({ error: 'property_id е задължителен' });
       db.prepare('UPDATE transactions SET property_id = ? WHERE id = ?').run(Number(property_id), req.params.id);
       res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST /fix-currency-2026 — еднократна корекция: транзакции с 2026 дата/месец,
+  // грешно тагнати като BGN по време на прехода, се коригират на EUR (сумата вече
+  // е в евро, само флагът е грешен). Връща брой засегнати. Admin-only.
+  router.post('/fix-currency-2026', (req, res) => {
+    if (req.user?.role !== 'admin') return res.status(403).json({ error: 'Само за администратори' });
+    try {
+      const tx = db.prepare(
+        `UPDATE transactions SET currency='EUR'
+         WHERE UPPER(COALESCE(currency,''))='BGN'
+           AND (COALESCE(месец,'') >= '2026-01' OR COALESCE(дата,'') >= '2026-01-01')`
+      ).run();
+      let exp = { changes: 0 };
+      try {
+        exp = db.prepare(
+          `UPDATE expense_invoices SET currency='EUR'
+           WHERE UPPER(COALESCE(currency,''))='BGN'
+             AND (COALESCE(месец,'') >= '2026-01' OR COALESCE(paid_date,'') >= '2026-01-01')`
+        ).run();
+      } catch (_) {}
+      res.json({ ok: true, transactions_fixed: tx.changes, expenses_fixed: exp.changes });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }

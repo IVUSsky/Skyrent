@@ -164,16 +164,36 @@ module.exports = function(db) {
     const manualMap = {};
     manualPaid.forEach(p => { manualMap[p.property_id] = p; });
 
+    // Cumulative покритие (предплащане): платено до месеца vs дължим наем от началото.
+    const cumRows = db.prepare(
+      `SELECT property_id, SUM(CASE WHEN UPPER(COALESCE(currency,'BGN'))='BGN' THEN сума/1.95583 ELSE сума END) as paid
+       FROM transactions WHERE категория='наем' AND operation='Кт' AND property_id IS NOT NULL
+         AND COALESCE(месец,'') != '' AND месец <= ? GROUP BY property_id`
+    ).all(month);
+    const cumMap = {};
+    cumRows.forEach(r => { cumMap[r.property_id] = r.paid; });
+    db.prepare(`SELECT property_id, SUM(amount) as paid FROM manual_rent_payments WHERE month <= ? GROUP BY property_id`)
+      .all(month).forEach(r => { cumMap[r.property_id] = (cumMap[r.property_id] || 0) + r.paid; });
+    const startMap = {};
+    db.prepare(`SELECT property_id, MIN(месец) as start FROM transactions
+                WHERE категория='наем' AND operation='Кт' AND property_id IS NOT NULL AND COALESCE(месец,'') != ''
+                GROUP BY property_id`).all().forEach(r => { startMap[r.property_id] = r.start; });
+    const monthsIncl = (s, e) => { if (!s || !e || s > e) return 0; const [ys, ms] = s.split('-').map(Number), [ye, me] = e.split('-').map(Number); return (ye - ys) * 12 + (me - ms) + 1; };
+
     const result = props.map(p => {
       const bank   = bankMap[p.id];
       const manual = manualMap[p.id];
       const paid_amount = (bank ? bank.paid_amount : 0) + (manual ? manual.amount : 0);
+      const rent = Number(p.наем) || 0;
+      const due = rent > 0 ? monthsIncl(startMap[p.id], month) * rent : 0;
+      const prepaid_covered = due > 0 && (cumMap[p.id] || 0) + 0.5 >= due;
       return {
         ...p,
         paid_amount,
         tx_count:      bank   ? bank.tx_count      : 0,
         bank_txs:      bankTxMap[p.id] || [],
-        is_paid:       !!(bank || manual),
+        is_paid:       !!(bank || manual || prepaid_covered),
+        prepaid:       !bank && !manual && prepaid_covered,
         manual_payment: manual || null,
       };
     });
@@ -346,28 +366,63 @@ module.exports = function(db) {
         cellMap[key].manual_type   = r.payment_type;
       }
 
-      // Build matrix
+      // Предплатен излишък от ПРЕДИ годината — за коректно пренасяне (напр. голяма
+      // вноска в декември, покриваща следващи месеци). Само излишъкът се пренася.
+      const beforeRows = db.prepare(
+        `SELECT property_id,
+                SUM(CASE WHEN UPPER(COALESCE(currency,'BGN'))='BGN' THEN сума/1.95583 ELSE сума END) as paid,
+                MIN(месец) as start
+         FROM transactions
+         WHERE категория = 'наем' AND operation = 'Кт' AND property_id IS NOT NULL
+           AND COALESCE(месец,'') != '' AND месец < ?
+         GROUP BY property_id`
+      ).all(monthFrom);
+      const beforeMap = {};
+      beforeRows.forEach(r => { beforeMap[r.property_id] = r; });
+      const monthsInclusive = (start, end) => {
+        if (!start || !end || start > end) return 0;
+        const [ys, ms] = start.split('-').map(Number);
+        const [ye, me] = end.split('-').map(Number);
+        return (ye - ys) * 12 + (me - ms) + 1;
+      };
+      const prevDec = `${Number(year) - 1}-12`;
+
+      // Build matrix — с „преходящ баланс": надплатеното покрива автоматично
+      // следващите месеци (предплащане), без ръчно разпределяне.
       const now = new Date();
       const curYM = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
       const properties = props.map(p => {
+        const rent = Number(p.наем) || 0;
+        // начален кредит = излишък отпреди годината
+        let credit = 0;
+        const before = beforeMap[p.id];
+        if (before && before.paid > 0 && rent > 0) {
+          const dueBefore = monthsInclusive(before.start, prevDec) * rent;
+          credit = Math.max(0, before.paid - dueBefore);
+        }
         const cells = [];
         for (let m = 1; m <= 12; m++) {
           const ym = `${year}-${String(m).padStart(2, '0')}`;
           const cell = cellMap[`${p.id}-${ym}`];
           const paid_amount = cell ? (cell.bank_amount || 0) + (cell.manual_amount || 0) : 0;
           const is_future = ym > curYM;
+          let is_paid = false, prepaid = false;
+          if (!is_future) {
+            if (rent > 0) {
+              credit += paid_amount;
+              if (credit + 0.5 >= rent) { is_paid = true; prepaid = paid_amount < rent - 0.5; credit -= rent; }
+            } else {
+              is_paid = paid_amount > 0; // няма зададен наем → fallback по наличие
+            }
+          }
           cells.push({
-            месец: ym,
-            paid_amount,
-            tx_count: cell?.tx_count || 0,
-            is_paid: !!cell && paid_amount > 0,
-            manual: !!cell?.manual_amount,
-            is_future,
+            месец: ym, paid_amount, tx_count: cell?.tx_count || 0,
+            is_paid, prepaid, manual: !!cell?.manual_amount, is_future,
           });
         }
         const collected = cells.reduce((s, c) => s + c.paid_amount, 0);
         const monthsActive = cells.filter(c => !c.is_future).length;
-        const expected = (p.наем || 0) * monthsActive;
+        const expected = rent * monthsActive;
         return {
           id: p.id, адрес: p.адрес, район: p.район, наемател: p.наемател, наем: p.наем,
           cells, collected, expected,
