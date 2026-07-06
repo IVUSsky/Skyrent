@@ -169,11 +169,10 @@ module.exports = function(db) {
       }
     }
 
-    // От 01.01.2026 България е на евро — датата е авторитетна. По време на прехода
-    // ProBanking извлеченията понякога отбелязват валутната колона като „BGN",
-    // макар сумата да е в евро → форсираме EUR за 2026+ дати (иначе справките
-    // делят на 1.95583 и показват половината реална сума).
-    const currency = дата >= '2026-01-01' ? 'EUR' : (rawTx.currency || 'BGN');
+    // Валутата идва от банковата колона (rawTx.currency) — по време на прехода
+    // 2026 плащанията са СМЕСЕНИ (някои в лева, някои в евро) и колоната е вярна.
+    // Fallback само ако липсва: 2026+ дати → EUR, иначе BGN.
+    const currency = rawTx.currency || (дата >= '2026-01-01' ? 'EUR' : 'BGN');
     const месец    = rawTx.месец || дата.slice(0, 7);
 
     return {
@@ -606,26 +605,16 @@ module.exports = function(db) {
     }
   });
 
-  // POST /fix-currency-2026 — еднократна корекция: транзакции с 2026 дата/месец,
-  // грешно тагнати като BGN по време на прехода, се коригират на EUR (сумата вече
-  // е в евро, само флагът е грешен). Връща брой засегнати. Admin-only.
-  router.post('/fix-currency-2026', (req, res) => {
+  // PATCH /transactions/:id/currency — точкова корекция на валутата на ЕДНА
+  // транзакция (когато банковата колона е сгрешила при конкретен превод).
+  // Валутата е смесена през 2026 (преход) → коригира се поединично, не масово.
+  router.patch('/transactions/:id/currency', (req, res) => {
     if (req.user?.role !== 'admin') return res.status(403).json({ error: 'Само за администратори' });
     try {
-      const tx = db.prepare(
-        `UPDATE transactions SET currency='EUR'
-         WHERE UPPER(COALESCE(currency,''))='BGN'
-           AND (COALESCE(месец,'') >= '2026-01' OR COALESCE(дата,'') >= '2026-01-01')`
-      ).run();
-      let exp = { changes: 0 };
-      try {
-        exp = db.prepare(
-          `UPDATE expense_invoices SET currency='EUR'
-           WHERE UPPER(COALESCE(currency,''))='BGN'
-             AND (COALESCE(месец,'') >= '2026-01' OR COALESCE(paid_date,'') >= '2026-01-01')`
-        ).run();
-      } catch (_) {}
-      res.json({ ok: true, transactions_fixed: tx.changes, expenses_fixed: exp.changes });
+      const c = String(req.body?.currency || '').toUpperCase();
+      if (c !== 'BGN' && c !== 'EUR') return res.status(400).json({ error: 'currency трябва да е BGN или EUR' });
+      const r = db.prepare('UPDATE transactions SET currency=? WHERE id=?').run(c, req.params.id);
+      res.json({ ok: true, changed: r.changes });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
