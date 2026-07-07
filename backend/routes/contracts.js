@@ -1376,7 +1376,14 @@ module.exports = function(db) {
     if (!contract) return res.status(404).json({ error: 'Not found' });
     const filepath = path.join(PDF_DIR, contract.pdf_path);
     if (!fs.existsSync(filepath)) return res.status(404).json({ error: 'PDF не е намерен' });
-    res.setHeader('Content-Type', 'application/pdf');
+    // Архивираните договори може да са Word (.docx) — сервирай с правилния mime,
+    // за да се свали коректно (иначе браузърът го третира като PDF).
+    if (/\.docx$/i.test(contract.pdf_path)) {
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+      res.setHeader('Content-Disposition', `attachment; filename="dogovor_${contract.id}.docx"`);
+    } else {
+      res.setHeader('Content-Type', 'application/pdf');
+    }
     fs.createReadStream(filepath).pipe(res);
   });
 
