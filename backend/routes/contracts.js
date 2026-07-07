@@ -756,11 +756,13 @@ function generateAnnexPDF(annex, contract, issuer) {
       || (!contract.landlord_type && !!issuer.eik);
     const landlordLabel = isCompany
       ? `${contract.landlord_name || issuer.name || '...'}, ЕИК ${contract.landlord_egn || issuer.eik || ''}${issuer.mol ? `, представлявано от ${issuer.mol} – Управител` : ''}`
-      : `${contract.landlord_name || issuer.name || ''}, ЕГН ${contract.landlord_egn || issuer.eik || ''}`;
+      : `${contract.landlord_name || issuer.name || ''}${contract.landlord_egn ? ', ЕГН ' + contract.landlord_egn : ''}`;
+    // Наемател-фирма (има МОЛ) → идентификаторът е ЕИК, не ЕГН
+    const tenantIdLabel = contract.tenant_mol ? 'ЕИК' : 'ЕГН';
 
     [
       ['НАЕМОДАТЕЛ / LANDLORD:', landlordLabel],
-      ['НАЕМАТЕЛ / TENANT:', `${contract.tenant_name}${contract.tenant_egn ? ', ЕГН ' + contract.tenant_egn : ''}`],
+      ['НАЕМАТЕЛ / TENANT:', `${contract.tenant_name}${contract.tenant_egn ? `, ${tenantIdLabel} ` + contract.tenant_egn : ''}${contract.tenant_mol ? `, представлявано от ${contract.tenant_mol}` : ''}`],
     ].forEach(([lbl, val]) => {
       doc.font('B').fontSize(9).fillColor('#374151').text(lbl + '  ', ML, y, { continued: true });
       doc.font('R').fontSize(9).fillColor('#111827').text(val, { width: PW - 140 });
