@@ -750,10 +750,11 @@ function generateAnnexPDF(annex, contract, issuer) {
        .text(`Днес, ${fmtDate(annex.annex_date)}, в гр. София, между долуподписаните страни:`, ML, y, { width: PW });
     y = doc.y + 12;
 
-    // Parties block. Архивираните (качени) договори нямат landlord_type →
-    // ако issuer-ът е фирма (има ЕИК), третирай наемодателя като дружество.
+    // Parties block. Архивираните (качени) договори получават DEFAULT
+    // landlord_type='физическо' и нямат landlord_name → ако няма изрично
+    // въведен наемодател-физлице и issuer-ът е фирма (има ЕИК) → дружество.
     const isCompany = contract.landlord_type === 'дружество'
-      || (!contract.landlord_type && !!issuer.eik);
+      || (!contract.landlord_name && !!issuer.eik);
     const landlordLabel = isCompany
       ? `${contract.landlord_name || issuer.name || '...'}, ЕИК ${contract.landlord_egn || issuer.eik || ''}${issuer.mol ? `, представлявано от ${issuer.mol} – Управител` : ''}`
       : `${contract.landlord_name || issuer.name || ''}${contract.landlord_egn ? ', ЕГН ' + contract.landlord_egn : ''}`;

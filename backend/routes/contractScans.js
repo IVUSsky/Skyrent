@@ -201,12 +201,19 @@ module.exports = function (db) {
       }
       const propertyId = b.property_id ? Number(b.property_id) : null;
 
+      // Наемодателят на архивния договор = издаващата организация (issuer):
+      // фирма с ЕИК → анексите/документите изписват „представлявано от <МОЛ>".
+      const { getIssuer } = require('../lib/branding');
+      const issuer = getIssuer(db);
+      const isCompany = !!issuer.eik;
+
       const r = db.prepare(`
         INSERT INTO contracts (property_id, status, tenant_name, tenant_egn, tenant_address,
           tenant_phone, tenant_email, tenant_doc, tenant_doc_date,
           property_address, property_area, monthly_rent, currency, deposit, payment_day,
-          start_date, end_date, notes, pdf_path, activated_at)
-        VALUES (?, 'active', ?,?,?,?,?,?,?, ?,?,?,?,?,?, ?,?, ?, ?, datetime('now'))
+          start_date, end_date, notes, pdf_path, activated_at,
+          landlord_type, landlord_name, landlord_egn, landlord_address)
+        VALUES (?, 'active', ?,?,?,?,?,?,?, ?,?,?,?,?,?, ?,?, ?, ?, datetime('now'), ?,?,?,?)
       `).run(
         propertyId, b.tenant_name || '', b.tenant_egn || null, b.tenant_address || null,
         b.tenant_phone || null, b.tenant_email || null, b.tenant_lk || null, b.tenant_lk_date || null,
@@ -214,7 +221,9 @@ module.exports = function (db) {
         b.monthly_rent || null, b.currency || 'BGN', b.deposit || 0, b.payment_day || 5,
         b.start_date || null, b.end_date || null,
         '📎 Архивиран съществуващ договор (качен скан)' + (b.contract_date ? ` от ${b.contract_date}` : ''),
-        path.basename(b.scan_file)
+        path.basename(b.scan_file),
+        isCompany ? 'дружество' : 'физическо',
+        issuer.name || null, issuer.eik || null, issuer.address || null
       );
 
       // По избор: обнови имота (наемател + контакти + абонатни номера; наемът НЕ се
