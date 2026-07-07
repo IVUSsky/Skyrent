@@ -637,15 +637,53 @@ export default function Contracts({ API }) {
       body: JSON.stringify(annexForm),
     })
       .then(r => r.json())
-      .then(d => {
+      .then(async d => {
         setCreatingAnnex(false)
         if (d.ok) {
           showToast(`Анекс ${d.annex_number} създаден`)
+          // Авто-изпращане към наемателя, ако е чекнато
+          if (annexSendAfter && d.id) {
+            const sr = await apiFetch(`${API}/api/contracts/${annexModal.id}/annexes/${d.id}/send`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+            const sd = await sr.json()
+            showToast(sr.ok ? '✉️ Анексът е изпратен на наемателя' : 'Анексът е създаден, но: ' + (sd.error || 'изпращането не мина'), sr.ok ? 'success' : 'error')
+          }
           apiFetch(`${API}/api/contracts/${annexModal.id}/annexes`).then(r => r.json()).then(setAnnexes)
           load()
         } else showToast('Грешка: ' + d.error, 'error')
       })
       .catch(e => { setCreatingAnnex(false); showToast(e.message, 'error') })
+  }
+
+  const [annexSendAfter, setAnnexSendAfter] = useState(false)
+  const [annexUploadBusy, setAnnexUploadBusy] = useState(false)
+
+  const sendAnnex = async (a) => {
+    let email = annexModal.tenant_email
+    if (!email) { email = window.prompt('Договорът няма имейл — въведи имейл на наемателя:') ; if (!email) return }
+    if (!window.confirm(`Изпращане на анекс ${a.annex_number} до ${email}?`)) return
+    const r = await apiFetch(`${API}/api/contracts/${annexModal.id}/annexes/${a.id}/send`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(annexModal.tenant_email ? {} : { email }),
+    })
+    const d = await r.json()
+    showToast(r.ok ? '✉️ Изпратено' : 'Грешка: ' + (d.error || ''), r.ok ? 'success' : 'error')
+  }
+
+  const uploadOldAnnex = async (fileList) => {
+    const files = Array.from(fileList || [])
+    if (!files.length) return
+    setAnnexUploadBusy(true)
+    const fd = new FormData()
+    for (const f of files) fd.append('files', f)
+    const dateStr = window.prompt('Дата на анекса (ГГГГ-ММ-ДД), или празно за днес:') || ''
+    if (dateStr) fd.append('annex_date', dateStr)
+    const r = await apiFetch(`${API}/api/contracts/${annexModal.id}/annexes/upload`, { method: 'POST', body: fd })
+    const d = await r.json()
+    setAnnexUploadBusy(false)
+    if (r.ok) {
+      showToast(`Архивен анекс ${d.annex_number} качен`)
+      apiFetch(`${API}/api/contracts/${annexModal.id}/annexes`).then(r2 => r2.json()).then(setAnnexes)
+    } else showToast('Грешка: ' + (d.error || ''), 'error')
   }
 
   const deleteAnnex = (a) => {
@@ -1264,35 +1302,50 @@ export default function Contracts({ API }) {
                     {Number(annexForm.new_monthly_rent) > Number(annexModal.monthly_rent) ? '▲' : '▼'} Промяна от {Number(annexModal.monthly_rent).toLocaleString('bg-BG')} → {Number(annexForm.new_monthly_rent).toLocaleString('bg-BG')} {annexForm.new_currency}
                   </div>
                 )}
+                <label className="flex items-center gap-2 text-xs text-gray-700 cursor-pointer">
+                  <input type="checkbox" checked={annexSendAfter} onChange={e => setAnnexSendAfter(e.target.checked)} />
+                  ✉️ Изпрати на наемателя веднага след генериране{annexModal.tenant_email ? ` (${annexModal.tenant_email})` : ' (няма имейл — добави в договора)'}
+                </label>
                 <button onClick={createAnnex} disabled={creatingAnnex || !annexForm.annex_date || !annexForm.new_end_date || !annexForm.new_monthly_rent}
                   className="w-full py-2 text-sm font-semibold text-white bg-purple-600 hover:bg-purple-700 disabled:opacity-50 rounded-lg">
                   {creatingAnnex ? 'Генерира...' : '📎 Създай анекс и PDF'}
                 </button>
               </div>
 
-              {/* Existing annexes */}
-              {annexes.length > 0 && (
-                <div>
-                  <div className="text-sm font-semibold text-gray-700 mb-2">Съществуващи анекси</div>
+              {/* Existing annexes — пълен архив */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="text-sm font-semibold text-gray-700">Съществуващи анекси {annexes.length > 0 && `(${annexes.length})`}</div>
+                  <label className={`text-xs font-medium px-2 py-1 rounded-lg cursor-pointer ${annexUploadBusy ? 'bg-gray-100 text-gray-400' : 'bg-purple-50 text-purple-700 hover:bg-purple-100'}`}>
+                    {annexUploadBusy ? 'Качва…' : '📎 Качи стар анекс'}
+                    <input type="file" multiple accept=".pdf,.docx,image/*" className="hidden" disabled={annexUploadBusy}
+                      onChange={e => { uploadOldAnnex(e.target.files); e.target.value = '' }} />
+                  </label>
+                </div>
+                {annexes.length === 0 ? (
+                  <div className="text-xs text-gray-400">Няма анекси. Създай нов горе или качи стар (подписан) — PDF, Word или снимки.</div>
+                ) : (
                   <div className="space-y-2">
                     {annexes.map(a => (
                       <div key={a.id} className="flex items-center justify-between bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
                         <div>
-                          <div className="text-xs font-bold text-purple-700">{a.annex_number}</div>
+                          <div className="text-xs font-bold text-purple-700">{a.annex_number}{(a.notes || '').includes('качен архивен') ? ' 📎' : ''}</div>
                           <div className="text-xs text-gray-500">{fmtDate(a.annex_date)} · до {fmtDate(a.new_end_date)} · {Number(a.new_monthly_rent).toLocaleString('bg-BG')} {a.new_currency}</div>
                         </div>
                         <div className="flex gap-2">
-                          <button
+                          <button title="Отвори"
                             onClick={() => apiFetch(`${API}/api/contracts/${annexModal.id}/annexes/${a.id}/pdf`).then(r => r.blob()).then(b => window.open(URL.createObjectURL(b), '_blank'))}
                             className="px-2 py-1 text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 rounded">📄</button>
+                          <button title="Изпрати на наемателя" onClick={() => sendAnnex(a)}
+                            className="px-2 py-1 text-xs bg-blue-50 border border-blue-200 text-blue-700 hover:bg-blue-100 rounded">✉️</button>
                           <button onClick={() => deleteAnnex(a)}
                             className="px-2 py-1 text-xs bg-red-50 border border-red-200 text-red-600 hover:bg-red-100 rounded">🗑️</button>
                         </div>
                       </div>
                     ))}
                   </div>
-                </div>
-              )}
+                )}
+              </div>
             </div>
             <div className="flex-shrink-0 px-6 py-3 border-t border-gray-200 flex justify-end">
               <button onClick={() => setAnnexModal(null)} className="px-4 py-2 text-sm text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg">Затвори</button>
