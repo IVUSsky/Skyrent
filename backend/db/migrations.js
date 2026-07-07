@@ -60,6 +60,7 @@ function runTenantMigrations(db) {
   try { db.exec("ALTER TABLE properties ADD COLUMN абонат_вода TEXT"); console.log('Migration: added абонат_вода'); } catch(_) {}
   try { db.exec("ALTER TABLE properties ADD COLUMN абонат_тец TEXT");  console.log('Migration: added абонат_тец');  } catch(_) {}
   try { db.exec("ALTER TABLE properties ADD COLUMN абонат_вход TEXT"); console.log('Migration: added абонат_вход'); } catch(_) {}
+  try { db.exec("ALTER TABLE properties ADD COLUMN абонат_газ TEXT");  console.log('Migration: added абонат_газ');  } catch(_) {}
 
   // Multi-owner (Agency): собственици на имоти (агенцията управлява чужди портфейли).
   db.exec(`CREATE TABLE IF NOT EXISTS owners (
