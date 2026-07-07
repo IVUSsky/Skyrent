@@ -668,6 +668,8 @@ function generateAnnexPDF(annex, contract, issuer) {
   return new Promise((resolve, reject) => {
     const filename = `annex_${annex.annex_number.replace(/[^a-zA-Z0-9]/g, '-')}.pdf`;
     const filepath = path.join(PDF_DIR, filename);
+    // Архивираните договори нямат номер → Д<id> (иначе в PDF-а излиза "null")
+    const cno = contract.contract_number || ('Д' + (contract.id || ''));
 
     const ML = 50, MR = 50;
     const HEADER_H = 100, FOOTER_H = 45;
@@ -738,7 +740,7 @@ function generateAnnexPDF(annex, contract, issuer) {
        .text(`№ ${annex.annex_number}`, ML, y, { width: PW, align: 'center' });
     y += 8;
     doc.font('R').fontSize(9).fillColor('#6b7280')
-       .text(`ANNEX TO LEASE AGREEMENT No. ${contract.contract_number}`, ML, y, { width: PW, align: 'center' });
+       .text(`ANNEX TO LEASE AGREEMENT No. ${cno}`, ML, y, { width: PW, align: 'center' });
     y += 18;
     doc.moveTo(ML, y).lineTo(ML + PW, y).lineWidth(0.5).strokeColor('#d1d5db').stroke();
     y += 14;
@@ -748,10 +750,12 @@ function generateAnnexPDF(annex, contract, issuer) {
        .text(`Днес, ${fmtDate(annex.annex_date)}, в гр. София, между долуподписаните страни:`, ML, y, { width: PW });
     y = doc.y + 12;
 
-    // Parties block
-    const isCompany = contract.landlord_type === 'дружество';
+    // Parties block. Архивираните (качени) договори нямат landlord_type →
+    // ако issuer-ът е фирма (има ЕИК), третирай наемодателя като дружество.
+    const isCompany = contract.landlord_type === 'дружество'
+      || (!contract.landlord_type && !!issuer.eik);
     const landlordLabel = isCompany
-      ? `${contract.landlord_name || issuer.name || '...'}, ЕИК ${contract.landlord_egn || issuer.eik || ''}, МОЛ: ${issuer.mol || '...'}`
+      ? `${contract.landlord_name || issuer.name || '...'}, ЕИК ${contract.landlord_egn || issuer.eik || ''}${issuer.mol ? `, представлявано от ${issuer.mol} – Управител` : ''}`
       : `${contract.landlord_name || issuer.name || ''}, ЕГН ${contract.landlord_egn || issuer.eik || ''}`;
 
     [
@@ -778,8 +782,8 @@ function generateAnnexPDF(annex, contract, issuer) {
 
     const articles = [
       {
-        bg: `Чл. 1. Срокът на Договор за наем № ${contract.contract_number} се удължава и страните се съгласяват имотът да бъде наеман до ${fmtDate(annex.new_end_date)}.`,
-        en: `Art. 1. The term of Lease Agreement No. ${contract.contract_number} is hereby extended and the parties agree that the property shall be leased until ${fmtDate(annex.new_end_date)}.`,
+        bg: `Чл. 1. Срокът на Договор за наем № ${cno} се удължава и страните се съгласяват имотът да бъде наеман до ${fmtDate(annex.new_end_date)}.`,
+        en: `Art. 1. The term of Lease Agreement No. ${cno} is hereby extended and the parties agree that the property shall be leased until ${fmtDate(annex.new_end_date)}.`,
       },
       {
         bg: `Чл. 2. Считано от ${fmtDate(annex.annex_date)}, месечната наемна цена се определя на ${newRent.toLocaleString('bg-BG')} ${annex.new_currency} (${rentWords} ${annex.new_currency === 'EUR' ? 'евро' : 'лева'})${rentDiff !== 0 ? `, което представлява ${rentDiff > 0 ? 'увеличение' : 'намаление'} от ${Math.abs(rentDiff).toLocaleString('bg-BG')} ${annex.new_currency} спрямо предходния наем` : ''}.`,
@@ -826,8 +830,10 @@ function generateAnnexPDF(annex, contract, issuer) {
     const lineY = sigY + 45;
     doc.moveTo(ML,           lineY).lineTo(ML + col,  lineY).lineWidth(0.7).strokeColor('#374151').stroke();
     doc.moveTo(ML + PW / 2, lineY).lineTo(ML + PW,   lineY).lineWidth(0.7).strokeColor('#374151').stroke();
+    const landlordSign = (contract.landlord_name || issuer.name || '')
+      + (isCompany && issuer.mol ? `\n${issuer.mol} – Управител` : '');
     doc.font('R').fontSize(8).fillColor('#6b7280')
-       .text(contract.landlord_name || issuer.name || '', ML, lineY + 5, { width: col, align: 'center', lineBreak: false });
+       .text(landlordSign, ML, lineY + 5, { width: col, align: 'center' });
     doc.font('R').fontSize(8).fillColor('#6b7280')
        .text(contract.tenant_name || '', ML + PW / 2, lineY + 5, { width: col, align: 'center', lineBreak: false });
 
