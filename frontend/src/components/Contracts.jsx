@@ -367,6 +367,49 @@ export default function Contracts({ API }) {
   const [directory, setDirectory] = useState([])   // указател на наематели
   const [savingParty, setSavingParty] = useState(false)
 
+  // Архив на съществуващи договори (качен скан → AI extract → apply)
+  const [scanFiles, setScanFiles] = useState([])
+  const [scanBusy, setScanBusy] = useState(false)
+  const [scanResult, setScanResult] = useState(null)  // { scan_file, extracted, suggested_property }
+  const [scanPropId, setScanPropId] = useState('')
+  const [scanUpdateProp, setScanUpdateProp] = useState(true)
+
+  const scanExtract = async () => {
+    if (!scanFiles.length) { showToast('Избери PDF или снимки на договора', 'error'); return }
+    setScanBusy(true); setScanResult(null)
+    try {
+      const fd = new FormData()
+      for (const f of scanFiles) fd.append('files', f)
+      const r = await apiFetch(`${API}/api/contract-scans/extract`, { method: 'POST', body: fd })
+      const d = await r.json()
+      if (!r.ok) { showToast(d.error || 'Грешка при разчитане', 'error'); setScanBusy(false); return }
+      setScanResult(d)
+      setScanPropId(d.suggested_property ? String(d.suggested_property.id) : '')
+      setScanBusy(false)
+    } catch (e) { showToast('Сървърна грешка', 'error'); setScanBusy(false) }
+  }
+
+  const scanApply = async () => {
+    if (!scanResult) return
+    setScanBusy(true)
+    try {
+      const r = await apiFetch(`${API}/api/contract-scans/apply`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          scan_file: scanResult.scan_file, ...scanResult.extracted,
+          property_id: scanPropId || null, update_property: scanUpdateProp,
+        }),
+      })
+      const d = await r.json()
+      if (!r.ok) { showToast(d.error || 'Грешка', 'error'); setScanBusy(false); return }
+      showToast('Договорът е архивиран' + (scanUpdateProp && scanPropId ? ' + имотът е актуализиран' : ''))
+      setScanFiles([]); setScanResult(null); setScanBusy(false)
+      load(); setTab('list')
+    } catch (e) { showToast('Сървърна грешка', 'error'); setScanBusy(false) }
+  }
+
+  const setExtractedField = (k, v) => setScanResult(s => ({ ...s, extracted: { ...s.extracted, [k]: v } }))
+
   // Извличане на данни от снимки на лична карта (Claude Vision) → попълва полетата
   const extractId = async () => {
     if (!idFront) { showToast('Качи поне лицевата страна на личната карта', 'error'); return }
@@ -623,7 +666,7 @@ export default function Contracts({ API }) {
       <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
         <h2 className="text-2xl font-bold text-gray-800">📋 Договори</h2>
         <div className="flex gap-2">
-          {[['list','📁 Архив'],['new','+ Нов договор'],['templates','📝 Шаблони']].map(([t,l]) => (
+          {[['list','📁 Архив'],['new','+ Нов договор'],['upload','📎 Качи съществуващ'],['templates','📝 Шаблони']].map(([t,l]) => (
             <button key={t} onClick={() => setTab(t)}
               className={`px-4 py-2 text-sm font-medium rounded-lg ${tab===t ? 'bg-blue-600 text-white' : 'bg-white border border-gray-200 text-gray-700 hover:bg-gray-50'}`}>
               {l}
@@ -631,6 +674,77 @@ export default function Contracts({ API }) {
           ))}
         </div>
       </div>
+
+      {/* ── UPLOAD TAB — архив на съществуващ (подписан) договор ─── */}
+      {tab === 'upload' && (
+        <div className="bg-white rounded-xl shadow border border-gray-100 p-6 max-w-3xl">
+          <h3 className="text-lg font-bold text-gray-800 mb-1">📎 Качи съществуващ договор</h3>
+          <p className="text-sm text-gray-500 mb-4">
+            PDF или снимки от телефона (заедно с протокола, ако е в същия файл). AI разчита данните —
+            преглеждаш, избираш имота и запазваш. Договорът влиза в архива, а данните на наемателя се актуализират.
+          </p>
+
+          {!scanResult ? (
+            <>
+              <input type="file" multiple accept=".pdf,image/*"
+                onChange={e => setScanFiles(Array.from(e.target.files || []))}
+                className="block w-full text-sm text-gray-600 file:mr-3 file:px-4 file:py-2 file:rounded-lg file:border-0 file:bg-blue-50 file:text-blue-700 file:font-semibold hover:file:bg-blue-100 mb-4" />
+              {scanFiles.length > 0 && (
+                <div className="text-xs text-gray-500 mb-3">{scanFiles.length} файл(а): {scanFiles.map(f => f.name).join(', ')}</div>
+              )}
+              <button onClick={scanExtract} disabled={scanBusy || !scanFiles.length}
+                className="px-5 py-2.5 rounded-lg text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50">
+                {scanBusy ? '🔍 Разчитане… (10–30 сек)' : '🔍 Разчети договора'}
+              </button>
+            </>
+          ) : (
+            <>
+              <div className="rounded-lg bg-green-50 border border-green-200 px-4 py-2.5 mb-4 text-sm text-green-800">
+                ✓ Разчетено — прегледай и коригирай преди запис
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
+                {[['tenant_name','Наемател *'],['tenant_egn','ЕГН'],['tenant_lk','Лична карта №'],['tenant_lk_date','ЛК издадена на'],
+                  ['tenant_phone','Телефон'],['tenant_email','Имейл'],['tenant_address','Адрес на наемателя'],['property_address','Адрес на имота'],
+                  ['monthly_rent','Наем/мес'],['currency','Валута (BGN/EUR)'],['deposit','Депозит'],['payment_day','Плащане до число'],
+                  ['start_date','От дата'],['end_date','До дата'],['абонат_ток','Абонат № ток'],['абонат_вода','Абонат № вода']].map(([k, label]) => (
+                  <div key={k}>
+                    <label className="block text-xs text-gray-500 mb-1">{label}</label>
+                    <input value={scanResult.extracted[k] ?? ''} onChange={e => setExtractedField(k, e.target.value)}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" />
+                  </div>
+                ))}
+              </div>
+
+              <div className="mb-3">
+                <label className="block text-xs text-gray-500 mb-1">Свържи с имот</label>
+                <select value={scanPropId} onChange={e => setScanPropId(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400">
+                  <option value="">— без връзка с имот —</option>
+                  {properties.map(p => (
+                    <option key={p.id} value={p.id}>
+                      {p.адрес}{p.наемател ? ` · ${p.наемател}` : ''}{scanResult.suggested_property?.id === p.id ? '  ⭐ предложено' : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <label className="flex items-center gap-2 text-sm text-gray-700 mb-5 cursor-pointer">
+                <input type="checkbox" checked={scanUpdateProp} onChange={e => setScanUpdateProp(e.target.checked)} />
+                Актуализирай данните на имота (наемател, имейл, телефон, абонатни номера)
+              </label>
+
+              <div className="flex gap-2">
+                <button onClick={scanApply} disabled={scanBusy || !scanResult.extracted.tenant_name}
+                  className="px-5 py-2.5 rounded-lg text-sm font-semibold bg-green-600 text-white hover:bg-green-700 disabled:opacity-50">
+                  {scanBusy ? 'Запис…' : '💾 Запази в архива'}
+                </button>
+                <button onClick={() => { setScanResult(null); setScanFiles([]) }}
+                  className="px-4 py-2.5 rounded-lg text-sm text-gray-600 hover:bg-gray-100">Откажи</button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
 
       {/* ── LIST TAB ─────────────────────────────────────────────── */}
       {tab === 'list' && (
