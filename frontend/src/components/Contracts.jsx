@@ -706,7 +706,8 @@ export default function Contracts({ API }) {
                 {[['tenant_name','Наемател *'],['tenant_egn','ЕГН'],['tenant_lk','Лична карта №'],['tenant_lk_date','ЛК издадена на'],
                   ['tenant_phone','Телефон'],['tenant_email','Имейл'],['tenant_address','Адрес на наемателя'],['property_address','Адрес на имота'],
                   ['monthly_rent','Наем/мес'],['currency','Валута (BGN/EUR)'],['deposit','Депозит'],['payment_day','Плащане до число'],
-                  ['start_date','От дата'],['end_date','До дата'],['абонат_ток','Абонат № ток'],['абонат_вода','Абонат № вода']].map(([k, label]) => (
+                  ['start_date','От дата'],['end_date','До дата'],['абонат_ток','Абонат № ток'],['абонат_вода','Абонат № вода'],
+                  ['абонат_газ','Абонат № газ'],['абонат_тец','Абонат № ТЕЦ']].map(([k, label]) => (
                   <div key={k}>
                     <label className="block text-xs text-gray-500 mb-1">{label}</label>
                     <input value={scanResult.extracted[k] ?? ''} onChange={e => setExtractedField(k, e.target.value)}

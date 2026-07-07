@@ -123,6 +123,7 @@ export default function Portfolio({ API, role }) {
       абонат_вода: prop['абонат_вода'] || '',
       абонат_тец:  prop['абонат_тец']  || '',
       абонат_вход: prop['абонат_вход'] || '',
+      абонат_газ:  prop['абонат_газ']  || '',
     })
     // Нотариални актове на имота (admin only — брокерът няма достъп до /api/deeds)
     setPropDeeds([])
@@ -177,6 +178,7 @@ export default function Portfolio({ API, role }) {
         абонат_вода: editForm.абонат_вода || null,
         абонат_тец:  editForm.абонат_тец  || null,
         абонат_вход: editForm.абонат_вход || null,
+        абонат_газ:  editForm.абонат_газ  || null,
         owner_id: editForm.owner_id || null,
       }),
     })
@@ -795,6 +797,7 @@ export default function Portfolio({ API, role }) {
                     { label: '⚡ Ток', key: 'абонат_ток' },
                     { label: '💧 Вода', key: 'абонат_вода' },
                     { label: '🔥 ТЕЦ', key: 'абонат_тец' },
+                    { label: '🪔 Газ', key: 'абонат_газ' },
                     { label: '🏢 Входна такса', key: 'абонат_вход' },
                   ].map(({ label, key }) => (
                     <div key={key}>
