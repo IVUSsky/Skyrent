@@ -685,9 +685,10 @@ function generateAnnexPDF(annex, contract, issuer) {
     const PW = doc.page.width - ML - MR;
     const PH = doc.page.height;
 
-    // Resolve logo
+    // Resolve logo — както при договора: качено от Settings, иначе вграденото
     const resolvedLogo = (() => {
-      if (fs.existsSync(DEFAULT_LOGO)) return DEFAULT_LOGO;
+      if (fs.existsSync(USER_DEFAULT_LOGO)) return USER_DEFAULT_LOGO;
+      if (fs.existsSync(BUNDLED_LOGO))      return BUNDLED_LOGO;
       return null;
     })();
 
