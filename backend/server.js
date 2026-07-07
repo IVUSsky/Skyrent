@@ -234,6 +234,7 @@ async function main() {
   // Routes
   app.use('/api/properties', require('./routes/properties')(db));
   app.use('/api/deeds',      require('./routes/deeds')(db));
+  app.use('/api/contract-scans', require('./routes/contractScans')(db)); // архив на подписани договори (AI extract)
   app.use('/api/loans',      require('./routes/loans')(db));
   app.use('/api/metrics',    require('./routes/metrics')(db));
   app.use('/api/metrics/portfolio', require('./routes/metricsPortfolio')(db));
