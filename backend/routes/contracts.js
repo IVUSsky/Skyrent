@@ -1445,8 +1445,122 @@ module.exports = function(db) {
     if (!annex || !annex.pdf_path) return res.status(404).json({ error: 'Not found' });
     const fp = path.join(PDF_DIR, annex.pdf_path);
     if (!fs.existsSync(fp)) return res.status(404).json({ error: 'PDF не е намерен' });
-    res.setHeader('Content-Type', 'application/pdf');
+    if (/\.docx$/i.test(annex.pdf_path)) {
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+      res.setHeader('Content-Disposition', `attachment; filename="aneks_${annex.id}.docx"`);
+    } else {
+      res.setHeader('Content-Type', 'application/pdf');
+    }
     fs.createReadStream(fp).pipe(res);
+  });
+
+  // Изпращане на анекс по имейл до наемателя (по модела на договорния send)
+  router.post('/:id/annexes/:annexId/send', async (req, res) => {
+    try {
+      const contract = db.prepare('SELECT * FROM contracts WHERE id=?').get(req.params.id);
+      const annex = db.prepare('SELECT * FROM contract_annexes WHERE id=? AND contract_id=?').get(req.params.annexId, req.params.id);
+      if (!contract || !annex) return res.status(404).json({ error: 'Not found' });
+      const toEmail = req.body?.email || contract.tenant_email;
+      if (!toEmail) return res.status(400).json({ error: 'Няма email адрес — добави го в договора или подай друг' });
+      let recipients;
+      try { recipients = parseRecipients(toEmail); }
+      catch (e) { return res.status(400).json({ error: e.message }); }
+
+      const resendKey = process.env.RESEND_API_KEY;
+      if (!resendKey) return res.status(400).json({ error: 'RESEND_API_KEY не е конфигуриран' });
+      const fp = path.join(PDF_DIR, annex.pdf_path || '');
+      if (!annex.pdf_path || !fs.existsSync(fp)) return res.status(404).json({ error: 'Файлът на анекса не е намерен' });
+
+      const issuer = getIssuer(db);
+      const fromEmail = process.env.RESEND_FROM_EMAIL || `info@${(issuer.email || 'skycapital.pro').split('@').slice(-1)[0]}`;
+      const fromName  = issuer.name || 'Skyrent';
+      const isDocx = /\.docx$/i.test(annex.pdf_path);
+
+      const emailHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"></head>
+<body style="margin:0;padding:0;background:#f0f2f8;font-family:Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f0f2f8;padding:30px 0;">
+    <tr><td align="center">
+      <table width="600" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:10px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.10);">
+        <tr><td style="background:#1a1a2e;padding:18px 32px;font-size:18px;font-weight:bold;color:#fff;letter-spacing:2px;">${fromName}</td></tr>
+        <tr><td style="padding:32px 32px 24px;color:#1a1a2e;font-size:14px;line-height:1.7;">
+          <p>Уважаеми/а <strong>${contract.tenant_name}</strong>,</p>
+          <p>Прилагаме <strong>Анекс № ${annex.annex_number}</strong> към Договор за наем${contract.contract_number ? ` № ${contract.contract_number}` : ''} за имот <strong>${contract.property_address || ''}</strong>.</p>
+          <p>Моля прегледайте, подпишете и върнете сканиран екземпляр.</p>
+          <p style="margin-top:24px;">С уважение,<br><strong>${fromName}</strong></p>
+        </td></tr>
+        <tr><td style="background:#e8eaf2;padding:14px 32px;text-align:center;font-size:11px;color:#6b7280;border-top:1px solid #d1d5db;">
+          <strong>${fromName}</strong>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body></html>`;
+
+      const response = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          from: `${fromName} <${fromEmail}>`,
+          to: recipients,
+          subject: `Анекс № ${annex.annex_number} към договор за наем`,
+          html: emailHtml,
+          attachments: [{ filename: `Анекс_${annex.annex_number.replace(/[^\wА-я-]/g, '-')}.${isDocx ? 'docx' : 'pdf'}`, content: fs.readFileSync(fp).toString('base64') }],
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok) return res.status(500).json({ error: result.message || 'Resend грешка' });
+      res.json({ ok: true });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  // Качване на СЪЩЕСТВУВАЩ (стар, подписан) анекс в архива — PDF/DOCX/снимки.
+  // Без AI — само файл + дата/бележка; номерът се генерира последователно.
+  router.post('/:id/annexes/upload', upload.array('files', 10), orgContext, async (req, res) => {
+    try {
+      const contract = db.prepare('SELECT * FROM contracts WHERE id=?').get(req.params.id);
+      if (!contract) return res.status(404).json({ error: 'Not found' });
+      const files = req.files || [];
+      if (!files.length) return res.status(400).json({ error: 'Качи PDF, Word или снимки на анекса' });
+
+      const isPdf  = (x) => /\.pdf$/i.test(x.originalname) || x.mimetype === 'application/pdf';
+      const isDocx = (x) => /\.docx$/i.test(x.originalname) || /wordprocessingml/i.test(x.mimetype);
+      const isImg  = (x) => /\.(jpe?g|png)$/i.test(x.originalname) || /image\/(jpe?g|png)/i.test(x.mimetype);
+      const pdfs = files.filter(isPdf), docxs = files.filter(isDocx), imgs = files.filter(isImg);
+
+      let storedPath;
+      if (pdfs.length) storedPath = pdfs[0].path;
+      else if (docxs.length) storedPath = docxs[0].path;
+      else if (imgs.length) {
+        // снимки → един многостраничен PDF
+        storedPath = path.join(PDF_DIR, `annex_scan_${Date.now()}.pdf`);
+        await new Promise((resolve, reject) => {
+          const doc = new PDFDocument({ autoFirstPage: false });
+          const stream = fs.createWriteStream(storedPath);
+          doc.pipe(stream);
+          for (const im of imgs) { const img = doc.openImage(im.path); doc.addPage({ size: [img.width, img.height], margin: 0 }); doc.image(img, 0, 0); }
+          doc.end();
+          stream.on('finish', resolve); stream.on('error', reject);
+        });
+      } else return res.status(400).json({ error: 'Неподдържан формат' });
+      for (const f of files) { if (f.path !== storedPath) { try { fs.unlinkSync(f.path); } catch (_) {} } }
+
+      const count = db.prepare('SELECT COUNT(*) as c FROM contract_annexes WHERE contract_id=?').get(contract.id).c;
+      const annex_number = `${contract.contract_number || 'Д' + contract.id}/А-${count + 1}`;
+      const annex_date = req.body.annex_date || new Date().toISOString().slice(0, 10);
+
+      const r = db.prepare(`
+        INSERT INTO contract_annexes (contract_id, annex_number, annex_date, new_end_date, new_monthly_rent, new_currency, notes, pdf_path)
+        VALUES (?,?,?,?,?,?,?,?)
+      `).run(
+        contract.id, annex_number, annex_date,
+        req.body.new_end_date || contract.end_date || annex_date,
+        req.body.new_monthly_rent != null && req.body.new_monthly_rent !== '' ? Number(req.body.new_monthly_rent) : (contract.monthly_rent || 0),
+        contract.currency || 'EUR',
+        (req.body.notes ? req.body.notes + ' · ' : '') + '📎 качен архивен анекс',
+        path.basename(storedPath)
+      );
+      res.status(201).json({ ok: true, id: r.lastInsertRowid, annex_number });
+    } catch (err) { res.status(500).json({ error: err.message }); }
   });
 
   // Create annex
@@ -1460,9 +1574,10 @@ module.exports = function(db) {
         return res.status(400).json({ error: 'annex_date, new_end_date и new_monthly_rent са задължителни' });
       }
 
-      // Annex number within this contract
+      // Annex number within this contract. Архивираните (качени) договори нямат
+      // contract_number → fallback към Д<id>, иначе номерът излиза празен.
       const count = db.prepare('SELECT COUNT(*) as c FROM contract_annexes WHERE contract_id=?').get(contract.id).c;
-      const annex_number = `${contract.contract_number}/А-${count + 1}`;
+      const annex_number = `${contract.contract_number || 'Д' + contract.id}/А-${count + 1}`;
 
       const issuer = getIssuer(db);
       const annex = { contract_id: contract.id, annex_number, annex_date, new_end_date, new_monthly_rent: Number(new_monthly_rent), new_currency: new_currency || contract.currency || 'EUR', notes: notes || '' };
