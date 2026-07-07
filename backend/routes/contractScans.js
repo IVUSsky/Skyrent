@@ -26,8 +26,9 @@ const upload = multer({
   storage,
   limits: { fileSize: 25 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
-    const ok = /pdf|jpe?g|png/i.test(file.mimetype) || /\.(pdf|jpe?g|png)$/i.test(file.originalname);
-    cb(ok ? null : new Error('Само PDF, JPEG или PNG'), ok);
+    const ok = /pdf|jpe?g|png|officedocument\.wordprocessingml/i.test(file.mimetype)
+      || /\.(pdf|jpe?g|png|docx)$/i.test(file.originalname);
+    cb(ok ? null : new Error('Само PDF, Word (.docx), JPEG или PNG'), ok);
   },
 });
 
@@ -89,10 +90,12 @@ module.exports = function (db) {
     try {
       const apiKey = process.env.ANTHROPIC_API_KEY;
       if (!apiKey) return res.status(400).json({ error: 'ANTHROPIC_API_KEY не е конфигуриран' });
-      if (!files.length) return res.status(400).json({ error: 'Качи PDF или снимки на договора' });
-      const isPdfFile = (x) => /pdf$/i.test(x.originalname) || x.mimetype === 'application/pdf';
-      const pdfFiles = files.filter(isPdfFile);
-      const imgFiles = files.filter(x => !isPdfFile(x));
+      if (!files.length) return res.status(400).json({ error: 'Качи PDF, Word (.docx) или снимки на договора' });
+      const isPdfFile  = (x) => /\.pdf$/i.test(x.originalname) || x.mimetype === 'application/pdf';
+      const isDocxFile = (x) => /\.docx$/i.test(x.originalname) || /wordprocessingml/i.test(x.mimetype);
+      const pdfFiles  = files.filter(isPdfFile);
+      const docxFiles = files.filter(isDocxFile);
+      const imgFiles  = files.filter(x => !isPdfFile(x) && !isDocxFile(x));
 
       let Anthropic;
       try { Anthropic = require('@anthropic-ai/sdk'); }
@@ -103,10 +106,22 @@ module.exports = function (db) {
       for (const pf of pdfFiles) {
         blocks.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: fs.readFileSync(pf.path).toString('base64') } });
       }
+      // Word (.docx): Claude API няма document block за docx → извличаме текста с
+      // mammoth и го подаваме като текстов блок (ръкописното в docx и без това е текст).
+      for (const dx of docxFiles) {
+        try {
+          const mammoth = require('mammoth');
+          const { value } = await mammoth.extractRawText({ path: dx.path });
+          blocks.push({ type: 'text', text: `[Текст от Word документ „${dx.originalname}"]:\n${(value || '').slice(0, 50000)}` });
+        } catch (e) {
+          console.warn('mammoth extract failed:', e.message);
+        }
+      }
       for (const im of imgFiles) {
         const buf = await sharp(im.path).rotate().resize({ width: 2500, height: 2500, fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 85 }).toBuffer();
         blocks.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: buf.toString('base64') } });
       }
+      if (!blocks.length) return res.status(422).json({ error: 'Не успях да прочета файловете' });
 
       const response = await client.messages.create({
         model: process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-6',
@@ -136,13 +151,16 @@ module.exports = function (db) {
         return res.status(422).json({ error: 'Не успях да разчета договора — пробвай по-ясен скан/снимки.' });
       }
 
-      // Съхрани като ЕДИН PDF (снимки → многостраничен PDF)
+      // Съхрани архивния файл: PDF ако има; иначе снимки → PDF; иначе docx as-is
+      // (сваля се с правилния mime през GET /:id/pdf).
       let pdfPath;
-      if (imgFiles.length > 0 && pdfFiles.length === 0) {
+      if (pdfFiles.length > 0) {
+        pdfPath = pdfFiles[0].path;
+      } else if (imgFiles.length > 0) {
         pdfPath = path.join(PDF_DIR, `scan_${Date.now()}_contract.pdf`);
         await imagesToPdf(imgFiles.map(i => i.path), pdfPath);
       } else {
-        pdfPath = pdfFiles[0].path; // единичен/първи PDF
+        pdfPath = docxFiles[0].path; // Word оригиналът остава как е
       }
       for (const f of files) { if (f.path !== pdfPath) { try { fs.unlinkSync(f.path); } catch (_) {} } }
 

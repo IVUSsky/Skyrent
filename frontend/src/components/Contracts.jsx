@@ -680,13 +680,13 @@ export default function Contracts({ API }) {
         <div className="bg-white rounded-xl shadow border border-gray-100 p-6 max-w-3xl">
           <h3 className="text-lg font-bold text-gray-800 mb-1">📎 Качи съществуващ договор</h3>
           <p className="text-sm text-gray-500 mb-4">
-            PDF или снимки от телефона (заедно с протокола, ако е в същия файл). AI разчита данните —
+            PDF, Word (.docx) или снимки от телефона (заедно с протокола, ако е в същия файл). AI разчита данните —
             преглеждаш, избираш имота и запазваш. Договорът влиза в архива, а данните на наемателя се актуализират.
           </p>
 
           {!scanResult ? (
             <>
-              <input type="file" multiple accept=".pdf,image/*"
+              <input type="file" multiple accept=".pdf,.docx,image/*"
                 onChange={e => setScanFiles(Array.from(e.target.files || []))}
                 className="block w-full text-sm text-gray-600 file:mr-3 file:px-4 file:py-2 file:rounded-lg file:border-0 file:bg-blue-50 file:text-blue-700 file:font-semibold hover:file:bg-blue-100 mb-4" />
               {scanFiles.length > 0 && (
