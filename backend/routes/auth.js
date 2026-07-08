@@ -51,7 +51,14 @@ async function sendVerificationEmail(toEmail, name, link) {
       body: JSON.stringify({
         from: `Skyrent <${from}>`,
         to: [toEmail],
+        reply_to: from,
         subject: 'Потвърдете имейла си — Skyrent',
+        // Текстова версия — HTML-only имейлите се пенализират от спам филтрите.
+        text: `Добре дошли в Skyrent${name ? ', ' + name : ''}!\n\n`
+          + `Остава една стъпка — потвърдете имейла си, за да активирате акаунта.\n`
+          + `Отворете този линк:\n${link}\n\n`
+          + `Линкът е валиден 24 часа. Ако не сте се регистрирали, игнорирайте този имейл.\n\n`
+          + `Skyrent — app.skycapital.pro`,
         html: `<div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto">
           <h2 style="color:#1a1a2e">Добре дошли в Skyrent${name ? ', ' + name : ''}!</h2>
           <p>Остава една стъпка — потвърдете имейла си, за да активирате акаунта:</p>

@@ -292,8 +292,12 @@ export default function Login({ API, onLogin, onBack }) {
                   <div style={{ fontSize: 40, margin: '6px 0' }}>📩</div>
                   <p className="sky-card-note">
                     Изпратихме линк за активиране на <b>{email}</b>. Кликнете го, за да влезете.
-                    Проверете и папка „Спам".
                   </p>
+                  <div style={{ background: 'rgba(232,183,110,.12)', border: '1px solid rgba(232,183,110,.35)',
+                    borderRadius: 10, padding: '11px 14px', margin: '4px 0', fontSize: 13, lineHeight: 1.55, color: '#E8B76E' }}>
+                    ⚠️ <b>Проверете папка „Спам" / „Промоции"</b> — първият имейл понякога попада там.
+                    Ако е в спам, маркирайте го „Не е спам", за да получавате следващите нормално.
+                  </div>
                   <button type="button" className="sky-back" onClick={() => resendVerification(email)}>
                     Не го получихте? Изпрати наново →
                   </button>
