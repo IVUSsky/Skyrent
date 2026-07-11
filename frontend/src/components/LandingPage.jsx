@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react'
+import React, { useEffect, useState } from 'react'
 import { setCanonical } from '../lib/seo'
 
 // Позиционираща страница за Skyrent — "Private Wealth Terminal" посока:
@@ -59,10 +59,35 @@ function CmpCell({ v }) {
   return <span style={{ color: CMP_TXT, fontWeight: 600, fontSize: 12.5 }}>{v}</span>
 }
 
+// Новото лого: „sky·rent" — Unbounded ExtraBold като векторни контури (не зависи
+// от шрифтове). sky + точката в синьо, rent в cream (тъмен фон).
+export function SkyLogo({ height = 26, rent = '#ece7dc', sky = '#63B0FF' }) {
+  return (
+    <svg viewBox="0 0 438 100" height={height} style={{ display: 'block' }} role="img" aria-label="skyrent">
+      <path transform="translate(1 0)" fill={sky} d="M59.120 64.720Q59.120 70.240 55.720 73.920Q52.320 77.600 46.120 79.480Q39.920 81.360 31.440 81.360Q22.720 81.360 16.160 79.280Q9.600 77.200 5.840 73.400Q2.080 69.600 1.840 64.560L20.480 64.560Q22.160 69.600 32.400 69.600Q41.280 69.600 41.280 66.560Q41.280 65.200 39.480 64.560Q37.680 63.920 33.440 63.600L25.680 63.040Q17.200 62.480 12.280 60.640Q7.360 58.800 5.200 55.760Q3.040 52.720 3.040 48.560Q3.040 43.280 6.400 39.760Q9.760 36.240 15.800 34.520Q21.840 32.800 29.840 32.800Q37.760 32.800 43.920 34.800Q50.080 36.800 53.800 40.400Q57.520 44 58.160 48.800L39.520 48.800Q38.880 46.720 36.360 45.320Q33.840 43.920 29.040 43.920Q20.960 43.920 20.960 46.880Q20.960 48.160 22.200 48.800Q23.440 49.440 26.880 49.680L37.280 50.400Q45.520 50.960 50.320 52.720Q55.120 54.480 57.120 57.480Q59.120 60.480 59.120 64.720" />
+      <path transform="translate(62.86 0)" fill={sky} d="M61.760 80L41.280 80L33.040 65.600L20.480 80L4.160 80L4.160 18.400L22.480 18.400L22.480 57.840L41.680 34.160L60.560 34.160L44.880 52.160" />
+      <path transform="translate(124.40 0)" fill={sky} d="M27.760 74.800L19.520 74.800L0.640 34.160L20.800 34.160L32.480 63.280L44.480 34.160L63.920 34.160L42.480 80.160Q39.920 85.600 36.400 88.760Q32.880 91.920 28.800 93.240Q24.720 94.560 20.560 94.560Q15.120 94.560 11 93.280Q6.880 92 2.880 89.040L2.880 76.560Q6.880 79.120 10.320 80.240Q13.760 81.360 17.840 81.360Q21.200 81.360 23.720 79.960Q26.240 78.560 27.760 74.800" />
+      <path transform="translate(188.66 0)" fill={sky} d="M12.800 60.720Q10 60.720 7.720 59.400Q5.440 58.080 4.080 55.800Q2.720 53.520 2.720 50.640Q2.720 47.840 4.080 45.560Q5.440 43.280 7.720 41.920Q10 40.560 12.800 40.560Q15.600 40.560 17.920 41.920Q20.240 43.280 21.560 45.560Q22.880 47.840 22.880 50.640Q22.880 53.520 21.560 55.800Q20.240 58.080 17.920 59.400Q15.600 60.720 12.800 60.720" />
+      <path transform="translate(214.76 0)" fill={rent} d="M5.120 49.840L2 34.160L20.720 34.160L22.720 46.080Q24.800 40.240 28.560 36.520Q32.320 32.800 38.800 32.800Q41.280 32.800 44.320 33.280L44.320 48.880Q41.760 48.400 39.640 48.200Q37.520 48 35.760 48Q32.480 48 29.680 49.240Q26.880 50.480 25.160 53.480Q23.440 56.480 23.440 61.760L23.440 80L5.120 80" />
+      <path transform="translate(260.78 0)" fill={rent} d="M31.600 81.360Q23.120 81.360 16.480 78.320Q9.840 75.280 6 69.760Q2.160 64.240 2.160 56.880Q2.160 49.680 5.880 44.240Q9.600 38.800 16 35.800Q22.400 32.800 30.480 32.800Q38.800 32.800 44.760 36.360Q50.720 39.920 53.880 46.520Q57.040 53.120 57.040 62.080L22.320 62.080Q26 68.080 37.120 68.080Q42.080 68.080 46.960 66.880Q51.840 65.680 55.840 63.360L55.840 74.720Q50.960 77.920 44.920 79.640Q38.880 81.360 31.600 81.360M31.120 45.440Q27.360 45.440 24.840 47.120Q22.320 48.800 21.360 51.600L40.320 51.600Q38 45.440 31.120 45.440" />
+      <path transform="translate(320.64 0)" fill={rent} d="M5.120 50.320L2 34.160L20.320 34.160L21.840 43.280Q24.880 38.080 29.600 35.440Q34.320 32.800 39.760 32.800Q46.480 32.800 51.160 35.440Q55.840 38.080 58.320 42.920Q60.800 47.760 60.800 54.240L60.800 80L42.400 80L42.400 56.880Q42.400 52.400 40.040 50Q37.680 47.600 33.360 47.600Q28.720 47.600 26.080 50.400Q23.440 53.200 23.440 58.080L23.440 80L5.120 80" />
+      <path transform="translate(385.54 0)" fill={rent} d="M9.600 47.600L0.480 47.600L0.480 39.680L9.600 35.520L17.600 21.760L28 21.760L28 34.160L46.560 34.160L46.560 47.600L28 47.600L28 59.040Q28 63.760 29.800 65.640Q31.600 67.520 36.880 67.520Q40.160 67.520 42.720 67Q45.280 66.480 47.360 65.680L47.360 79.200Q44.720 80.080 40.840 80.720Q36.960 81.360 32.640 81.360Q20.800 81.360 15.200 76.040Q9.600 70.720 9.600 61.520" />
+    </svg>
+  )
+}
+
+const API = import.meta.env.VITE_API_URL || ''
+
 export default function LandingPage({ onEnter }) {
+  const [listings, setListings] = useState([])
   useEffect(() => {
     setCanonical('/')
     document.title = 'Skyrent — операционна система за наемния бизнес'
+    // Свободни имоти за секцията (тийзър от публичния каталог).
+    // ВАЖНО: пълен API URL — frontend и API са на различни домейни.
+    fetch(`${API}/api/public/catalog`).then(r => r.json())
+      .then(d => setListings(Array.isArray(d) ? d : []))
+      .catch(() => setListings([]))
   }, [])
   return (
     <div className="skylp">
@@ -72,8 +97,11 @@ export default function LandingPage({ onEnter }) {
 
       {/* Nav */}
       <nav className="lp-nav">
-        <div className="lp-word">Skyrent<span>°</span></div>
-        <button className="lp-ghost" onClick={onEnter}>Вход</button>
+        <a href="/" style={{ textDecoration: 'none' }} aria-label="skyrent — начало"><SkyLogo height={24} /></a>
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+          <a className="lp-navlink" href="/imoti">Свободни имоти</a>
+          <button className="lp-ghost" onClick={onEnter}>Вход</button>
+        </div>
       </nav>
 
       {/* Hero */}
@@ -203,6 +231,40 @@ export default function LandingPage({ onEnter }) {
         <div className="lp-busy-note">10 минути месечно. Толкова е ангажиментът ви — за всичките ви имоти.</div>
       </section>
 
+      {/* Свободни имоти — публичният каталог (тийзър). Показва се само ако има обяви. */}
+      {listings.length > 0 && (
+        <section className="lp-sec">
+          <div className="lp-sec-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', maxWidth: 'none', flexWrap: 'wrap', gap: 14 }}>
+            <div>
+              <span className="lp-kick">Търсите имот?</span>
+              <h2 className="lp-h2">Свободни имоти за наемане.</h2>
+            </div>
+            <a className="lp-ghost" href="/imoti" style={{ textDecoration: 'none', whiteSpace: 'nowrap' }}>
+              Всички обяви ({listings.length}) →
+            </a>
+          </div>
+          <div className="lp-listings">
+            {listings.slice(0, 3).map(x => (
+              <a key={`${x.org_id}-${x.id}`} className="lp-listing" href={`/obiava/${x.org_id}-${x.id}`}>
+                <div className="lp-listing-thumb">
+                  {x.photo
+                    ? <img src={`${API}/api/public/listings/${x.org_id}/${x.id}/photo/${x.photo}`} alt="" loading="lazy" />
+                    : <span className="lp-listing-ph">🏠</span>}
+                  <span className="lp-listing-price">{Number(x.наем || 0).toLocaleString('bg-BG')} €/мес</span>
+                </div>
+                <div className="lp-listing-body">
+                  <b>{x.тип || 'Имот'}{x.район ? ` · ${x.район}` : ''}</b>
+                  <span>{x.площ ? `${x.площ} м² · ` : ''}{x.адрес || ''}</span>
+                </div>
+              </a>
+            ))}
+          </div>
+          <p className="lp-listings-note">
+            Обявите са на наемодатели, които ползват Skyrent — с онлайн договор и наемателски портал от първия ден.
+          </p>
+        </section>
+      )}
+
       {/* Pricing */}
       <section className="lp-sec">
         <div className="lp-sec-head">
@@ -259,11 +321,11 @@ export default function LandingPage({ onEnter }) {
       </section>
 
       <footer className="lp-foot">
-        <span>Skyrent°</span>
+        <SkyLogo height={18} />
         <span style={{ display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
           <a href="/dogovor-naem" style={{ color: 'inherit', textDecoration: 'none' }}>Договор за наем</a>
           <a href="/kalkulator-naem" style={{ color: 'inherit', textDecoration: 'none' }}>Калкулатор данък наем</a>
-          <a href="/imoti" style={{ color: 'inherit', textDecoration: 'none' }}>Имоти под наем</a>
+          <a href="/imoti" style={{ color: 'inherit', textDecoration: 'none' }}>Свободни имоти</a>
           <a href="/usloviya" style={{ color: 'inherit', textDecoration: 'none' }}>Общи условия</a>
           <a href="/poveritelnost" style={{ color: 'inherit', textDecoration: 'none' }}>Поверителност</a>
         </span>
@@ -399,6 +461,23 @@ const CSS = `
 .lp-about-punch em{font-family:var(--disp);font-style:italic;color:var(--brass2);font-size:17px;}
 .lp-busy{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:18px;}
 .lp-busy-note{margin-top:28px;font-size:14px;letter-spacing:.04em;color:var(--brass2);font-family:var(--disp);font-style:italic;}
+/* Свободни имоти */
+.lp-navlink{font-family:var(--body);font-size:14px;font-weight:600;color:var(--text);text-decoration:none;transition:.2s;}
+.lp-navlink:hover{color:var(--brass2);}
+.lp-listings{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:18px;}
+.lp-listing{display:block;text-decoration:none;border:1px solid var(--line);border-radius:16px;overflow:hidden;
+  background:var(--ink2);transition:.25s;}
+.lp-listing:hover{transform:translateY(-3px);border-color:rgba(201,162,75,.45);}
+.lp-listing-thumb{position:relative;height:170px;background:#101019;display:flex;align-items:center;justify-content:center;}
+.lp-listing-thumb img{width:100%;height:100%;object-fit:cover;display:block;}
+.lp-listing-ph{font-size:36px;opacity:.4;}
+.lp-listing-price{position:absolute;bottom:10px;left:10px;background:rgba(21,21,30,.88);color:var(--brass2);
+  font-weight:700;font-size:14px;padding:5px 12px;border-radius:999px;}
+.lp-listing-body{padding:14px 16px;}
+.lp-listing-body b{display:block;color:var(--cream);font-size:15px;font-weight:600;margin-bottom:3px;}
+.lp-listing-body span{font-size:12.5px;color:var(--text);}
+.lp-listings-note{margin-top:22px;font-size:13px;color:var(--text);}
+
 .lp-final{max-width:760px;margin:0 auto;padding:90px 28px 70px;text-align:center;}
 .lp-final-note{margin-top:20px;font-size:13px;color:var(--text);letter-spacing:.02em;}
 
