@@ -163,6 +163,56 @@ module.exports = function (getOrgDb, controlDb) {
   });
 
   // SEO инструмент: генериране на „Договор за наем" (образец) → PDF. БЕЗ login.
+  // Запитване за довършителни работи (страница /remonti) → имейл до Скай.
+  // Rate limited (същия лимитер като договора — публична форма).
+  router.post('/remont-inquiry', contractLimiter, async (req, res) => {
+    try {
+      const b = req.body || {};
+      const name = String(b.name || '').trim().slice(0, 120);
+      const phone = String(b.phone || '').trim().slice(0, 60);
+      const email = String(b.email || '').trim().slice(0, 120);
+      const obj = String(b.object || '').trim().slice(0, 200);
+      const msg = String(b.message || '').trim().slice(0, 2000);
+      if (!name || (!phone && !email)) {
+        return res.status(400).json({ error: 'Име и телефон или имейл са задължителни' });
+      }
+      if (b.company) return res.json({ ok: true }); // honeypot — тихо игнорирай ботове
+
+      const resendKey = process.env.RESEND_API_KEY;
+      const to = process.env.REMONT_INQUIRY_EMAIL || 'info@skycapital.pro';
+      if (resendKey) {
+        const from = process.env.RESEND_FROM_EMAIL || 'info@skycapital.pro';
+        await fetch('https://api.resend.com/emails', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            from: `Sky Capital <${from}>`,
+            to: [to],
+            reply_to: email || undefined,
+            subject: `🔨 Запитване за ремонт до ключ — ${name}`,
+            html: `<div style="font-family:Arial,sans-serif;max-width:560px">
+              <h2 style="color:#15151e">Ново запитване — довършителни работи</h2>
+              <table cellpadding="6" style="border-collapse:collapse;font-size:14px">
+                <tr><td style="color:#888">Име:</td><td><b>${esc(name)}</b></td></tr>
+                <tr><td style="color:#888">Телефон:</td><td>${esc(phone) || '—'}</td></tr>
+                <tr><td style="color:#888">Имейл:</td><td>${esc(email) || '—'}</td></tr>
+                <tr><td style="color:#888">Обект:</td><td>${esc(obj) || '—'}</td></tr>
+              </table>
+              <p style="background:#f6f6f9;border-left:3px solid #c9a24b;padding:10px 14px;font-size:14px;white-space:pre-wrap">${esc(msg) || '(без съобщение)'}</p>
+              <p style="font-size:12px;color:#999">Изпратено от формата на skycapital.pro/remonti</p>
+            </div>`,
+          }),
+        });
+      }
+      // In-app известие към админите на org 1 (Скай) — resilient дори без Resend
+      try { const odb = getOrgDb(1); notifyAdmin(odb, { kind: 'remont_inquiry', title: `🔨 Запитване за ремонт: ${name}`, body: (phone || email) + (obj ? ' · ' + obj : ''), link: 'dashboard' }); } catch (_) {}
+      res.json({ ok: true });
+    } catch (err) {
+      console.error('[remont-inquiry]', err.message);
+      res.status(500).json({ error: 'Грешка при изпращане — опитайте по-късно или се обадете.' });
+    }
+  });
+
   router.post('/rental-contract', contractLimiter, async (req, res) => {
     try {
       const f = req.body || {};
@@ -190,6 +240,7 @@ module.exports = function (getOrgDb, controlDb) {
       { loc: SITE + '/imoti', freq: 'daily', pri: '0.9' },
       { loc: SITE + '/dogovor-naem', freq: 'monthly', pri: '0.8' },
       { loc: SITE + '/kalkulator-naem', freq: 'monthly', pri: '0.8' },
+      { loc: SITE + '/remonti', freq: 'monthly', pri: '0.8' },
     ];
     try {
       const orgs = controlDb.prepare("SELECT id FROM organizations WHERE status != 'suspended'").all();
