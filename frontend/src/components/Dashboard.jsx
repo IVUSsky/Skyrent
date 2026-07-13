@@ -141,7 +141,13 @@ export default function Dashboard({ API }) {
   const plRow = monthly.find(m => m.месец === plMonth)
   const plRetained = plRow?.задържан_депозит_total ?? 0
   const plIncome   = (plRow?.наем_total ?? metrics.наем_мес ?? 0) + plRetained
-  const plMortgage = plRow?.вноска_total ?? metrics.total_вноска ?? 0
+  // Ипотека: банковите вноски за месеца; ако ги няма още (вноските са на ~20-о
+  // число / извлечението не е качено) → графикът от модул Кредити, за да не
+  // показва резюмето 0 ипотека в началото на месеца.
+  const plMortgageBank = plRow?.вноска_total ?? 0
+  const plMortgageScheduled = plRow?.вноска_scheduled ?? 0
+  const plMortgageIsScheduled = plMortgageBank <= 0 && plMortgageScheduled > 0
+  const plMortgage = plMortgageBank > 0 ? plMortgageBank : (plMortgageScheduled || metrics.total_вноска || 0)
   const toEur = (eur, bgn) => (eur || 0) + (bgn || 0) / 1.95583
   const plOpEx   = plExpenses ? toEur(plExpenses.total_eur, plExpenses.total_bgn) : 0
   const plRenov  = plExpenses?.renov  ? toEur(plExpenses.renov.total_eur,  plExpenses.renov.total_bgn)  : 0
@@ -392,6 +398,12 @@ export default function Dashboard({ API }) {
               <span className="flex items-center gap-1.5">
                 <span className="w-2 h-2 rounded-full bg-orange-400 inline-block"/>
                 Ипотечни вноски
+                {plMortgageIsScheduled && (
+                  <span className="text-[10px] text-orange-500 bg-orange-50 border border-orange-200 rounded-full px-1.5 py-0.5"
+                    title="Банковите вноски за месеца още не са минали/импортнати — показан е графикът от модул Кредити">
+                    по график
+                  </span>
+                )}
               </span>
               <span className="font-medium">−{fmt(plMortgage, 2)} €</span>
             </div>
