@@ -3,12 +3,87 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <title>Sky Rent</title>
+    <title>Skyrent — операционна система за наемния бизнес | Sky Capital</title>
 
     <!-- PWA: manifest + theme -->
     <link rel="manifest" href="/manifest.json" />
     <meta name="theme-color" content="#1a1a2e" />
-    <meta name="description" content="Sky Capital — портал за наематели" />
+    <meta name="description" content="Skyrent следи кой е платил наема (банков импорт), пази договорите, издава фактурите и прави данъчната справка. Безплатно до 5 имота. От Sky Capital — наемодатели с 38 собствени имота. Плюс: довършителни работи до ключ." />
+
+    <!-- Open Graph — социални и AI прегледи -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Skyrent" />
+    <meta property="og:title" content="Skyrent — имотите ви на автопилот" />
+    <meta property="og:description" content="Наеми, договори, депозити и данъци — на едно място, автоматично. Безплатно до 5 имота, без карта." />
+    <meta property="og:url" content="https://app.skycapital.pro/" />
+    <meta property="og:image" content="https://app.skycapital.pro/sky_capital_logo.png" />
+    <meta property="og:locale" content="bg_BG" />
+
+    <!-- Структурирани данни за търсачки и AI (JSON-LD) -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "Organization",
+          "@id": "https://skycapital.pro/#org",
+          "name": "Скай Кепитъл ООД",
+          "alternateName": ["Sky Capital", "Skyrent"],
+          "url": "https://skycapital.pro",
+          "logo": "https://app.skycapital.pro/sky_capital_logo.png",
+          "email": "info@skycapital.pro",
+          "telephone": "+359888646420",
+          "vatID": "BG207291184",
+          "address": { "@type": "PostalAddress", "addressLocality": "София", "addressCountry": "BG", "streetAddress": "ж.к. Младост 3, бл. 386" },
+          "areaServed": ["София", "Пазарджик", "България"]
+        },
+        {
+          "@type": "SoftwareApplication",
+          "name": "Skyrent",
+          "url": "https://app.skycapital.pro",
+          "applicationCategory": "BusinessApplication",
+          "operatingSystem": "Web",
+          "inLanguage": "bg",
+          "description": "Софтуер за управление на имоти под наем: банков импорт с автоматично разпознаване на плащанията, договори и анекси, онлайн плащания (Stripe/SEPA), портал за наематели с AI асистент, данъчна справка по чл. 50.",
+          "offers": [
+            { "@type": "Offer", "name": "Basic", "price": "0", "priceCurrency": "EUR", "description": "Безплатно завинаги, до 5 имота" },
+            { "@type": "Offer", "name": "Pro", "price": "24", "priceCurrency": "EUR", "description": "Месечно; неограничени имоти, плащания, портал, банков импорт" },
+            { "@type": "Offer", "name": "Agency", "price": "49", "priceCurrency": "EUR", "description": "Месечно; за агенции — мулти-собственик, white-label" }
+          ],
+          "publisher": { "@id": "https://skycapital.pro/#org" }
+        },
+        {
+          "@type": "Service",
+          "name": "Довършителни работи до ключ",
+          "serviceType": "Интериорен дизайн, цялостно довършване и мебелиране на имоти",
+          "url": "https://app.skycapital.pro/remonti",
+          "provider": { "@id": "https://skycapital.pro/#org" },
+          "areaServed": ["София", "Пазарджик"],
+          "description": "Дизайн, пълно довършване и мебелиране на имоти с фиксиран срок и бюджет; последващо управление на имота или самоуправление със Skyrent. Безплатен оглед и оферта."
+        },
+        {
+          "@type": "FAQPage",
+          "mainEntity": [
+            {
+              "@type": "Question",
+              "name": "Колко струва Skyrent?",
+              "acceptedAnswer": { "@type": "Answer", "text": "Basic планът е безплатен завинаги за до 5 имота. Pro е €24/месец, Agency €49/месец. Регистрацията е без карта." }
+            },
+            {
+              "@type": "Question",
+              "name": "Как Skyrent разбира кой е платил наема?",
+              "acceptedAnswer": { "@type": "Answer", "text": "Качвате банковото извлечение, системата разпознава преводите, свързва ги с наемателите и имотите и отбелязва платените месеци автоматично." }
+            },
+            {
+              "@type": "Question",
+              "name": "Какъв данък дължа върху наем като физическо лице в България?",
+              "acceptedAnswer": { "@type": "Answer", "text": "10% плосък данък върху 90% от наемния доход (10% нормативно признати разходи) — ефективно около 9%. Декларира се до 30 април по чл. 50. Skyrent прави справката автоматично." }
+            }
+          ]
+        }
+      ]
+    }
+    </script>
 
     <!-- iOS PWA support -->
     <meta name="apple-mobile-web-app-capable" content="yes" />
