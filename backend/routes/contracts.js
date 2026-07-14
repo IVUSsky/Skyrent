@@ -1256,10 +1256,17 @@ module.exports = function(db) {
         console.error('Tenant provisioning failed:', e.message);
       }
 
-      // Авто-генериране на първа фактура при активиране (ако е включено в Настройки)
+      // Авто-генериране на първа фактура при активиране.
+      // issue_invoice от заявката (изборът в диалога) има превес над глобалната
+      // настройка: true включва фактурирането за имота и издава, false пропуска.
       let invoice = null;
       try {
-        if (contract.property_id && autoInvoiceOnActivateOn(db)) {
+        const explicit = typeof req.body?.issue_invoice === 'boolean' ? req.body.issue_invoice : null;
+        const shouldInvoice = explicit !== null ? explicit : autoInvoiceOnActivateOn(db);
+        if (contract.property_id && shouldInvoice) {
+          if (explicit === true) {
+            db.prepare('UPDATE properties SET invoice_enabled=1 WHERE id=?').run(contract.property_id);
+          }
           const month = (contract.start_date || new Date().toISOString()).slice(0, 7);
           const r = await generateRentInvoice(db, { property_id: contract.property_id, month });
           if (r.ok) invoice = { id: r.id, invoice_number: r.invoice_number };

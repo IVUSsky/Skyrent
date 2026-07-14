@@ -568,12 +568,19 @@ export default function Contracts({ API }) {
 
   const activateContract = (c) => {
     if (!window.confirm(`Активиране ще обнови портфолиото и ще създаде онлайн профил за наемателя. Продължи?`)) return
-    apiFetch(`${API}/api/contracts/${c.id}/activate`, { method: 'POST' })
+    const issueInvoice = window.confirm(
+      'Да се фактурира ли този имот?\n\n' +
+      'OK — включва фактурирането за имота и издава първата фактура (изпраща се и към счетоводството)\n' +
+      'Отказ — без фактура'
+    )
+    apiFetch(`${API}/api/contracts/${c.id}/activate`, { method: 'POST', body: JSON.stringify({ issue_invoice: issueInvoice }) })
       .then(r => r.json())
       .then(d => {
         if (!d.ok) return showToast('Грешка: ' + d.error, 'error')
         let msg = 'Договорът е активен — портфолиото е обновено'
         if (d.tenant_account?.created) msg += d.tenant_account.email_sent ? ' • покана изпратена на наемателя' : ' • профил създаден (email не е изпратен)'
+        if (d.invoice?.invoice_number) msg += ` • фактура № ${d.invoice.invoice_number} издадена`
+        else if (d.invoice?.skipped === 'duplicate') msg += ' • фактура за месеца вече съществува'
         showToast(msg)
         load()
       })
