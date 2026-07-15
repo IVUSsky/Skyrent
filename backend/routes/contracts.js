@@ -908,6 +908,13 @@ module.exports = function(db) {
       try { data = JSON.parse(raw.slice(s, e + 1)); }
       catch (_) { return res.status(422).json({ error: 'Не успях да разчета данните — опитай с по-ясна/добре осветена снимка' }); }
 
+      // Авто-запис в указателя — данните да не се губят, ако договорът не бъде довършен
+      upsertParty({
+        name: data.tenant_name, egn: data.egn, address: data.permanent_address,
+        doc_type: data.id_number ? 'документ № ' + data.id_number : '',
+        doc_date: data.id_issued_date, dob: data.birth_date,
+      }, 'авто от сканиран документ');
+
       res.json({
         ok: true,
         data,
@@ -980,6 +987,32 @@ module.exports = function(db) {
   });
 
   const PARTY_FIELDS = ['name', 'egn', 'address', 'phone', 'email', 'doc_type', 'doc_date', 'doc_country', 'dob', 'notes'];
+
+  // Авто-запис в указателя: upsert по ЕГН (ако има), иначе по име. Попълва
+  // само празните полета на съществуващ запис — не изтрива въведени данни.
+  function upsertParty(t, sourceNote) {
+    if (!t.name || !String(t.name).trim()) return;
+    try {
+      const name = String(t.name).trim();
+      const ex = (t.egn && db.prepare('SELECT id FROM tenant_directory WHERE egn=?').get(t.egn))
+              || db.prepare('SELECT id FROM tenant_directory WHERE name=?').get(name);
+      if (ex) {
+        db.prepare(`UPDATE tenant_directory SET
+            egn=COALESCE(NULLIF(egn,''),NULLIF(?,'')), address=COALESCE(NULLIF(address,''),NULLIF(?,'')),
+            phone=COALESCE(NULLIF(phone,''),NULLIF(?,'')), email=COALESCE(NULLIF(email,''),NULLIF(?,'')),
+            doc_type=COALESCE(NULLIF(doc_type,''),NULLIF(?,'')), doc_date=COALESCE(NULLIF(doc_date,''),NULLIF(?,'')),
+            doc_country=COALESCE(NULLIF(doc_country,''),NULLIF(?,'')), dob=COALESCE(NULLIF(dob,''),NULLIF(?,'')),
+            updated_at=CURRENT_TIMESTAMP WHERE id=?`)
+          .run(t.egn || '', t.address || '', t.phone || '', t.email || '',
+               t.doc_type || '', t.doc_date || '', t.doc_country || '', t.dob || '', ex.id);
+      } else {
+        db.prepare(`INSERT INTO tenant_directory (name, egn, address, phone, email, doc_type, doc_date, doc_country, dob, notes)
+            VALUES (?,?,?,?,?,?,?,?,?,?)`)
+          .run(name, t.egn || null, t.address || null, t.phone || null, t.email || null,
+               t.doc_type || null, t.doc_date || null, t.doc_country || null, t.dob || null, sourceNote);
+      }
+    } catch (e) { console.warn('party upsert failed:', e.message); }
+  }
   router.post('/parties', (req, res) => {
     try {
       const b = req.body || {};
@@ -1170,6 +1203,14 @@ module.exports = function(db) {
         contract.абонат_ток, contract.абонат_вода, contract.абонат_тец, contract.абонат_вход,
         filename, protocolFilename, contract.id_front_path, contract.id_back_path
       );
+
+      // Авто-запис на наемателя в указателя при всяко създаване на договор
+      upsertParty({
+        name: contract.tenant_name, egn: contract.tenant_egn, address: contract.tenant_address,
+        phone: contract.tenant_phone, email: contract.tenant_email,
+        doc_type: contract.tenant_doc, doc_date: contract.tenant_doc_date,
+        doc_country: contract.tenant_doc_country, dob: contract.tenant_dob,
+      }, 'авто при създаване на договор');
 
       res.status(201).json({ ok: true, id: r.lastInsertRowid, contract_number, filename, protocol_filename: protocolFilename });
     } catch (err) {
