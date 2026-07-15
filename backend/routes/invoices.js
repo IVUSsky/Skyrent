@@ -400,7 +400,26 @@ async function generateRentInvoice(db, { property_id, month, payment_type, notes
   const issuer = getIssuer(db);
   const invoice_number = nextInvoiceNumber(db, { rent: true });
   const vat_rate  = prop.vat_exempt ? 0 : (issuer.vat_rate ? Number(issuer.vat_rate) : 0);
-  const rent      = Number(prop['наем'] || 0);
+  const fullRent  = Number(prop['наем'] || 0);
+
+  // Про-рата за първия непълен месец: договор, започващ след 1-во число →
+  // наем на ден = (месечен наем × 12) ÷ 365, умножен по оставащите дни
+  // от началната дата до края на месеца включително.
+  let rent = fullRent;
+  let prorataNote = null;
+  const startedC = db.prepare(
+    "SELECT start_date FROM contracts WHERE property_id=? AND status='active' AND start_date LIKE ? ORDER BY id DESC LIMIT 1"
+  ).get(property_id, month + '%');
+  const startDay = startedC ? Number(startedC.start_date.slice(8, 10)) : 1;
+  if (startedC && startDay > 1) {
+    const [y, m] = month.split('-').map(Number);
+    const daysInMonth = new Date(y, m, 0).getDate();
+    const days  = daysInMonth - startDay + 1;
+    const daily = fullRent * 12 / 365;
+    rent = Math.round(daily * days * 100) / 100;
+    prorataNote = `Пропорционален наем за ${days} дни (${String(startDay).padStart(2,'0')}.${String(m).padStart(2,'0')} – ${daysInMonth}.${String(m).padStart(2,'0')}): ${fullRent} × 12 ÷ 365 × ${days} дни`;
+  }
+
   const rent_net  = vat_rate > 0 ? Math.round(rent / (1 + vat_rate / 100) * 100) / 100 : rent;
   const vat_amount = Math.round((rent - rent_net) * 100) / 100;
   const issued_at = new Date().toISOString().slice(0, 10);
@@ -426,7 +445,7 @@ async function generateRentInvoice(db, { property_id, month, payment_type, notes
     tax_event_date: tax_event_date || issued_at,
     due_date:       due_date       || null,
     issued_at,
-    notes: [notes, addonsNote].filter(Boolean).join(' | ') || null,
+    notes: [notes, prorataNote, addonsNote].filter(Boolean).join(' | ') || null,
   };
 
   const { filename } = await generatePDF(inv, issuer);
