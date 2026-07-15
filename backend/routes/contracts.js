@@ -908,11 +908,16 @@ module.exports = function(db) {
       try { data = JSON.parse(raw.slice(s, e + 1)); }
       catch (_) { return res.status(422).json({ error: 'Не успях да разчета данните — опитай с по-ясна/добре осветена снимка' }); }
 
-      // Авто-запис в указателя — данните да не се губят, ако договорът не бъде довършен
+      // Авто-запис в указателя — данните да не се губят, ако договорът не бъде довършен.
+      // Пази ВСИЧКО от документа: номер, издаден от, дата, валидност, рождена дата, адрес.
+      const docBits = [
+        data.id_number      ? 'документ № ' + data.id_number       : '',
+        data.id_issued_by   ? 'изд. от ' + data.id_issued_by       : '',
+        data.id_valid_until ? 'валиден до ' + data.id_valid_until  : '',
+      ].filter(Boolean).join(', ');
       upsertParty({
         name: data.tenant_name, egn: data.egn, address: data.permanent_address,
-        doc_type: data.id_number ? 'документ № ' + data.id_number : '',
-        doc_date: data.id_issued_date, dob: data.birth_date,
+        doc_type: docBits, doc_date: data.id_issued_date, dob: data.birth_date,
       }, 'авто от сканиран документ');
 
       res.json({
