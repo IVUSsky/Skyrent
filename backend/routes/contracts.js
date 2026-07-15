@@ -67,6 +67,24 @@ function fillTemplate(template, fields) {
   });
 }
 
+// Официална БГ транслитерация (Закон за транслитерацията) — за EN частта
+// на двуезичните договори. Настройките issuer.name_en/address_en/mol_en
+// имат превес; това е fallback за всичко без изрична латинска версия.
+const TRANSLIT = {
+  а:'a',б:'b',в:'v',г:'g',д:'d',е:'e',ж:'zh',з:'z',и:'i',й:'y',к:'k',л:'l',м:'m',
+  н:'n',о:'o',п:'p',р:'r',с:'s',т:'t',у:'u',ф:'f',х:'h',ц:'ts',ч:'ch',ш:'sh',
+  щ:'sht',ъ:'a',ь:'y',ю:'yu',я:'ya',
+};
+function translit(s) {
+  if (!s) return s;
+  return String(s).replace(/[а-яА-Я]/g, (ch) => {
+    const low = ch.toLowerCase();
+    const lat = TRANSLIT[low] || ch;
+    if (ch === low) return lat;
+    return lat.charAt(0).toUpperCase() + lat.slice(1);
+  });
+}
+
 // Build field map from contract data
 function buildFields(contract, issuer) {
   const isCompany = contract.landlord_type === 'дружество';
@@ -80,12 +98,16 @@ function buildFields(contract, issuer) {
     ? `${coName}, ЕИК ${contract.landlord_egn || issuer.eik || '...'}, МОЛ: ${coMol}, с адрес ${contract.landlord_address || issuer.address || ''}`
     : `${contract.landlord_name || issuer.name || ''}, ЕГН ${contract.landlord_egn || issuer.eik || ''}, ЛК № ${contract.landlord_lk || '...'}, издадена на ${contract.landlord_lk_date || '...'} год. с адрес ${contract.landlord_address || issuer.address || ''}`;
 
+  // EN версии: изрично зададените issuer.*_en имат превес, иначе транслитерация
+  const coNameEN = issuer.name_en    || translit(coName);
+  const coMolEN  = issuer.mol_en     || translit(coMol);
+  const coAddrEN = issuer.address_en || translit(contract.landlord_address || issuer.address || '');
   const landlordDataEN = isCompany
-    ? `${coName}, Company Registration No. ${contract.landlord_egn || issuer.eik || '...'}, Manager: ${coMol}, address ${contract.landlord_address || issuer.address || ''}`
-    : `${contract.landlord_name || issuer.name || ''}, Personal Identification No. ${contract.landlord_egn || issuer.eik || ''} Identity Card No. ${contract.landlord_lk || '...'}, issued on ${contract.landlord_lk_date || '...'}, address ${contract.landlord_address || issuer.address || ''}`;
+    ? `${coNameEN}, Company Registration No. ${contract.landlord_egn || issuer.eik || '...'}, Manager: ${coMolEN}, address ${coAddrEN}`
+    : `${translit(contract.landlord_name || issuer.name || '')}, Personal Identification No. ${contract.landlord_egn || issuer.eik || ''} Identity Card No. ${contract.landlord_lk || '...'}, issued on ${contract.landlord_lk_date || '...'}, address ${coAddrEN}`;
 
   const landlordSignBG = isCompany ? `${coName}\nМОЛ: ${coMol}` : (contract.landlord_name || issuer.name || '');
-  const landlordSignEN = isCompany ? `${coName}\nManager: ${coMol}` : (contract.landlord_name || issuer.name || '');
+  const landlordSignEN = isCompany ? `${coNameEN}\nManager: ${coMolEN}` : translit(contract.landlord_name || issuer.name || '');
 
   return {
     'ДОГОВОР_НОМЕР':          contract.contract_number || '',
