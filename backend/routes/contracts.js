@@ -339,6 +339,24 @@ function generateContractPDF(contract, template, issuer, photos = [], opts = {})
       } else if (line === '' || line === '---') {
         doc.moveDown(0.25);
 
+      } else if (line.includes(' ||| ')) {
+        // Двуколонен ред „BG ||| EN" — успоредни колони като в оригиналните
+        // двуезични договори. Bold при **...** или ред, започващ с Чл./Art.
+        const [bgRaw, enRaw] = line.split(' ||| ');
+        const bg = bgRaw.replace(/\*\*/g, '');
+        const en = (enRaw || '').replace(/\*\*/g, '');
+        const gap = 14;
+        const colWd = (PW - gap) / 2;
+        const isBold = bgRaw.startsWith('**') || /^(Чл\.|Art\.)/.test(bg);
+        doc.font(isBold ? 'B' : 'R').fontSize(9).fillColor('#111827');
+        const h = Math.max(doc.heightOfString(bg, { width: colWd }), doc.heightOfString(en, { width: colWd }));
+        let y0 = cy;
+        if (y0 + h > PH - FOOTER_H - 20) { doc.addPage(); y0 = doc.y; }
+        doc.text(bg, ML, y0, { width: colWd });
+        doc.text(en, ML + colWd + gap, y0, { width: colWd });
+        doc.y = y0 + h;
+        doc.moveDown(0.25);
+
       } else if (line.startsWith('**') && line.endsWith('**')) {
         doc.font('B').fontSize(10).fillColor('#111827')
            .text(line.replace(/\*\*/g, ''), ML, cy, { width: PW });
