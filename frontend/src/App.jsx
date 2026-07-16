@@ -39,6 +39,7 @@ const Support        = lazy(() => import('./components/Support'))
 const Contacts       = lazy(() => import('./components/Contacts'))
 const Legal          = lazy(() => import('./components/Legal'))
 const Remonti        = lazy(() => import('./components/Remonti'))
+const Blog           = lazy(() => import('./components/Blog'))
 const Internet       = lazy(() => import('./components/Internet'))
 const TenantApp      = lazy(() => import('./components/TenantApp'))
 const ChatLearning   = lazy(() => import('./components/ChatLearning'))
@@ -263,6 +264,8 @@ export default function App() {
   if (pubPath === '/poveritelnost') return <Legal which="privacy" />
   // Довършителни работи до ключ (Sky Capital услуга)
   if (pubPath === '/remonti')       return <Remonti API={API} />
+  // Блог (публична статия)
+  if (pubPath === '/blog')          return <Blog />
 
   if (!authenticated) {
     return showLogin
