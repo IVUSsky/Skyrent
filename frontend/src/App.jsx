@@ -41,6 +41,7 @@ const Legal          = lazy(() => import('./components/Legal'))
 const Remonti        = lazy(() => import('./components/Remonti'))
 const Blog           = lazy(() => import('./components/Blog'))
 const SeoPrograma    = lazy(() => import('./components/SeoPrograma'))
+const BlogSravnenie  = lazy(() => import('./components/BlogSravnenie'))
 const Internet       = lazy(() => import('./components/Internet'))
 const TenantApp      = lazy(() => import('./components/TenantApp'))
 const ChatLearning   = lazy(() => import('./components/ChatLearning'))
@@ -265,8 +266,9 @@ export default function App() {
   if (pubPath === '/poveritelnost') return <Legal which="privacy" />
   // Довършителни работи до ключ (Sky Capital услуга)
   if (pubPath === '/remonti')       return <Remonti API={API} />
-  // Блог (публична статия)
+  // Блог (публични статии)
   if (pubPath === '/blog')          return <Blog />
+  if (pubPath === '/blog/sravnenie-softuer-naemi') return <BlogSravnenie />
   // SEO страница — програма за управление на имоти
   if (pubPath === '/programa-za-upravlenie-na-imoti') return <SeoPrograma />
 

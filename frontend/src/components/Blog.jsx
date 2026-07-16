@@ -125,6 +125,7 @@ export default function Blog() {
 
         <H2>Кои сме ние</H2>
         <P>Skyrent е създаден от Скай Кепитъл ООД — наемодатели, които управляват собствен портфейл от имоти в София и Пазарджик. Софтуерът не е писан в офис по презумпции — всяка функция идва от реален проблем, който сами сме имали.</P>
+        <P>Още от блога: <a href="/blog/sravnenie-softuer-naemi" style={{ color: BRASS2 }}>Rentila, ИМОТко или Skyrent — кой софтуер за наеми да избера?</a></P>
 
         {/* CTA */}
         <div style={{ marginTop: 44, padding: '28px 26px', borderRadius: 16, border: `1px solid rgba(224,189,110,.35)`, background: 'rgba(224,189,110,.06)', textAlign: 'center' }}>
