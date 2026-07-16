@@ -183,7 +183,7 @@ export default function Remonti({ API = '' }) {
 
       <footer className="rm-foot">
         <SkyCapitalLogo height={18} />
-        <span>Работим в София и Пазарджик · Sky Capital ООД, ЕИК 207291184</span>
+        <span>Работим в София и други големи градове · Sky Capital ООД, ЕИК 207291184</span>
       </footer>
     </div>
   )
