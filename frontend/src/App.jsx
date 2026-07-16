@@ -40,6 +40,7 @@ const Contacts       = lazy(() => import('./components/Contacts'))
 const Legal          = lazy(() => import('./components/Legal'))
 const Remonti        = lazy(() => import('./components/Remonti'))
 const Blog           = lazy(() => import('./components/Blog'))
+const SeoPrograma    = lazy(() => import('./components/SeoPrograma'))
 const Internet       = lazy(() => import('./components/Internet'))
 const TenantApp      = lazy(() => import('./components/TenantApp'))
 const ChatLearning   = lazy(() => import('./components/ChatLearning'))
@@ -266,6 +267,8 @@ export default function App() {
   if (pubPath === '/remonti')       return <Remonti API={API} />
   // Блог (публична статия)
   if (pubPath === '/blog')          return <Blog />
+  // SEO страница — програма за управление на имоти
+  if (pubPath === '/programa-za-upravlenie-na-imoti') return <SeoPrograma />
 
   if (!authenticated) {
     return showLogin

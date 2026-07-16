@@ -242,6 +242,7 @@ module.exports = function (getOrgDb, controlDb) {
       { loc: SITE + '/kalkulator-naem', freq: 'monthly', pri: '0.8' },
       { loc: SITE + '/remonti', freq: 'monthly', pri: '0.8' },
       { loc: SITE + '/blog', freq: 'monthly', pri: '0.7' },
+      { loc: SITE + '/programa-za-upravlenie-na-imoti', freq: 'monthly', pri: '0.8' },
     ];
     try {
       const orgs = controlDb.prepare("SELECT id FROM organizations WHERE status != 'suspended'").all();

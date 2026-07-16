@@ -325,6 +325,7 @@ export default function LandingPage({ onEnter }) {
         <SkyLogo height={18} />
         <span style={{ display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
           <a href="/blog" style={{ color: 'inherit', textDecoration: 'none' }}>Блог</a>
+          <a href="/programa-za-upravlenie-na-imoti" style={{ color: 'inherit', textDecoration: 'none' }}>Програма за управление на имоти</a>
           <a href="/remonti" style={{ color: 'inherit', textDecoration: 'none' }}>Ремонти до ключ</a>
           <a href="/dogovor-naem" style={{ color: 'inherit', textDecoration: 'none' }}>Договор за наем</a>
           <a href="/kalkulator-naem" style={{ color: 'inherit', textDecoration: 'none' }}>Калкулатор данък наем</a>
