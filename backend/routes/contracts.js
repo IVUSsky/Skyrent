@@ -114,6 +114,9 @@ function buildFields(contract, issuer) {
     'ДАТА_ДНЕС':              fmtDate(contract.created_at || new Date()),
     'ДАТА_НАЧАЛО':            fmtDate(contract.start_date),
     'ДАТА_КРАЙ':              contract.end_date ? fmtDate(contract.end_date) : 'безсрочен / indefinite',
+    // Гъвкав срок: с крайна дата → срочен, без → гладка безсрочна формулировка
+    'СРОК_BG':                contract.end_date ? `и се сключва за срок до ${fmtDate(contract.end_date)}` : 'и е безсрочен',
+    'СРОК_EN':                contract.end_date ? `and is concluded for a period until ${fmtDate(contract.end_date)}` : 'and is concluded for an indefinite period',
     'ДАТА_ПРЕДАВАНЕ':         fmtDate(contract.delivery_date || contract.start_date),
     'НАЕМОДАТЕЛ_ДАННИ_BG':    landlordDataBG,
     'НАЕМОДАТЕЛ_ДАННИ_EN':    landlordDataEN,
