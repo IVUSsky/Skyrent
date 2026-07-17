@@ -165,6 +165,35 @@ export default function Settings({ API }) {
     <div className="max-w-3xl fin-surface">
       <h2 className="text-2xl font-bold text-gray-800 mb-6">Настройки</h2>
 
+      {/* Публични страници — бърз достъп до маркетинг частта на сайта */}
+      <section className="bg-white rounded-xl shadow p-5 mb-6">
+        <h3 className="text-lg font-semibold text-gray-800 mb-1">🌐 Публични страници</h3>
+        <p className="text-sm text-gray-500 mb-3">
+          Маркетинг страниците и безплатните инструменти на сайта — отварят се в нов раздел, както ги виждат посетителите.
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          {[
+            ['🏠 Начална страница (landing)', '/', 'само в инкогнито — логнат те праща тук'],
+            ['📰 Блог: Колко струва пропуснат наем', '/blog'],
+            ['⚖️ Сравнение: Rentila / ИМОТко / Skyrent', '/blog/sravnenie-softuer-naemi'],
+            ['🔍 Програма за управление на имоти (SEO)', '/programa-za-upravlenie-na-imoti'],
+            ['🛠️ Ремонти до ключ', '/remonti'],
+            ['📄 Генератор на договор за наем', '/dogovor-naem'],
+            ['🧮 Калкулатор данък наем', '/kalkulator-naem'],
+            ['🏢 Свободни имоти (каталог)', '/imoti'],
+            ['📜 Общи условия', '/usloviya'],
+            ['🔒 Поверителност', '/poveritelnost'],
+          ].map(([label, path, note]) => (
+            <a key={path} href={path} target="_blank" rel="noopener noreferrer"
+              className="flex flex-col px-3 py-2 rounded-lg border border-gray-200 bg-gray-50 hover:bg-blue-50 hover:border-blue-200 text-sm text-gray-700 hover:text-blue-700"
+              title={note || ''}>
+              <span className="font-medium">{label}</span>
+              <span className="text-xs text-gray-400">{path}</span>
+            </a>
+          ))}
+        </div>
+      </section>
+
       <section className="bg-white rounded-xl shadow p-5 mb-6">
         <h3 className="text-lg font-semibold text-gray-800 mb-1">🧭 Менюта в приложението</h3>
         <p className="text-sm text-gray-500 mb-3">
