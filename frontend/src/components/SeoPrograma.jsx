@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react'
 import { setCanonical } from '../lib/seo'
 import { SkyLogo } from './LandingPage'
+import PublicNav from './PublicNav'
 
 // SEO страница /programa-za-upravlenie-na-imoti — таргетира търсенията
 // „програма за управление на имоти", „софтуер за наеми", „приложение за
@@ -39,12 +40,7 @@ export default function SeoPrograma() {
     <div style={{ minHeight: '100vh', background: INK, color: CREAM, fontFamily: "'Manrope', sans-serif" }}>
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(JSONLD) }} />
 
-      <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px clamp(20px, 5vw, 56px)', borderBottom: '1px solid rgba(236,231,220,.08)' }}>
-        <a href="/" aria-label="Начало"><SkyLogo height={30} /></a>
-        <a href="/" style={{ color: INK, background: `linear-gradient(135deg, ${BRASS}, ${BRASS2})`, padding: '10px 20px', borderRadius: 999, fontWeight: 700, fontSize: 14, textDecoration: 'none' }}>
-          Пробвай безплатно
-        </a>
-      </header>
+      <PublicNav active="/programa-za-upravlenie-na-imoti" />
 
       <main style={{ maxWidth: 760, margin: '0 auto', padding: '48px clamp(20px, 5vw, 32px) 80px', fontSize: 17 }}>
         <h1 style={{ fontFamily: "'Playfair Display', serif", fontSize: 'clamp(28px, 4.6vw, 40px)', lineHeight: 1.2, margin: '0 0 18px' }}>

@@ -173,7 +173,7 @@ export default function Settings({ API }) {
         </p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           {[
-            ['🏠 Начална страница (landing)', '/', 'само в инкогнито — логнат те праща тук'],
+            ['🏠 Начална страница (landing)', '/?site=1'],
             ['📰 Блог: Колко струва пропуснат наем', '/blog'],
             ['⚖️ Сравнение: Rentila / ИМОТко / Skyrent', '/blog/sravnenie-softuer-naemi'],
             ['🔍 Програма за управление на имоти (SEO)', '/programa-za-upravlenie-na-imoti'],

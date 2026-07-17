@@ -99,7 +99,9 @@ export default function LandingPage({ onEnter }) {
       {/* Nav */}
       <nav className="lp-nav">
         <a href="/" style={{ textDecoration: 'none' }} aria-label="skyrent — начало"><SkyLogo height={24} /></a>
-        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+          <a className="lp-navlink" href="/blog">Блог</a>
+          <a className="lp-navlink" href="/remonti">Ремонти</a>
           <a className="lp-navlink" href="/imoti">Свободни имоти</a>
           <button className="lp-ghost" onClick={onEnter}>Вход</button>
         </div>
