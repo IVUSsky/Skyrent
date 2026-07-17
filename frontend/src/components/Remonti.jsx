@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { setCanonical } from '../lib/seo'
 import { SkyLogo } from './LandingPage'
+import PublicNav from './PublicNav'
 
 // Публична страница /remonti — довършителни работи до ключ през Sky Capital:
 // дизайн + цялостно довършване + мебелиране + управление (или Skyrent софтуер).
@@ -68,9 +69,9 @@ export default function Remonti({ API = '' }) {
       <style>{CSS}</style>
       <div className="rm-glow" aria-hidden />
 
+      <PublicNav active="/remonti" />
       <nav className="rm-nav">
-        <a href="/" style={{ display: 'flex', alignItems: 'center' }}><SkyCapitalLogo height={24} /></a>
-        <a className="rm-ghost" href="/">към Skyrent →</a>
+        <a href="/remonti" style={{ display: 'flex', alignItems: 'center' }}><SkyCapitalLogo height={24} /></a>
       </nav>
 
       {/* Hero */}

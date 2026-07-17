@@ -271,6 +271,11 @@ export default function App() {
   if (pubPath === '/blog/sravnenie-softuer-naemi') return <BlogSravnenie />
   // SEO страница — програма за управление на имоти
   if (pubPath === '/programa-za-upravlenie-na-imoti') return <SeoPrograma />
+  // /?site=1 — показва публичния сайт (landing) дори когато си логнат;
+  // „Вход" от него връща към приложението / login формата.
+  if (new URLSearchParams(window.location.search).has('site')) {
+    return <LandingPage onEnter={() => { window.history.replaceState(null, '', '/'); setShowLogin(true) }} />
+  }
 
   if (!authenticated) {
     return showLogin

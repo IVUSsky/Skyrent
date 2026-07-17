@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react'
 import { setCanonical } from '../lib/seo'
 import { SkyLogo } from './LandingPage'
+import PublicNav from './PublicNav'
 
 // Публична страница /blog — статия „Колко струва един пропуснат наем?".
 // Стилът следва landing-а (ink + brass). Снимките са от демо организацията.
@@ -48,13 +49,7 @@ export default function Blog() {
     <div style={{ minHeight: '100vh', background: INK, color: CREAM, fontFamily: "'Manrope', sans-serif" }}>
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(JSONLD) }} />
 
-      {/* Header */}
-      <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px clamp(20px, 5vw, 56px)', borderBottom: '1px solid rgba(236,231,220,.08)' }}>
-        <a href="/" aria-label="Начало"><SkyLogo height={30} /></a>
-        <a href="/" style={{ color: INK, background: `linear-gradient(135deg, ${BRASS}, ${BRASS2})`, padding: '10px 20px', borderRadius: 999, fontWeight: 700, fontSize: 14, textDecoration: 'none' }}>
-          Пробвай безплатно
-        </a>
-      </header>
+      <PublicNav active="/blog" />
 
       <article style={{ maxWidth: 760, margin: '0 auto', padding: '48px clamp(20px, 5vw, 32px) 80px', fontSize: 17 }}>
         <div style={{ color: BRASS2, fontSize: 13, letterSpacing: '.14em', textTransform: 'uppercase', marginBottom: 14 }}>Skyrent · Блог</div>
