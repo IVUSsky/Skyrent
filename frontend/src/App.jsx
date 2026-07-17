@@ -314,7 +314,8 @@ export default function App() {
       {orgId !== 1 && <SetupWizard API={API} onDone={(et) => setEntityInfo(i => ({ ...i, individual: et === 'individual' }))} />}
       <header className="shadow-lg" style={{ background: 'var(--shell-bg)' }}>
         <div className="max-w-7xl mx-auto px-4 py-2 flex items-center gap-5 flex-wrap">
-          <div className="shrink-0" style={{ background: 'white', borderRadius: '7px', padding: '4px 10px', display: 'inline-flex', alignItems: 'center' }}>
+          {/* Логото води към публичния сайт (/?site=1 работи и логнат) */}
+          <a href="/?site=1" title="Към сайта" className="shrink-0" style={{ background: 'white', borderRadius: '7px', padding: '4px 10px', display: 'inline-flex', alignItems: 'center', textDecoration: 'none' }}>
             {/* org 1 (Sky Capital) → винаги PNG логото; чужди org-и → тяхно лого, иначе име */}
             {orgId !== 1 && brand?.logo ? (
               <img src={brand.logo} alt={brand.name} style={{ height: '42px', display: 'block' }} />
@@ -323,7 +324,7 @@ export default function App() {
             ) : (
               <img src="/sky_capital_logo.png" alt="Sky Capital" style={{ height: '42px', display: 'block' }} />
             )}
-          </div>
+          </a>
           <nav className="flex gap-1 flex-wrap items-center">
             {tabs.map(tab => (
               <button
