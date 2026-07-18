@@ -5,6 +5,7 @@
 // (idempotent: UPDATE if today's row exists, INSERT otherwise).
 
 const t212 = require('./trading212');
+const { renovationByProperty, renoTotal } = require('./renovationCosts');
 
 // Mirror of computePortfolioSnapshot in routes/investments.js, kept here to
 // avoid a circular dependency (routes → lib → routes). Behaviour must stay
@@ -40,13 +41,14 @@ async function computeWealth(db) {
   // Properties
   const properties = db.prepare('SELECT * FROM properties').all();
   const loans = db.prepare('SELECT * FROM loans').all();
+  const renoMap = renovationByProperty(db);
   const property_asset = properties.reduce((s, p) => {
-    const v = p.market_val != null && p.market_val > 0 ? p.market_val : (p['покупна'] || 0) + (p['ремонт'] || 0);
+    const v = p.market_val != null && p.market_val > 0 ? p.market_val : (p['покупна'] || 0) + renoTotal(p, renoMap);
     return s + v;
   }, 0);
   const property_debt = loans.reduce((s, l) => s + (l['остатък'] || 0), 0);
   const property_equity = property_asset - property_debt;
-  const property_invested = properties.reduce((s, p) => s + (p['покупна'] || 0) + (p['ремонт'] || 0), 0);
+  const property_invested = properties.reduce((s, p) => s + (p['покупна'] || 0) + renoTotal(p, renoMap), 0);
 
   const gold = metalSnapshot(db, 'gold');
   const silver = metalSnapshot(db, 'silver');

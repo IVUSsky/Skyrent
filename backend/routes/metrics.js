@@ -1,4 +1,5 @@
 const express = require('express');
+const { renovationByProperty, renoTotal } = require('../lib/renovationCosts');
 module.exports = function(db) {
   const router = express.Router();
 
@@ -16,11 +17,12 @@ module.exports = function(db) {
     const total_debt = loans.reduce((sum, l) => sum + (l['остатък'] || 0), 0);
     const total_вноска = loans.reduce((sum, l) => sum + (l['вноска'] || 0), 0);
 
-    // Asset base: use market_val if set, otherwise покупна+ремонт
+    // Asset base: use market_val if set, otherwise покупна+ремонт (вкл. ремонтни фактури)
+    const renoMap = renovationByProperty(db);
     const asset_base = properties.reduce((sum, p) => {
       const val = p.market_val != null && p.market_val > 0
         ? p.market_val
-        : (p['покупна'] || 0) + (p['ремонт'] || 0);
+        : (p['покупна'] || 0) + renoTotal(p, renoMap);
       return sum + val;
     }, 0);
 
@@ -45,7 +47,7 @@ module.exports = function(db) {
       const asset_val = group.reduce((s, p) => {
         const val = p.market_val != null && p.market_val > 0
           ? p.market_val
-          : (p['покупна'] || 0) + (p['ремонт'] || 0);
+          : (p['покупна'] || 0) + renoTotal(p, renoMap);
         return s + val;
       }, 0);
       return { count: group.length, active_count: active.length, monthly_rent, annual_rent, asset_val };

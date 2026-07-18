@@ -5,6 +5,7 @@ const path    = require('path');
 const fs      = require('fs');
 const { optimizeMany } = require('../lib/imageOptimize');
 const { imagesOnly } = require('../lib/uploadFilter');
+const { renovationByProperty } = require('../lib/renovationCosts');
 
 const DATA_DIR   = process.env.DATA_DIR || path.join(__dirname, '../data');
 const PHOTOS_DIR = path.join(DATA_DIR, 'property_photos');
@@ -21,7 +22,7 @@ const uploadPhoto = multer({ storage: photoStorage, limits: { fileSize: 10 * 102
 
 // Финансови полета, скрити от роля „брокер" (недоверен лизинг агент). Той
 // управлява описателните данни/обяви/наематели, но не вижда икономиката.
-const BROKER_HIDDEN_FIELDS = ['покупна', 'ремонт', 'market_val', 'owner_id'];
+const BROKER_HIDDEN_FIELDS = ['покупна', 'ремонт', 'ремонт_фактури', 'market_val', 'owner_id'];
 const isBroker = (req) => req.user?.role === 'broker';
 const stripForBroker = (req, row) => {
   if (!isBroker(req) || !row) return row;
@@ -57,7 +58,10 @@ module.exports = function(db) {
 
   router.get('/', (req, res) => {
     const rows = db.prepare('SELECT * FROM properties ORDER BY id').all();
-    res.json(isBroker(req) ? rows.map(r => stripForBroker(req, r)) : rows);
+    // Ремонтни фактури по имот — допълват колоната 'ремонт' в калкулациите
+    const reno = renovationByProperty(db);
+    const withReno = rows.map(r => ({ ...r, ремонт_фактури: reno[r.id] || 0 }));
+    res.json(isBroker(req) ? withReno.map(r => stripForBroker(req, r)) : withReno);
   });
 
   // Обединяване на дубликати: source (премахва се) → target (запазва се).
