@@ -342,6 +342,8 @@ IMPORTANT RULES:
 - Copy IBAN digit by digit very carefully
 - amount_total must be a NUMBER not a string
 - If currency shows EUR but amount shows in лв — use BGN
+- DUAL-CURRENCY invoices (2026+): Bulgarian invoices often show EVERY amount in BOTH BGN (лв) and EUR (fixed rate 1.95583). Pick ONE currency and be CONSISTENT: amount_no_vat, vat_amount and amount_total MUST all be in that same currency, and "currency" must name it. NEVER mix (e.g. total in лв with VAT breakdown in EUR). Prefer EUR when both are printed.
+- Sanity check before answering: amount_no_vat + vat_amount must equal amount_total. If it does not, you mixed currencies — redo.
 - "Словом" field confirms the amount in words — use it to verify
 
 IBAN EXTRACTION RULES - very important:
@@ -380,6 +382,28 @@ IBAN EXTRACTION RULES - very important:
       };
 
       let sourceNote = 'AI parsed (Claude)';
+
+      // Защита срещу смесени валути (дуалните лв/€ фактури от 2026):
+      // ако ДДС разбивката не сборува до總 сумата, но сборува по фиксинга —
+      // сумата е в другата валута. Коригираме и отбелязваме.
+      const BGN_PER_EUR = 1.95583;
+      const nv = Number(data.amount_no_vat), vt = Number(data.vat_amount), tot = Number(data.amount);
+      if (nv > 0 && vt >= 0 && tot > 0 && Math.abs(nv + vt - tot) > 0.05) {
+        if (Math.abs((nv + vt) * BGN_PER_EUR - tot) < 1) {
+          // разбивката е EUR, а total е BGN → уеднаквяваме към EUR
+          data.amount = Math.round((nv + vt) * 100) / 100;
+          data.currency = 'EUR';
+          sourceNote += `; ⚠ дуална валута: total беше ${tot} лв → ${data.amount} €`;
+        } else if (Math.abs((nv + vt) / BGN_PER_EUR - tot) < 1) {
+          // разбивката е BGN, а total е EUR → уеднаквяваме към BGN
+          data.amount = Math.round((nv + vt) * 100) / 100;
+          data.currency = 'BGN';
+          sourceNote += `; ⚠ дуална валута: total беше ${tot} € → ${data.amount} лв`;
+        } else {
+          sourceNote += `; ⚠ ДДС разбивката (${(nv + vt).toFixed(2)}) не сборува до total (${tot}) — провери ръчно`;
+        }
+      }
+
       if (data.supplier_iban && !validateIBAN(data.supplier_iban)) {
         sourceNote += '; ⚠ IBAN невалиден';
       }
