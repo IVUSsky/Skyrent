@@ -478,6 +478,43 @@ module.exports = function(db) {
     }
   });
 
+  // POST /:id/split — разделя разход между няколко имота (напр. една фактура
+  // за материали за два апартамента). body: { parts: [{ property_id, amount }] }.
+  // Сборът на частите трябва да е равен на сумата на оригинала. Първата част
+  // остава в оригиналния запис; за останалите се създават копия със същия
+  // доставчик/фактура/статус и бележка ✂️ част i/N.
+  expRouter.post('/:id/split', (req, res) => {
+    try {
+      const inv = db.prepare('SELECT * FROM expense_invoices WHERE id=?').get(req.params.id);
+      if (!inv) return res.status(404).json({ error: 'Разходът не е намерен' });
+      const parts = (req.body?.parts || []).map(p => ({ property_id: p.property_id || null, amount: Number(p.amount) }));
+      if (parts.length < 2) return res.status(400).json({ error: 'Нужни са поне 2 части' });
+      if (parts.some(p => !(p.amount > 0))) return res.status(400).json({ error: 'Всяка част трябва да има положителна сума' });
+      const total = parts.reduce((s, p) => s + p.amount, 0);
+      if (Math.abs(total - Number(inv.amount)) > 0.011)
+        return res.status(400).json({ error: `Сборът на частите (${total.toFixed(2)}) не съвпада със сумата на разхода (${Number(inv.amount).toFixed(2)})` });
+
+      const note = (i) => [`✂️ част ${i + 1}/${parts.length} от разход #${inv.id}`, inv.ai_notes].filter(Boolean).join(' | ');
+      const tx = db.transaction(() => {
+        db.prepare('UPDATE expense_invoices SET amount=?, property_id=?, ai_notes=? WHERE id=?')
+          .run(parts[0].amount, parts[0].property_id, note(0), inv.id);
+        const ins = db.prepare(`INSERT INTO expense_invoices
+            (filename, filepath, status, supplier_name, supplier_iban, supplier_bic, amount, currency, reason,
+             property_id, expense_category, месец, paid, paid_date, ai_notes)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+        const ids = [inv.id];
+        for (let i = 1; i < parts.length; i++) {
+          const r = ins.run(inv.filename, inv.filepath, inv.status, inv.supplier_name, inv.supplier_iban, inv.supplier_bic,
+            parts[i].amount, inv.currency, inv.reason, parts[i].property_id, inv.expense_category, inv['месец'],
+            inv.paid, inv.paid_date, note(i));
+          ids.push(r.lastInsertRowid);
+        }
+        return ids;
+      });
+      res.json({ ok: true, ids: tx() });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
   // POST /extract-ai  { ids: [1,2,3] }
   expRouter.post('/extract-ai', async (req, res) => {
     const { ids } = req.body || {};
