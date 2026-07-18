@@ -94,6 +94,32 @@ function InvoiceCard({ inv, properties, counterparties, API, onChange, onDelete,
   const [splitErr, setSplitErr]     = useState('')
   const splitSum = splitParts.reduce((s, p) => s + (Number(p.amount) || 0), 0)
 
+  // Артикули от фактурата
+  const [itemsOpen, setItemsOpen]     = useState(false)
+  const [items, setItems]             = useState(null) // null = не са заредени
+  const [itemsBusy, setItemsBusy]     = useState(false)
+  const [itemsErr, setItemsErr]       = useState('')
+
+  const loadItems = () => {
+    apiFetch(`${API}/api/expenses/${inv.id}/items`).then(r => r.json()).then(d => setItems(Array.isArray(d) ? d : []))
+  }
+  const toggleItems = () => {
+    const open = !itemsOpen
+    setItemsOpen(open)
+    if (open && items === null) loadItems()
+  }
+  const extractItems = () => {
+    setItemsBusy(true); setItemsErr('')
+    apiFetch(`${API}/api/expenses/${inv.id}/extract-items`, { method: 'POST' })
+      .then(r => r.json())
+      .then(d => {
+        setItemsBusy(false)
+        if (d.ok) setItems(d.items)
+        else setItemsErr(d.error || 'Грешка при извличането')
+      })
+      .catch(() => { setItemsBusy(false); setItemsErr('Няма връзка') })
+  }
+
   const doSplit = () => {
     setSplitting(true); setSplitErr('')
     apiFetch(`${API}/api/expenses/${inv.id}/split`, {
@@ -302,6 +328,11 @@ function InvoiceCard({ inv, properties, counterparties, API, onChange, onDelete,
         </label>
         {inv.xml_exported ? <span className="text-xs text-blue-500">📥 XML</span> : null}
         <div className="ml-auto flex gap-2">
+          <button onClick={toggleItems}
+            className="px-3 py-1.5 text-xs font-semibold bg-emerald-100 text-emerald-800 border border-emerald-300 rounded hover:bg-emerald-200"
+            title="Артикулите от фактурата — кодове, количества, цени">
+            📦 Артикули
+          </button>
           <button onClick={() => setSplitOpen(o => !o)}
             className="px-3 py-1.5 text-xs font-semibold bg-amber-100 text-amber-800 border border-amber-300 rounded hover:bg-amber-200"
             title="Раздели сумата между няколко имота">
@@ -313,6 +344,58 @@ function InvoiceCard({ inv, properties, counterparties, API, onChange, onDelete,
           </button>
         </div>
       </div>
+
+      {/* Items panel — артикулите от фактурата */}
+      {itemsOpen && (
+        <div className="mt-3 pt-3 border-t border-dashed border-emerald-300 text-xs">
+          {items === null ? (
+            <div className="text-gray-400">Зарежда…</div>
+          ) : items.length === 0 ? (
+            <div className="flex items-center gap-3">
+              <span className="text-gray-500">Няма извлечени артикули за тази фактура.</span>
+              <button onClick={extractItems} disabled={itemsBusy}
+                className="px-3 py-1.5 font-semibold bg-emerald-600 text-white rounded hover:bg-emerald-700 disabled:opacity-50">
+                {itemsBusy ? 'Чете фактурата…' : '🤖 Извлечи от документа (AI)'}
+              </button>
+            </div>
+          ) : (
+            <>
+              <div className="flex items-center mb-1.5">
+                <span className="font-bold text-emerald-800">📦 {items.length} артикула</span>
+                <button onClick={extractItems} disabled={itemsBusy}
+                  className="ml-auto px-2 py-1 border border-gray-300 rounded hover:bg-gray-50 text-gray-500">
+                  {itemsBusy ? '…' : '🔄 Извлечи наново'}
+                </button>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-gray-400 uppercase border-b border-gray-200">
+                      <th className="text-left py-1 pr-2">Код</th>
+                      <th className="text-left py-1 pr-2">Артикул</th>
+                      <th className="text-right py-1 pr-2">Кол.</th>
+                      <th className="text-right py-1 pr-2">Ед. цена</th>
+                      <th className="text-right py-1">Общо</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {items.map(it => (
+                      <tr key={it.id} className="border-b border-gray-100">
+                        <td className="py-1 pr-2 font-mono text-gray-400">{it.code || '—'}</td>
+                        <td className="py-1 pr-2 text-gray-800">{it.name}</td>
+                        <td className="py-1 pr-2 text-right text-gray-600">{it.qty ?? '—'} {it.unit || ''}</td>
+                        <td className="py-1 pr-2 text-right text-gray-600">{it.unit_price != null ? fmt(it.unit_price) : '—'}</td>
+                        <td className="py-1 text-right font-semibold text-gray-800">{it.total != null ? fmt(it.total) : '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+          {itemsErr && <div className="mt-1 text-red-600 font-medium">{itemsErr}</div>}
+        </div>
+      )}
 
       {/* Split panel — разделя разхода между няколко имота */}
       {splitOpen && (
@@ -954,6 +1037,18 @@ export default function Expenses({ API }) {
   const [clearResult, setClearResult] = useState(null)
   const [searchText, setSearchText] = useState('')
   const [searchAmount, setSearchAmount] = useState('')
+  // Търсене на артикул по всички фактури (напр. „латекс")
+  const [itemQuery, setItemQuery]       = useState('')
+  const [itemResults, setItemResults]   = useState(null)
+  const [itemSearching, setItemSearching] = useState(false)
+  const searchItems = () => {
+    if (itemQuery.trim().length < 2) { setItemResults(null); return }
+    setItemSearching(true)
+    apiFetch(`${API}/api/expenses/items/search?q=${encodeURIComponent(itemQuery.trim())}`)
+      .then(r => r.json())
+      .then(d => { setItemSearching(false); setItemResults(Array.isArray(d) ? d : []) })
+      .catch(() => { setItemSearching(false); setItemResults([]) })
+  }
   const [expandedId, setExpandedId] = useState(null)
   const fileRef = useRef()
 
@@ -1101,6 +1196,57 @@ export default function Expenses({ API }) {
       {/* ── ФАКТУРИ ── */}
       {subTab === 'invoices' && (
         <div>
+          {/* Търсене на артикул по всички фактури */}
+          <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 mb-4">
+            <div className="flex gap-2 items-center">
+              <input type="text" value={itemQuery}
+                onChange={e => setItemQuery(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && searchItems()}
+                placeholder='🔍 Търси артикул по всички фактури — напр. "латекс", "фаянс", код…'
+                className="flex-1 border border-emerald-300 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-emerald-400"/>
+              <button onClick={searchItems} disabled={itemSearching}
+                className="px-4 py-1.5 text-sm font-semibold bg-emerald-600 text-white rounded hover:bg-emerald-700 disabled:opacity-50">
+                {itemSearching ? '…' : 'Търси'}
+              </button>
+              {itemResults !== null && (
+                <button onClick={() => { setItemResults(null); setItemQuery('') }}
+                  className="px-2 py-1.5 text-sm text-gray-400 hover:text-gray-600">×</button>
+              )}
+            </div>
+            {itemResults !== null && (
+              <div className="mt-2 overflow-x-auto">
+                {itemResults.length === 0 ? (
+                  <div className="text-xs text-gray-500 py-1">Нищо не е намерено. Артикулите се извличат от бутона „📦 Артикули" на всяка фактура.</div>
+                ) : (
+                  <table className="w-full text-xs bg-white rounded border border-emerald-100">
+                    <thead>
+                      <tr className="text-gray-400 uppercase border-b border-gray-200">
+                        <th className="text-left px-2 py-1">Артикул</th>
+                        <th className="text-left px-2 py-1">Код</th>
+                        <th className="text-right px-2 py-1">Ед. цена</th>
+                        <th className="text-left px-2 py-1">Доставчик / фактура</th>
+                        <th className="text-left px-2 py-1">Месец</th>
+                        <th className="text-left px-2 py-1">Имот</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {itemResults.map(r => (
+                        <tr key={r.id} className="border-b border-gray-50">
+                          <td className="px-2 py-1 text-gray-800 font-medium">{r.name}</td>
+                          <td className="px-2 py-1 font-mono text-gray-400">{r.code || '—'}</td>
+                          <td className="px-2 py-1 text-right font-semibold">{r.unit_price != null ? `${fmt(r.unit_price)} ${r.currency === 'BGN' ? 'лв' : '€'}` : '—'}</td>
+                          <td className="px-2 py-1 text-gray-600">{r.supplier_name}{r.invoice_number ? ` №${r.invoice_number}` : ''}</td>
+                          <td className="px-2 py-1 text-gray-500">{r['месец']}</td>
+                          <td className="px-2 py-1 text-gray-600">{r['адрес'] || '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            )}
+          </div>
+
           {/* Toolbar */}
           <div className="flex gap-2 flex-wrap items-center mb-4">
             <input type="month" value={filterMonth} onChange={e => setFilterMonth(e.target.value)}

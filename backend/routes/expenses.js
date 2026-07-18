@@ -502,6 +502,81 @@ module.exports = function(db) {
     }
   });
 
+  // GET /items/search?q=латекс — търсене на артикул по всички фактури
+  // (име или код), с фактурата, месеца и имота към всеки резултат.
+  expRouter.get('/items/search', (req, res) => {
+    try {
+      const q = String(req.query.q || '').trim();
+      if (q.length < 2) return res.json([]);
+      const rows = db.prepare(`
+        SELECT it.*, ei.supplier_name, ei.invoice_number, ei.invoice_date, ei.месец,
+               ei.currency, ei.property_id, p.адрес
+        FROM expense_invoice_items it
+        JOIN expense_invoices ei ON ei.id = it.invoice_id
+        LEFT JOIN properties p ON p.id = ei.property_id
+        WHERE it.name LIKE ? OR it.code LIKE ?
+        ORDER BY ei.месец DESC, it.id
+        LIMIT 100
+      `).all(`%${q}%`, `%${q}%`);
+      res.json(rows);
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  // GET /:id/items — артикулите на фактура
+  expRouter.get('/:id/items', (req, res) => {
+    try {
+      res.json(db.prepare('SELECT * FROM expense_invoice_items WHERE invoice_id=? ORDER BY id').all(req.params.id));
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  // POST /:id/extract-items — AI извличане на редовете (артикули) от фактурата
+  expRouter.post('/:id/extract-items', async (req, res) => {
+    try {
+      const inv = db.prepare('SELECT * FROM expense_invoices WHERE id=?').get(req.params.id);
+      if (!inv) return res.status(404).json({ error: 'Разходът не е намерен' });
+      const fp = inv.filepath;
+      if (!fp || !fs.existsSync(fp)) return res.status(400).json({ error: 'Файлът на фактурата липсва' });
+      const apiKey = process.env.ANTHROPIC_API_KEY;
+      if (!apiKey) return res.status(500).json({ error: 'ANTHROPIC_API_KEY не е конфигуриран' });
+
+      const Anthropic = require('@anthropic-ai/sdk');
+      const client = new Anthropic.default({ apiKey });
+      const base64 = fs.readFileSync(fp).toString('base64');
+      const isPdf = fp.toLowerCase().endsWith('.pdf');
+      const media = isPdf ? 'application/pdf' : fp.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg';
+
+      const response = await client.messages.create({
+        model: process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-6',
+        max_tokens: 8000,
+        messages: [{
+          role: 'user',
+          content: [
+            { type: isPdf ? 'document' : 'image', source: { type: 'base64', media_type: media, data: base64 } },
+            { type: 'text', text: `Това е българска фактура/касов бон за материали. Извлечи ВСИЧКИ редове (артикули) от нея. Върни САМО JSON масив, без markdown:
+[{ "code": "артикулен номер/код или празен низ", "name": "точното наименование на артикула както е изписано", "qty": число, "unit": "бр/м2/л/кг...", "unit_price": число, "total": число }]
+ПРАВИЛА:
+- Преписвай наименованията ТОЧНО както са на документа (не превеждай, не съкращавай)
+- Числата с точка за десетичен знак, без валутни знаци
+- При дуални лв/€ суми ползвай ЕДНА валута консистентно (предпочети тази на общата сума)
+- Не пропускай редове — и отстъпките, ако са отделен ред (с отрицателна сума)` },
+          ],
+        }],
+      });
+      const raw = response.content.map(c => c.text || '').join('').trim();
+      const s = raw.indexOf('['), e = raw.lastIndexOf(']');
+      if (s === -1 || e === -1) return res.status(422).json({ error: 'AI не върна списък — опитай пак' });
+      const items = JSON.parse(raw.slice(s, e + 1)).filter(i => i && i.name);
+
+      const tx = db.transaction(() => {
+        db.prepare('DELETE FROM expense_invoice_items WHERE invoice_id=?').run(inv.id);
+        const ins = db.prepare('INSERT INTO expense_invoice_items (invoice_id, code, name, qty, unit, unit_price, total) VALUES (?,?,?,?,?,?,?)');
+        for (const i of items) ins.run(inv.id, i.code || null, String(i.name).slice(0, 200), Number(i.qty) || null, i.unit || null, Number(i.unit_price) || null, Number(i.total) || null);
+      });
+      tx();
+      res.json({ ok: true, count: items.length, items: db.prepare('SELECT * FROM expense_invoice_items WHERE invoice_id=? ORDER BY id').all(inv.id) });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
   // POST /:id/split — разделя разход между няколко имота (напр. една фактура
   // за материали за два апартамента). body: { parts: [{ property_id, amount }] }.
   // Сборът на частите трябва да е равен на сумата на оригинала. Първата част
