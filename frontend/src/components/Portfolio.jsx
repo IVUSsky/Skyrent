@@ -255,7 +255,7 @@ export default function Portfolio({ API, role }) {
     ...(broker ? [] : [{ label: 'Покупна+Ремонт (EUR €)', key: 'cost' }, { label: 'Пазарна стойност (EUR €)', key: 'market_val' }]),
     { label: '', key: null },
   ]
-  const sortVal = (p, k) => k === 'cost' ? (p['покупна'] || 0) + (p['ремонт'] || 0) : p[k]
+  const sortVal = (p, k) => k === 'cost' ? (p['покупна'] || 0) + (p['ремонт'] || 0) + (p['ремонт_фактури'] || 0) : p[k]
   const sortedProps = [...properties].sort((a, b) => {
     const k = sort.key; if (!k) return 0
     let va = sortVal(a, k), vb = sortVal(b, k)
@@ -380,7 +380,7 @@ export default function Portfolio({ API, role }) {
             </thead>
             <tbody className="divide-y divide-gray-100">
               {sortedProps.map((p, i) => {
-                const cost = (p['покупна'] || 0) + (p['ремонт'] || 0)
+                const cost = (p['покупна'] || 0) + (p['ремонт'] || 0) + (p['ремонт_фактури'] || 0)
                 return (
                   <tr key={p.id} onClick={() => openPhotos(p)} className={`cursor-pointer ${i % 2 === 0 ? 'bg-white hover:bg-blue-50' : 'bg-gray-50 hover:bg-blue-50'}`}>
                     <td className="px-3 py-2 text-gray-400 font-mono text-xs">{p.id}</td>
@@ -395,7 +395,12 @@ export default function Portfolio({ API, role }) {
                     <td className="px-3 py-2 text-right font-semibold text-gray-800">{p['наем'] ? fmt(p['наем']) : '—'}</td>
                     <td className="px-3 py-2 text-right text-gray-600">{p['площ']}</td>
                     <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{p['тип']}</td>
-                    {!broker && <td className="px-3 py-2 text-right text-gray-600">{cost > 0 ? fmt(cost) : '—'}</td>}
+                    {!broker && (
+                      <td className="px-3 py-2 text-right text-gray-600"
+                        title={p['ремонт_фактури'] > 0 ? `покупна ${fmt(p['покупна'] || 0)} + ремонт ${fmt(p['ремонт'] || 0)} + фактури ремонт ${fmt(p['ремонт_фактури'])}` : undefined}>
+                        {cost > 0 ? fmt(cost) : '—'}{p['ремонт_фактури'] > 0 ? ' 🧾' : ''}
+                      </td>
+                    )}
                     {!broker && <td className="px-3 py-2 text-right text-gray-600">{p.market_val ? fmt(p.market_val) : '—'}</td>}
                     <td className="px-3 py-2" onClick={e => e.stopPropagation()}>
                       <div className="flex gap-1">

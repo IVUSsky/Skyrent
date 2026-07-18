@@ -115,7 +115,7 @@ export default function Analysis({ API }) {
   const cocTable = properties
     .filter(p => (p['покупна'] || 0) > 0 && (p['наем'] || 0) > 0)
     .map(p => {
-      const totalCost = (p['покупна'] || 0) + (p['ремонт'] || 0)
+      const totalCost = (p['покупна'] || 0) + (p['ремонт'] || 0) + (p['ремонт_фактури'] || 0)
       const loanShare = propLoanMap[p.id] || { вноска: 0, остатък: 0 }
       const cashInvested = Math.max(1, totalCost - loanShare.остатък)
       const annualRent = (p['наем'] || 0) * 12
@@ -146,7 +146,7 @@ export default function Analysis({ API }) {
     .map(p => {
       const cost = p.market_val && p.market_val > 0
         ? p.market_val
-        : (p['покупна'] || 0) + (p['ремонт'] || 0)
+        : (p['покупна'] || 0) + (p['ремонт'] || 0) + (p['ремонт_фактури'] || 0)
       const annualRent = (p['наем'] || 0) * 12
       const yield_ = cost > 0 ? annualRent / cost : null
       return { ...p, cost, annualRent, yield_ }

@@ -1,4 +1,5 @@
 const express = require('express');
+const { renovationByProperty, renoTotal } = require('../lib/renovationCosts');
 
 const BGN_RATE = 1.95583;
 const toEur = (amount, currency) => {
@@ -210,13 +211,14 @@ module.exports = function(db) {
         }
       }
 
+      const renoMap = renovationByProperty(db);
       const propRows = properties.map(p => {
         const rentMonthly = p['наем'] || 0;
         const rentAnnual = rentMonthly * 12;
         const assetVal = (p.market_val != null && p.market_val > 0)
           ? p.market_val
-          : (p['покупна'] || 0) + (p['ремонт'] || 0);
-        const costBasis = (p['покупна'] || 0) + (p['ремонт'] || 0);
+          : (p['покупна'] || 0) + renoTotal(p, renoMap);
+        const costBasis = (p['покупна'] || 0) + renoTotal(p, renoMap);
         const stage = p.lifecycle_stage || (p['статус'] === '✅' ? 'active' : 'inactive');
         return {
           id: p.id,
