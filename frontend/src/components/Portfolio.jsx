@@ -396,9 +396,17 @@ export default function Portfolio({ API, role }) {
                     <td className="px-3 py-2 text-right text-gray-600">{p['площ']}</td>
                     <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{p['тип']}</td>
                     {!broker && (
-                      <td className="px-3 py-2 text-right text-gray-600"
-                        title={p['ремонт_фактури'] > 0 ? `покупна ${fmt(p['покупна'] || 0)} + ремонт ${fmt(p['ремонт'] || 0)} + фактури ремонт ${fmt(p['ремонт_фактури'])}` : undefined}>
-                        {cost > 0 ? fmt(cost) : '—'}{p['ремонт_фактури'] > 0 ? ' 🧾' : ''}
+                      <td className="px-3 py-2 text-right text-gray-600 whitespace-nowrap">
+                        {cost > 0 ? (
+                          <>
+                            <div className="font-medium text-gray-800">{fmt(cost)}{p['ремонт_фактури'] > 0 ? ' 🧾' : ''}</div>
+                            {((p['ремонт'] || 0) + (p['ремонт_фактури'] || 0)) > 0 && (
+                              <div className="text-[11px] text-gray-400">
+                                покупна {fmt(p['покупна'] || 0)} · ремонт {fmt((p['ремонт'] || 0) + (p['ремонт_фактури'] || 0))}
+                              </div>
+                            )}
+                          </>
+                        ) : '—'}
                       </td>
                     )}
                     {!broker && <td className="px-3 py-2 text-right text-gray-600">{p.market_val ? fmt(p.market_val) : '—'}</td>}
