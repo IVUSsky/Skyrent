@@ -105,6 +105,14 @@ function runTenantMigrations(db) {
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     handled INTEGER DEFAULT 0
   )`); console.log('listing_inquiries table ready'); } catch(_) {}
+  // Артикули (редове) от разходни фактури — за търсене „същия латекс" по-късно
+  try { db.exec(`CREATE TABLE IF NOT EXISTS expense_invoice_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    invoice_id INTEGER NOT NULL REFERENCES expense_invoices(id) ON DELETE CASCADE,
+    code TEXT, name TEXT NOT NULL,
+    qty REAL, unit TEXT, unit_price REAL, total REAL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`); console.log('expense_invoice_items table ready'); } catch(_) {}
   console.log('integrity tables ready');
 
   // Default lifecycle_stage from emoji status (idempotent — only if NULL).
