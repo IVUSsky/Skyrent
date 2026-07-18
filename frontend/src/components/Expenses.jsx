@@ -87,6 +87,27 @@ function InvoiceCard({ inv, properties, counterparties, API, onChange, onDelete,
     paid:          !!inv.paid,
   })
   const [saving, setSaving] = useState(false)
+  // Разделяне между имоти
+  const [splitOpen, setSplitOpen]   = useState(false)
+  const [splitParts, setSplitParts] = useState([{ property_id: '', amount: '' }, { property_id: '', amount: '' }])
+  const [splitting, setSplitting]   = useState(false)
+  const [splitErr, setSplitErr]     = useState('')
+  const splitSum = splitParts.reduce((s, p) => s + (Number(p.amount) || 0), 0)
+
+  const doSplit = () => {
+    setSplitting(true); setSplitErr('')
+    apiFetch(`${API}/api/expenses/${inv.id}/split`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ parts: splitParts.map(p => ({ property_id: Number(p.property_id) || null, amount: Number(p.amount) })) }),
+    }).then(r => r.json())
+      .then(d => {
+        setSplitting(false)
+        if (d.ok) { setSplitOpen(false); onChange() }
+        else setSplitErr(d.error || 'Грешка при разделянето')
+      })
+      .catch(() => { setSplitting(false); setSplitErr('Няма връзка') })
+  }
 
   // Re-sync form when AI extraction completes (inv updates from parent)
   useEffect(() => {
@@ -280,13 +301,62 @@ function InvoiceCard({ inv, properties, counterparties, API, onChange, onDelete,
           </span>
         </label>
         {inv.xml_exported ? <span className="text-xs text-blue-500">📥 XML</span> : null}
-        <div className="ml-auto">
+        <div className="ml-auto flex gap-2">
+          <button onClick={() => setSplitOpen(o => !o)}
+            className="px-3 py-1.5 text-xs font-semibold bg-amber-100 text-amber-800 border border-amber-300 rounded hover:bg-amber-200"
+            title="Раздели сумата между няколко имота">
+            ✂️ Раздели
+          </button>
           <button onClick={save} disabled={saving}
             className="px-3 py-1.5 text-xs font-semibold bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50">
             {saving ? 'Запазва...' : 'Запази'}
           </button>
         </div>
       </div>
+
+      {/* Split panel — разделя разхода между няколко имота */}
+      {splitOpen && (
+        <div className="mt-3 pt-3 border-t border-dashed border-amber-300 text-xs">
+          <div className="font-bold text-amber-800 mb-2">
+            ✂️ Разделяне на {fmt(Number(form.amount) || inv.amount)} {form.currency} между имоти
+          </div>
+          {splitParts.map((p, i) => (
+            <div key={i} className="flex gap-2 mb-1.5 items-center">
+              <select value={p.property_id}
+                onChange={e => setSplitParts(ps => ps.map((x, j) => j === i ? { ...x, property_id: e.target.value } : x))}
+                className="flex-1 border border-gray-300 rounded px-2 py-1.5 focus:outline-none">
+                <option value="">— избери имот —</option>
+                {properties.map(pr => <option key={pr.id} value={pr.id}>#{pr.id} {pr['адрес']}</option>)}
+              </select>
+              <input type="number" step="0.01" min="0" value={p.amount} placeholder="сума"
+                onChange={e => setSplitParts(ps => ps.map((x, j) => j === i ? { ...x, amount: e.target.value } : x))}
+                className="w-28 border border-gray-300 rounded px-2 py-1.5 text-right focus:outline-none"/>
+              {splitParts.length > 2 && (
+                <button onClick={() => setSplitParts(ps => ps.filter((_, j) => j !== i))}
+                  className="text-red-400 hover:text-red-600 font-bold px-1">×</button>
+              )}
+            </div>
+          ))}
+          <div className="flex items-center gap-2 mt-2 flex-wrap">
+            <button onClick={() => setSplitParts(ps => [...ps, { property_id: '', amount: '' }])}
+              className="px-2 py-1 border border-gray-300 rounded hover:bg-gray-50">+ част</button>
+            <button onClick={() => {
+              const total = Number(form.amount) || Number(inv.amount) || 0
+              const n = splitParts.length
+              const each = Math.floor(total / n * 100) / 100
+              setSplitParts(ps => ps.map((x, j) => ({ ...x, amount: (j === 0 ? Math.round((total - each * (n - 1)) * 100) / 100 : each).toFixed(2) })))
+            }} className="px-2 py-1 border border-gray-300 rounded hover:bg-gray-50">÷ по равно</button>
+            <span className={`ml-auto font-semibold ${Math.abs(splitSum - (Number(form.amount) || inv.amount)) < 0.011 ? 'text-green-700' : 'text-red-600'}`}>
+              разпределени: {fmt(splitSum)} / {fmt(Number(form.amount) || inv.amount)}
+            </span>
+            <button onClick={doSplit} disabled={splitting || Math.abs(splitSum - (Number(form.amount) || inv.amount)) > 0.011 || splitParts.some(p => !p.property_id)}
+              className="px-3 py-1.5 font-semibold bg-amber-600 text-white rounded hover:bg-amber-700 disabled:opacity-40">
+              {splitting ? 'Разделя...' : 'Раздели разхода'}
+            </button>
+          </div>
+          {splitErr && <div className="mt-1 text-red-600 font-medium">{splitErr}</div>}
+        </div>
+      )}
     </div>
   )
 }
