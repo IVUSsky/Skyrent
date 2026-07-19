@@ -311,7 +311,7 @@ export default function LandingPage({ onEnter }) {
             </tbody>
           </table>
           <p style={{ textAlign: 'center', fontSize: 12, color: '#a6a299', marginTop: 14 }}>
-            Безплатният план е завинаги — до 5 имота, без карта. Платените отключват автоматизацията (плащания, портал, банков импорт).
+            Безплатният план е завинаги — до 5 имота, без банкова карта. Платените отключват автоматизацията (плащания, портал, банков импорт).
           </p>
         </div>
       </section>
@@ -320,7 +320,7 @@ export default function LandingPage({ onEnter }) {
       <section className="lp-final">
         <h2 className="lp-h1 sm">Дай на бизнеса си<br /><em>да работи сам.</em></h2>
         <button className="lp-brass big" onClick={onEnter}>Започни безплатно →</button>
-        <div className="lp-final-note">Без карта за Basic. Минути до първата фактура.</div>
+        <div className="lp-final-note">Без банкова карта за Basic. Минути до първата фактура.</div>
       </section>
 
       <footer className="lp-foot">
