@@ -106,7 +106,7 @@ export default function Blog() {
           </table>
         </div>
 
-        <P><B>Съотношение ползи/разход: близо 10:1.</B> А до 5 имота Skyrent е изцяло безплатен — без карта, без срок.</P>
+        <P><B>Съотношение ползи/разход: близо 10:1.</B> А до 5 имота Skyrent е изцяло безплатен — без банкова карта, без срок.</P>
 
         <H2>Какво печели всеки</H2>
 
@@ -125,7 +125,7 @@ export default function Blog() {
         {/* CTA */}
         <div style={{ marginTop: 44, padding: '28px 26px', borderRadius: 16, border: `1px solid rgba(224,189,110,.35)`, background: 'rgba(224,189,110,.06)', textAlign: 'center' }}>
           <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 24, marginBottom: 10 }}>Пробвайте със собствените си имоти</div>
-          <div style={{ color: MUTED, marginBottom: 18 }}>Безплатно до 5 имота — завинаги, без карта.</div>
+          <div style={{ color: MUTED, marginBottom: 18 }}>Безплатно до 5 имота — завинаги, без банкова карта.</div>
           <a href="/" style={{ display: 'inline-block', color: INK, background: `linear-gradient(135deg, ${BRASS}, ${BRASS2})`, padding: '13px 30px', borderRadius: 999, fontWeight: 800, textDecoration: 'none' }}>
             Създай акаунт → app.skycapital.pro
           </a>

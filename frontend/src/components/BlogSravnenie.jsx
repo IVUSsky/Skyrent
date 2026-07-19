@@ -101,7 +101,7 @@ export default function BlogSravnenie() {
 
         <div style={{ marginTop: 40, padding: '28px 26px', borderRadius: 16, border: `1px solid rgba(224,189,110,.35)`, background: 'rgba(224,189,110,.06)', textAlign: 'center' }}>
           <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 24, marginBottom: 10 }}>Сравнете със собствените си имоти</div>
-          <div style={{ color: MUTED, marginBottom: 18 }}>Skyrent е безплатен до 5 имота — завинаги, без карта. Пробата не струва нищо.</div>
+          <div style={{ color: MUTED, marginBottom: 18 }}>Skyrent е безплатен до 5 имота — завинаги, без банкова карта. Пробата не струва нищо.</div>
           <a href="/" style={{ display: 'inline-block', color: INK, background: `linear-gradient(135deg, ${BRASS}, ${BRASS2})`, padding: '13px 30px', borderRadius: 999, fontWeight: 800, textDecoration: 'none' }}>
             Създай безплатен акаунт
           </a>
