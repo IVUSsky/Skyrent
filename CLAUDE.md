@@ -56,6 +56,31 @@ Migrations live in **`backend/db/migrations.js`**: `runControlMigrations(db)` (c
 - **All tab views are `React.lazy(() => import(...))`.** There is an `ErrorBoundary` (`src/components/ErrorBoundary.jsx`) wrapping the Suspense boundaries: on a chunk-load failure (stale `index.html` after a deploy) it auto-reloads once via a `sessionStorage` guard. The PWA service worker (`public/sw.js`) is network-first for HTML, cache-first for hashed assets; bump `CACHE_NAME` when changing caching behavior.
 - Tenant users (`role === 'tenant'`) render `TenantApp.jsx` instead of the admin shell (see `App.jsx`); superadmins additionally get the 🛸 Платформа tab.
 
+### Contracts & documents (routes/contracts.js + contractScans.js)
+
+- **Templates** (`contract_templates`, per-org): plain text with `{{ПЛЕЙСХОЛДЪРИ}}` — the full placeholder map is `buildFields()` in `routes/contracts.js` (~60 keys: НАЕМАТЕЛ_*, НАЕМОДАТЕЛ_* incl. `*_EN` latinized variants, ИМОТ_*, НАЕМ/ДЕПОЗИТ + `_ДУМИ`, СРОК_BG/EN, АБОНАТ_*, БРОЙ_КЛЮЧОВЕ_*). API: GET/POST `/templates`, PUT `/templates/:id` (multipart FormData, field `content`).
+- **PDF renderer** (`generateContractPDF` → `renderLine`): `#`/`##`/`###` headings, `**whole-line bold**`, `---`, lines starting `Чл.`/`Art.` auto-bold, and **`BG ||| EN` → two parallel columns** (bilingual contracts). The "Приемо-предавателен протокол" template (id 3) is looked up **by exact name** and auto-generated alongside every contract.
+- **EN side of bilingual contracts**: `issuer.name_en/mol_en/address_en` (settings) take precedence; otherwise official BG transliteration via `translit()`. Never let Cyrillic reach the EN column.
+- **Contract creation** auto-upserts the tenant into `tenant_directory` (указател, API `/api/contracts/parties`), as does ID-card scanning (`/extract-id` — prompt requires verbatim transcription, NO transliteration of foreign documents). Data is saved even if the contract draft is abandoned.
+- **Activation** (`POST /:id/activate`): updates the property, provisions the tenant portal user, and takes `issue_invoice: bool` in the body — `true` sets `invoice_enabled=1` on the property and issues the first invoice (overrides the `auto_invoice_on_activate` setting).
+- **Pro-rata first month** (in `generateRentInvoice`, routes/invoices.js): if the active contract starts after the 1st, the invoice = `наем × 12 ÷ 365 × days-to-month-end` with the formula in notes.
+- **Archive of existing contracts** (`routes/contractScans.js`): PDF/docx/images → Claude extracts fields (line-based prompt) → `/apply` creates the contract + updates property + upserts tenant_directory.
+- Invoices auto-send to Controlisy (accounting) when `kontrolisi_auto` setting is on; PUT `/api/settings` is a per-key upsert so partial updates are safe.
+
+### Expenses domain (routes/expenses.js)
+
+- **AI invoice parser** (`/extract-ai`): XML first (e-invoice.bg), Claude fallback for PDF/images. **Dual-currency guard**: 2026+ Bulgarian invoices print both лв and €; if `no_vat + vat ≠ total` but matches via ×/÷1.95583, the amount is normalized and flagged in `ai_notes`. Keep this invariant when touching the parser.
+- **Split across properties** (`POST /:id/split` `{parts:[{property_id, amount}]}`): first part updates the original row, the rest become copies; sum must equal the original (±0.01).
+- **Line items** (`expense_invoice_items`): `POST /:id/extract-items` (Claude reads the invoice document → verbatim product rows with codes/prices), `GET /items/search?q=латекс` (global search with property attribution). Route order matters: `/items/search` is defined before `/:id/...`.
+- **Renovation rollup** (`lib/renovationCosts.js`): SUM of `expense_category='ремонт'` invoices per property (BGN→EUR by 1.95583) is returned as `ремонт_фактури` on GET `/api/properties` and added to the manual `ремонт` column in ALL investment math (Portfolio cost, Analysis, metrics.js, metricsPortfolio.js, wealthSnapshot.js) via `renoTotal(p, map)`. The manual `ремонт` column itself is never mutated (would double-count on edit round-trips). `'ремонт д'` (personal) is excluded.
+
+### Public site & marketing
+
+- **Public pages** (checked by `pubPath` in App.jsx BEFORE auth): `/blog`, `/blog/sravnenie-softuer-naemi`, `/programa-za-upravlenie-na-imoti`, `/remonti`, `/dogovor-naem`, `/kalkulator-naem`, `/imoti`, `/usloviya`, `/poveritelnost`. Shared sticky nav: `PublicNav.jsx`. **`/?site=1` shows the landing even when authenticated** (the app-header logo links there). Brand: ink `#15151e`, brass `#c9a24b`/`#e0bd6e`, Playfair Display + Manrope; `SkyLogo` is exported from `LandingPage.jsx`.
+- **New public page checklist**: route in App.jsx (lazy) → add to the dynamic sitemap (`backend/routes/public.js`) → link in footers → mention in `frontend/public/llms.txt` → Request Indexing (GSC + Bing).
+- **SEO/GEO layer**: llms.txt + robots.txt (AI crawlers explicitly allowed) + JSON-LD `@graph` in `index.html`. Wording rule: "без банкова карта" (never "без карта").
+- **Screenshots/video assets**: demo org 3 (`Демо Имоти ЕООД`, user `demo`) holds seeded fake data — NEVER screenshot org 1 (real tenant PII) for public materials. Blog screenshots live in `frontend/public/blog/`; finished videos + end-cards in `Skyrent/marketing/` (not a build artifact — keep). Generation scripts (puppeteer/sharp/HeyGen/ElevenLabs pipeline) are in `%TEMP%\skyrent-logo\`.
+
 ### Key data-model notes
 
 - `settings` is a key-value store (`key`, `value`); JSON blobs under keys like `smtp`, `issuer`, `account_scope_map`.
@@ -70,4 +95,4 @@ Two services from `IVUSsky/Skyrent`: **backend** (Root = `backend`, `Dockerfile`
 
 Backend env: `DB_PATH=/data/portfolio.db` (DATA_DIR is its dirname → control.db + orgs/ live there), `JWT_SECRET`, `RESEND_API_KEY`, `RESEND_FROM_EMAIL`, `STRIPE_SECRET_KEY`, optional `SIGNUP_CODE`, `FRONTEND_URL`. Frontend env: `VITE_API_URL` (also in `.env.production`).
 
-`browser confirm()/alert()` are **blocked** on Railway HTTPS — use inline React state confirm patterns (`confirmState ? <Да/Не> : <trigger>`).
+`browser confirm()/alert()` can be **blocked in PWA standalone mode** — regular browser tabs work (Contracts.jsx uses `window.confirm` successfully). For anything that must work installed-as-app, prefer inline React state confirm patterns (`confirmState ? <Да/Не> : <trigger>`).
