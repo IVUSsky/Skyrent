@@ -3,7 +3,7 @@
 // cache-first for static assets (CSS, JS, images, fonts).
 // API calls are always network — never cache /api/.
 
-const CACHE_NAME = 'skyrent-v2';
+const CACHE_NAME = 'skyrent-v3';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -37,6 +37,13 @@ self.addEventListener('fetch', (event) => {
 
   // Only handle same-origin GET requests
   if (event.request.method !== 'GET' || url.origin !== self.location.origin) {
+    return;
+  }
+
+  // Media / range requests: let the browser talk to the network directly.
+  // Caching 206 partial responses throws, and serving a full 200 to a range
+  // request breaks video seeking. Bypass the SW entirely.
+  if (event.request.headers.has('range') || /\.(mp4|webm|mov|m4v)$/i.test(url.pathname)) {
     return;
   }
 
