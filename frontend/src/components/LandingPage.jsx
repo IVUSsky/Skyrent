@@ -122,6 +122,17 @@ export default function LandingPage({ onEnter }) {
           <button className="lp-ghost lg" onClick={onEnter}>Вход</button>
         </div>
 
+        {/* Promo video */}
+        <div className="lp-video rise" style={{ '--d': '.34s' }}>
+          <video
+            src="/skyrent-promo.mp4"
+            poster="/skyrent-promo-poster.png"
+            controls
+            playsInline
+            preload="metadata"
+          />
+        </div>
+
         {/* Faux terminal */}
         <div className="lp-term rise" style={{ '--d': '.4s' }}>
           <div className="lp-term-bar"><span /><span /><span /><div className="lp-term-title">наеми · март</div></div>
@@ -384,6 +395,11 @@ const CSS = `
 .lp-h1.sm{font-size:clamp(32px,5vw,56px);margin-bottom:32px;}
 .lp-sub{max-width:620px;margin:0 auto 36px;font-size:clamp(15px,1.7vw,18px);color:var(--text);}
 .lp-cta-row{display:flex;gap:14px;justify-content:center;flex-wrap:wrap;}
+
+/* Promo video */
+.lp-video{max-width:720px;margin:52px auto 0;border:1px solid var(--line);border-radius:16px;
+  overflow:hidden;background:#000;box-shadow:0 40px 80px -30px rgba(0,0,0,.7);}
+.lp-video video{display:block;width:100%;aspect-ratio:16/9;object-fit:cover;}
 
 /* Terminal */
 .lp-term{max-width:560px;margin:64px auto 0;background:linear-gradient(180deg,var(--ink2),#191923);
