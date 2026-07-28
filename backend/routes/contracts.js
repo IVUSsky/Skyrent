@@ -1310,7 +1310,7 @@ module.exports = function(db) {
 
       // Update property
       if (contract.property_id) {
-        db.prepare(`UPDATE properties SET наемател=?, наем=?, телефон=?, email=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`)
+        db.prepare(`UPDATE properties SET наемател=?, наем=?, телефон=?, email=?, статус='✅', updated_at=CURRENT_TIMESTAMP WHERE id=?`)
           .run(contract.tenant_name, contract.monthly_rent, contract.tenant_phone || null, contract.tenant_email || null, contract.property_id);
 
         // Add to tenant_history
