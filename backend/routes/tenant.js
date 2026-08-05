@@ -477,7 +477,8 @@ module.exports = function(db) {
     const account = getOrCreateAccount(db, req.user.id, propId);
     // Плановете се предлагат само ако имотът има инсталиран рутер —
     // иначе наемателят би платил за услуга, която няма как да получи
-    const hasRouter = !!(propId && db.prepare('SELECT id FROM routers WHERE property_id=?').get(propId));
+    const routerRow = propId ? db.prepare('SELECT mode FROM routers WHERE property_id=?').get(propId) : null;
+    const hasRouter = !!routerRow;
     const plans = !hasRouter ? [] : db.prepare(`
       SELECT id, name, description, duration_days, price, speed_down_mbps, speed_up_mbps, currency
       FROM internet_plans WHERE active = 1
@@ -497,6 +498,7 @@ module.exports = function(db) {
         total_paid: account.total_paid,
       },
       has_router: hasRouter,
+      router_mode: routerRow ? routerRow.mode : null,
       plans,
       purchases,
     });
