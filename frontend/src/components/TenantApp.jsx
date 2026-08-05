@@ -873,31 +873,35 @@ function TenantInternet() {
           </div>
         )}
 
-        <div className="bg-slate-50 rounded p-3 mb-3 text-sm">
-          <div className="text-xs text-slate-500 mb-1">За свързване към Wi-Fi мрежата:</div>
-          <div className="flex justify-between">
-            <span className="text-slate-600">Потребител:</span>
-            <span className="font-mono font-semibold">{acc.username}</span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-slate-600">Парола:</span>
-            <span className="font-mono font-semibold">{acc.password}</span>
-          </div>
-        </div>
+        {data.router_mode !== 'flat' && (
+          <>
+            <div className="bg-slate-50 rounded p-3 mb-3 text-sm">
+              <div className="text-xs text-slate-500 mb-1">За свързване към Wi-Fi мрежата:</div>
+              <div className="flex justify-between">
+                <span className="text-slate-600">Потребител:</span>
+                <span className="font-mono font-semibold">{acc.username}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-600">Парола:</span>
+                <span className="font-mono font-semibold">{acc.password}</span>
+              </div>
+            </div>
 
-        <div className="text-xs text-slate-600">
-          <div className="font-medium mb-1">MAC адрес на устройството ви (опционално)</div>
-          <div className="text-slate-500 mb-2">Ако зададете MAC, ще се свързвате автоматично без парола.</div>
-          <div className="flex gap-2">
-            <input value={macInput} onChange={e => setMacInput(e.target.value.toUpperCase())}
-              placeholder="AA:BB:CC:DD:EE:FF" maxLength={17}
-              className="flex-1 border border-gray-300 rounded px-2 py-1.5 text-sm font-mono" />
-            <button onClick={saveMac} disabled={savingMac || macInput === (acc.mac_address || '')}
-              className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs px-3 py-1.5 rounded">
-              {savingMac ? '...' : 'Запази'}
-            </button>
-          </div>
-        </div>
+            <div className="text-xs text-slate-600">
+              <div className="font-medium mb-1">MAC адрес на устройството ви (опционално)</div>
+              <div className="text-slate-500 mb-2">Ако зададете MAC, ще се свързвате автоматично без парола.</div>
+              <div className="flex gap-2">
+                <input value={macInput} onChange={e => setMacInput(e.target.value.toUpperCase())}
+                  placeholder="AA:BB:CC:DD:EE:FF" maxLength={17}
+                  className="flex-1 border border-gray-300 rounded px-2 py-1.5 text-sm font-mono" />
+                <button onClick={saveMac} disabled={savingMac || macInput === (acc.mac_address || '')}
+                  className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs px-3 py-1.5 rounded">
+                  {savingMac ? '...' : 'Запази'}
+                </button>
+              </div>
+            </div>
+          </>
+        )}
       </Card>
 
       {/* Plans */}
