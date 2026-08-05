@@ -163,14 +163,15 @@ module.exports = function(db) {
       if (!b.property_id || !b.host) return res.status(400).json({ error: 'property_id и host са задължителни' });
       const pollToken = require('crypto').randomBytes(24).toString('hex');
       const r = db.prepare(`
-        INSERT INTO routers (property_id, name, model, host, api_port, api_user, api_pass, use_tls, notes, mode, lan_interface, poll_token, desired_access)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+        INSERT INTO routers (property_id, name, model, host, api_port, api_user, api_pass, use_tls, notes, mode, lan_interface, poll_token, desired_access, enforce_cutoff)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
       `).run(
         Number(b.property_id), b.name || '', b.model || 'MikroTik',
         b.host, Number(b.api_port) || 8728,
         b.api_user || 'admin', b.api_pass || '',
         b.use_tls ? 1 : 0, b.notes || '',
-        b.mode === 'flat' ? 'flat' : 'hotspot', b.lan_interface || 'bridge', pollToken
+        b.mode === 'flat' ? 'flat' : 'hotspot', b.lan_interface || 'bridge', pollToken,
+        b.enforce_cutoff === false ? 0 : 1
       );
       res.json({ ok: true, id: r.lastInsertRowid });
     } catch (err) {
@@ -188,7 +189,7 @@ module.exports = function(db) {
       const b = req.body;
       db.prepare(`
         UPDATE routers SET
-          name=?, model=?, host=?, api_port=?, api_user=?, api_pass=?, use_tls=?, notes=?, mode=?, lan_interface=?
+          name=?, model=?, host=?, api_port=?, api_user=?, api_pass=?, use_tls=?, notes=?, mode=?, lan_interface=?, enforce_cutoff=?
         WHERE id=?
       `).run(
         b.name !== undefined ? b.name : cur.name,
@@ -201,6 +202,7 @@ module.exports = function(db) {
         b.notes !== undefined ? b.notes : cur.notes,
         b.mode !== undefined ? (b.mode === 'flat' ? 'flat' : 'hotspot') : (cur.mode || 'hotspot'),
         b.lan_interface !== undefined ? (b.lan_interface || 'bridge') : (cur.lan_interface || 'bridge'),
+        b.enforce_cutoff !== undefined ? (b.enforce_cutoff ? 1 : 0) : cur.enforce_cutoff,
         req.params.id
       );
       res.json({ ok: true });

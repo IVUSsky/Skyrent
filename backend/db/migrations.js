@@ -593,6 +593,10 @@ function runTenantMigrations(db) {
   try { db.exec("ALTER TABLE routers ADD COLUMN desired_access INTEGER DEFAULT 1"); console.log('Migration: added routers.desired_access'); } catch(_) {}
   try { db.exec("ALTER TABLE routers ADD COLUMN poll_token TEXT"); console.log('Migration: added routers.poll_token'); } catch(_) {}
   try { db.exec("ALTER TABLE routers ADD COLUMN poll_seen_at DATETIME"); console.log('Migration: added routers.poll_seen_at'); } catch(_) {}
+  // enforce_cutoff=1 (default): при изтичане/неплащане cron-ът реже нета на рутера.
+  // enforce_cutoff=0: акаунтът пак се маркира 'expired' (за фактуриране/отчет),
+  // но router.disableUser НЕ се вика — интернетът остава пуснат независимо от плащане.
+  try { db.exec("ALTER TABLE routers ADD COLUMN enforce_cutoff INTEGER DEFAULT 1"); console.log('Migration: added routers.enforce_cutoff'); } catch(_) {}
 
   db.exec(`CREATE TABLE IF NOT EXISTS internet_plans (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

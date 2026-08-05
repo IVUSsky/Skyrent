@@ -41,12 +41,19 @@ async function reconcileInternetAccounts(db, opts = {}) {
         `).run(JSON.stringify({ ok: true, ts: now.toISOString() }), acc.id);
         stats.activated++;
       } else if (!isPaid && acc.status === 'active') {
-        // Expire
-        await router.disableUser(db, { username: acc.username, mac_address: acc.mac_address, property_id: acc.property_id });
+        // Expire — маркираме винаги (за фактуриране/отчет), но реалното спиране на
+        // рутера е опционално per router (enforce_cutoff=0 → нетът остава пуснат).
+        const r = acc.property_id
+          ? db.prepare('SELECT enforce_cutoff FROM routers WHERE property_id=?').get(acc.property_id)
+          : null;
+        const shouldCutoff = !r || r.enforce_cutoff !== 0;
+        if (shouldCutoff) {
+          await router.disableUser(db, { username: acc.username, mac_address: acc.mac_address, property_id: acc.property_id });
+        }
         db.prepare(`
           UPDATE internet_accounts SET status='expired', router_synced_at=datetime('now'),
             router_state=? WHERE id=?
-        `).run(JSON.stringify({ ok: true, ts: now.toISOString(), reason: 'expired' }), acc.id);
+        `).run(JSON.stringify({ ok: true, ts: now.toISOString(), reason: 'expired', cutoff: shouldCutoff }), acc.id);
         stats.expired++;
         // Notify the tenant
         notifyTenant(db, acc.user_id, {
