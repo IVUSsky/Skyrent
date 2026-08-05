@@ -300,7 +300,7 @@ function PlansTab({ API, showToast }) {
   )
 }
 
-const ROUTER_EMPTY = { property_id: '', name: '', model: 'MikroTik hAP ax²', host: '', api_port: 8728, api_user: 'admin', api_pass: '', use_tls: 0, notes: '', mode: 'hotspot', lan_interface: 'bridge' }
+const ROUTER_EMPTY = { property_id: '', name: '', model: 'MikroTik hAP ax²', host: '', api_port: 8728, api_user: 'admin', api_pass: '', use_tls: 0, notes: '', mode: 'hotspot', lan_interface: 'bridge', enforce_cutoff: 1 }
 
 function RoutersTab({ API, showToast }) {
   const [routers, setRouters] = useState([])
@@ -425,6 +425,14 @@ function RoutersTab({ API, showToast }) {
                 <input value={form.lan_interface || 'bridge'} onChange={e => setForm({ ...form, lan_interface: e.target.value })} placeholder="bridge" className="w-full border rounded px-3 py-1.5" />
               </div>
             )}
+            <div>
+              <label className="text-xs text-gray-500 font-medium">При неплащане</label>
+              <label className="flex items-center gap-2 mt-1">
+                <input type="checkbox" checked={form.enforce_cutoff === undefined ? true : !!form.enforce_cutoff} onChange={e => setForm({ ...form, enforce_cutoff: e.target.checked ? 1 : 0 })} className="w-4 h-4" />
+                Спирай интернета автоматично
+              </label>
+              {form.enforce_cutoff === 0 && <p className="text-xs text-amber-600 mt-1">⚠️ Изключено — нетът остава пуснат дори без плащане (само таксуване/отчет).</p>}
+            </div>
             <div className="md:col-span-3">
               <label className="text-xs text-gray-500 font-medium">Бележки</label>
               <input value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} className="w-full border rounded px-3 py-1.5" />
@@ -463,6 +471,11 @@ function RoutersTab({ API, showToast }) {
                         {r.desired_access === 0
                           ? <span className="inline-block text-xs px-2 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-200" title="Наемателят НЯМА интернет">🛑 Нет спрян</span>
                           : <span className="inline-block text-xs px-2 py-0.5 rounded-full bg-green-50 text-green-700 border border-green-200" title="Наемателят има интернет">✅ Нет пуснат</span>}
+                      </div>
+                    )}
+                    {r.enforce_cutoff === 0 && (
+                      <div className="mt-1">
+                        <span className="inline-block text-xs px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200" title="Cron-ът никога не спира този рутер при неплащане">♾️ Без cutoff</span>
                       </div>
                     )}
                   </td>
