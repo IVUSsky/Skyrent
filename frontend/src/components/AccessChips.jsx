@@ -18,14 +18,18 @@ export default function AccessChips() {
   const [token, setToken] = useState(localStorage.getItem('pm3_bridge_token') || '')
   const [tokenInput, setTokenInput] = useState('')
   const [health, setHealth] = useState(null) // null=checking, true/false
+  const [healthErr, setHealthErr] = useState(null)
   const [step, setStep] = useState('idle') // idle | reading | read-done | writing | done | error
   const [result, setResult] = useState(null)
   const [err, setErr] = useState(null)
   const [showRaw, setShowRaw] = useState(false)
 
   const checkHealth = () => {
-    setHealth(null)
-    fetch(`${BRIDGE_URL}/health`).then(r => r.json()).then(() => setHealth(true)).catch(() => setHealth(false))
+    setHealth(null); setHealthErr(null)
+    fetch(`${BRIDGE_URL}/health`)
+      .then(r => r.json())
+      .then(() => setHealth(true))
+      .catch(e => { setHealth(false); setHealthErr(`${e.name}: ${e.message}`) })
   }
   useEffect(checkHealth, [])
 
@@ -91,7 +95,12 @@ export default function AccessChips() {
                 Bridge статус:{' '}
                 {health === null && <span className="text-gray-400">проверка...</span>}
                 {health === true && <span className="text-green-600 font-medium">🟢 Свързан</span>}
-                {health === false && <span className="text-red-600 font-medium">🔴 Няма връзка — пусни <code>node server.js</code> в proxmark-bridge папката</span>}
+                {health === false && (
+                  <>
+                    <span className="text-red-600 font-medium">🔴 Няма връзка — пусни <code>node server.js</code> в proxmark-bridge папката</span>
+                    {healthErr && <div className="text-xs text-red-500 font-mono mt-1">{healthErr}</div>}
+                  </>
+                )}
               </div>
               <div className="flex gap-2">
                 <button onClick={checkHealth} className="text-xs px-2 py-1 bg-gray-50 hover:bg-gray-100 border rounded">↻ Провери</button>
