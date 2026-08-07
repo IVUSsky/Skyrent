@@ -22,12 +22,13 @@ export const ALL_TABS = [
   { id: 'investments', label: '📈 Инвестиции',   roles: ['admin'],         tier: 'advanced' },
   { id: 'personal',    label: '💰 Личен бюджет', roles: ['admin'],         tier: 'advanced' },
   { id: 'smart',       label: '⚡ Смарт',        roles: ['admin'],         tier: 'advanced' },
+  { id: 'access_chips', label: '🔑 Чипове',      roles: ['admin'],         tier: 'advanced' },
   { id: 'billing',     label: '💳 Абонамент',  roles: ['admin'],           tier: 'system' },
   { id: 'settings',    label: '⚙️ Настройки',  roles: ['admin'],           tier: 'system' },
 ]
 
 // Org-1-only табове: интеграции с лични env ключове (T212, Tuya, личен бюджет)
-export const ORG1_ONLY_TABS = new Set(['investments', 'smart', 'personal'])
+export const ORG1_ONLY_TABS = new Set(['investments', 'smart', 'personal', 'access_chips'])
 
 // Лесен режим показва само 'core' + 'system'. Разширен показва всичко.
 export const SIMPLE_TIERS = new Set(['core', 'system'])

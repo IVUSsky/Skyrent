@@ -32,6 +32,7 @@ const Contracts      = lazy(() => import('./components/Contracts'))
 const Settings       = lazy(() => import('./components/Settings'))
 const Expenses       = lazy(() => import('./components/Expenses'))
 const Smart          = lazy(() => import('./components/Smart'))
+const AccessChips    = lazy(() => import('./components/AccessChips'))
 const Investments    = lazy(() => import('./components/Investments'))
 const PersonalBudget = lazy(() => import('./components/PersonalBudget'))
 const Addons         = lazy(() => import('./components/Addons'))
@@ -424,6 +425,7 @@ export default function App() {
           {validTab === 'expenses'  && <Expenses API={API} />}
           {validTab === 'import'    && <Import API={API} />}
           {validTab === 'smart'        && <Smart API={API} />}
+          {validTab === 'access_chips' && <AccessChips />}
           {validTab === 'investments'  && <Investments API={API} />}
           {validTab === 'personal'     && <PersonalBudget />}
           {validTab === 'integrity'    && <Integrity API={API} />}
