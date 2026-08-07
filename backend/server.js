@@ -254,6 +254,7 @@ async function main() {
   app.use('/api/counterparties', cpRouter);
 
   app.use('/api/smart', require('./routes/smart')(db));
+  app.use('/api/access-chips', require('./routes/accessChips')(db));
   app.use('/api/inventory', require('./routes/inventory')(db));
   app.use('/api/investments', require('./routes/investments')(db));
   app.use('/api/investments/bulgar', require('./routes/bulgar')(db));
