@@ -425,7 +425,7 @@ export default function App() {
           {validTab === 'expenses'  && <Expenses API={API} />}
           {validTab === 'import'    && <Import API={API} />}
           {validTab === 'smart'        && <Smart API={API} />}
-          {validTab === 'access_chips' && <AccessChips />}
+          {validTab === 'access_chips' && <AccessChips API={API} />}
           {validTab === 'investments'  && <Investments API={API} />}
           {validTab === 'personal'     && <PersonalBudget />}
           {validTab === 'integrity'    && <Integrity API={API} />}

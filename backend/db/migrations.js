@@ -598,6 +598,22 @@ function runTenantMigrations(db) {
   // но router.disableUser НЕ се вика — интернетът остава пуснат независимо от плащане.
   try { db.exec("ALTER TABLE routers ADD COLUMN enforce_cutoff INTEGER DEFAULT 1"); console.log('Migration: added routers.enforce_cutoff'); } catch(_) {}
 
+  // Библиотека с прочетени/клонирани RFID/NFC чипове за вход (Proxmark3 workflow).
+  // property_id е опционален — много врати (входна врата на блок, общи части)
+  // не са отделен "имот" в Skyrent, затова label носи свободен текст за локацията.
+  db.exec(`CREATE TABLE IF NOT EXISTS access_chips (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    property_id INTEGER REFERENCES properties(id),
+    label TEXT NOT NULL,
+    chip_type TEXT DEFAULT 'MIFARE Classic 1K',
+    uid TEXT NOT NULL,
+    keys_json TEXT,
+    dump_b64 TEXT,
+    notes TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+  try { db.exec("CREATE INDEX IF NOT EXISTS idx_access_chips_property ON access_chips(property_id)"); } catch(_) {}
+
   db.exec(`CREATE TABLE IF NOT EXISTS internet_plans (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
