@@ -13,6 +13,10 @@ function fmtDate(d) {
   return new Date(d).toLocaleDateString('bg-BG')
 }
 
+const VIDEO_SURVEILLANCE_CLAUSE = `## Видеонаблюдение / Video Surveillance
+
+Наемателят е уведомен и се съгласява, че входът на имота е обект на видеонаблюдение с камера (Reolink), монтирана с цел сигурност и контрол на достъпа. Записите се съхраняват до 60 дни и се изтриват автоматично след този срок, освен при необходимост за разследване на инцидент. Наемателят има право на достъп до записите, отнасящи се до него, и право да поиска тяхното изтриване съгласно Регламент (ЕС) 2016/679 (GDPR). Наемодателят не споделя записите с трети страни извън случаите, предвидени по закон. ||| The Tenant is informed and agrees that the entrance of the property is subject to video surveillance by camera (Reolink), installed for security and access control purposes. Recordings are stored for up to 60 days and automatically deleted thereafter, except when needed for incident investigation. The Tenant has the right to access recordings concerning them and to request their deletion in accordance with Regulation (EU) 2016/679 (GDPR). The Landlord does not share recordings with third parties except as required by law.`
+
 const DEFAULT_TEMPLATE = `# ДОГОВОР ЗА НАЕМ НА НЕДВИЖИМ ИМОТ / RESIDENTIAL LEASE AGREEMENT
 ## № {{ДОГОВОР_НОМЕР}}
 
@@ -359,6 +363,7 @@ export default function Contracts({ API }) {
     property_address: '', property_description: '', property_area: '',
     monthly_rent: '', currency: 'EUR', deposit: '', payment_day: '5',
     start_date: '', end_date: '', delivery_date: '', conditions: '', notes: '',
+    video_surveillance_clause: false,
   })
   const [creating, setCreating] = useState(false)
   const [idFront, setIdFront] = useState(null)
@@ -553,9 +558,10 @@ export default function Contracts({ API }) {
     if (!newForm.template_id) { showToast('Изберете шаблон', 'error'); return }
     if (!newForm.tenant_name) { showToast('Въведете наемател', 'error'); return }
     setCreating(true)
+    const conditions = newForm.conditions + (newForm.video_surveillance_clause ? '\n\n' + VIDEO_SURVEILLANCE_CLAUSE : '')
     apiFetch(`${API}/api/contracts`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(newForm),
+      body: JSON.stringify({ ...newForm, conditions }),
     })
       .then(r => r.json())
       .then(d => {
@@ -1114,6 +1120,12 @@ export default function Contracts({ API }) {
                   <textarea value={newForm.conditions} onChange={e=>setNewForm(f=>({...f,conditions:e.target.value}))}
                     rows={2} placeholder="Допълнителни клаузи..."
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  <label className="flex items-center gap-2 mt-2 text-sm text-gray-700">
+                    <input type="checkbox" checked={newForm.video_surveillance_clause}
+                      onChange={e=>setNewForm(f=>({...f,video_surveillance_clause:e.target.checked}))}
+                      className="w-4 h-4" />
+                    📹 Клауза за видеонаблюдение (за имоти с камера — добавя GDPR текст в договора)
+                  </label>
                   <div className="mt-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
                     <div className="text-xs font-semibold text-gray-700 mb-2">⚡💧🔥🏢 Абонатни номера <span className="text-gray-400 font-normal">(попълват се автоматично от имота)</span></div>
                     <div className="grid grid-cols-2 gap-2">
