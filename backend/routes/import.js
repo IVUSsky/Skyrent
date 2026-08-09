@@ -153,11 +153,6 @@ module.exports = function(db) {
 
     let { категория, property_id, scope } = categorizeRow({ operation, контрагент, основание, property_id_from_map, defaultScope });
 
-    if (категория === 'наем' && !property_id_from_map && контрагент && !unknownSet.has(контрагент)) {
-      unknownSet.add(контрагент);
-      unknownTenants.push({ контрагент, основание });
-    }
-
     let rule_id = null, validated = 1;
     for (const rule of rules) {
       const pat = rule.pattern.replace(/\s+/g, ' ').trim().toLowerCase();
@@ -169,6 +164,16 @@ module.exports = function(db) {
         validated = 0;
         break;
       }
+    }
+
+    // "Неразпознати наематели" — само транзакции, за които НИТО tenantMap,
+    // НИТО tx_rules успяха да присвоят имот. По-рано тази проверка ставаше
+    // ПРЕДИ tx_rules цикъла и гледаше само property_id_from_map → показваше
+    // дори вече разпознати (чрез правило) наематели като "неразпознати",
+    // объркващо потребителя че auto-learn не работи, докато той реално работи.
+    if (категория === 'наем' && !property_id && контрагент && !unknownSet.has(контрагент)) {
+      unknownSet.add(контрагент);
+      unknownTenants.push({ контрагент, основание });
     }
 
     // Валутата идва от банковата колона (rawTx.currency) — по време на прехода
