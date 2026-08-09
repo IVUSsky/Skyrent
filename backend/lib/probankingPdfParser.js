@@ -224,8 +224,11 @@ function recordToTransaction(rec, accountCurrency) {
       основание = fullBody.replace(/\s+/g, ' ').trim();
     }
   } else if (iban) {
-    // Wire transfer with counterparty — first-line-rest is contractor name
-    контрагент = firstLineRest.trim();
+    // Wire transfer with counterparty — first-line-rest is contractor name.
+    // Нормализирано (не само trim) — PDF колонното разчупване понякога вкарва
+    // различен брой вътрешни интервали за едно и също име между извлечения,
+    // което чупеше auto-learn правилата (виж основание по-долу, вече нормализирано).
+    контрагент = firstLineRest.replace(/\s+/g, ' ').trim();
     // Основание: body lines които не са СМЕТКА/BIC/КУРС
     const reasonLines = body.filter(l => !SKIP_BODY_RE.test(l)).map(l => l.trim());
     // Често основанието е дублирано (BG + EN/same). Премахни дубликати.

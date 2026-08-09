@@ -137,8 +137,10 @@ module.exports = function(db) {
       контрагент = parsePosName(основание) || '';
     }
 
-    const kontLower = (контрагент || '').toLowerCase();
-    const osnLower  = (основание  || '').toLowerCase();
+    // Нормализирано (не само lowercase) — защитава и срещу стари, не-нормализирани
+    // редове в tx_rules отпреди фикса за вътрешни интервали (вижте PATCH /category).
+    const kontLower = (контрагент || '').replace(/\s+/g, ' ').trim().toLowerCase();
+    const osnLower  = (основание  || '').replace(/\s+/g, ' ').trim().toLowerCase();
 
     // Tenant map lookup
     let property_id_from_map = null;
@@ -158,7 +160,7 @@ module.exports = function(db) {
 
     let rule_id = null, validated = 1;
     for (const rule of rules) {
-      const pat = rule.pattern.toLowerCase();
+      const pat = rule.pattern.replace(/\s+/g, ' ').trim().toLowerCase();
       if (kontLower.includes(pat) || osnLower.includes(pat)) {
         категория = rule.категория;
         if (rule.property_id) property_id = rule.property_id;
@@ -233,10 +235,12 @@ module.exports = function(db) {
 
       const tx = enrichTransaction({
         дата,
-        контрагент:      String(row[10] || '').trim(),
+        // Нормализирани (не само trim) — виж бележката в probankingPdfParser.js:
+        // вариращи вътрешни интервали чупеха auto-learn съвпадението.
+        контрагент:      String(row[10] || '').replace(/\s+/g, ' ').trim(),
         контрагент_iban: String(row[11] || '').replace(/\s/g,'').toUpperCase(),
         контрагент_bic:  String(row[9]  || '').trim().toUpperCase(),
-        основание:       String(row[12] || '').trim(),
+        основание:       String(row[12] || '').replace(/\s+/g, ' ').trim(),
         сума,
         operation:       String(row[7]  || '').trim(),
       }, ctx);
@@ -713,13 +717,22 @@ module.exports = function(db) {
       }
 
       if (tx && tx.контрагент) {
-        const pattern = tx.контрагент.trim();
+        // Нормализирано (не само trim) — PDF/Excel извличането понякога дава
+        // различен брой вътрешни интервали за едно и също име между импорти,
+        // което правеше и записа, и съвпадението на правилата ненадеждни.
+        // Прилагаме същата нормализация тук, за да "конвергира" и стар,
+        // не-нормализиран pattern при следващо преучаване.
+        const pattern = tx.контрагент.replace(/\s+/g, ' ').trim();
+        const patLower = pattern.toLowerCase();
 
-        // Upsert rule (включително scope, за auto-apply при бъдещ импорт)
-        const existing = db.prepare('SELECT id FROM tx_rules WHERE LOWER(pattern)=LOWER(?)').get(pattern);
+        // Upsert rule (включително scope, за auto-apply при бъдещ импорт).
+        // Сравняваме в JS (не SQL LOWER()), за да improve-нем и стари редове с
+        // разминаващи се интервали — таблицата е малка, няма performance проблем.
+        const allRules = db.prepare('SELECT id, pattern FROM tx_rules').all();
+        const existing = allRules.find(r => r.pattern.replace(/\s+/g, ' ').trim().toLowerCase() === patLower);
         if (existing) {
-          db.prepare('UPDATE tx_rules SET категория=?, property_id=?, scope=? WHERE id=?')
-            .run(категория, property_id || null, newScope, existing.id);
+          db.prepare('UPDATE tx_rules SET pattern=?, категория=?, property_id=?, scope=? WHERE id=?')
+            .run(pattern, категория, property_id || null, newScope, existing.id);
         } else {
           db.prepare('INSERT INTO tx_rules (pattern, категория, property_id, scope) VALUES (?,?,?,?)')
             .run(pattern, категория, property_id || null, newScope);
@@ -727,9 +740,8 @@ module.exports = function(db) {
         rule_saved = true;
 
         // Apply retroactively to all unvalidated transactions with same counterparty
-        const patLower = pattern.toLowerCase();
         const unvalidated = db.prepare('SELECT id, контрагент FROM transactions WHERE validated=0 AND id != ?').all(req.params.id);
-        const toUpdate = unvalidated.filter(t => t.контрагент && t.контрагент.toLowerCase().includes(patLower));
+        const toUpdate = unvalidated.filter(t => t.контрагент && t.контрагент.replace(/\s+/g, ' ').trim().toLowerCase().includes(patLower));
         if (toUpdate.length) {
           const upd = db.prepare('UPDATE transactions SET категория=?, property_id=COALESCE(?,property_id), scope=?, validated=1 WHERE id=?');
           const run = db.transaction(list => list.forEach(t => upd.run(категория, property_id || null, newScope, t.id)));
