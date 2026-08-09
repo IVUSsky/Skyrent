@@ -23,6 +23,7 @@ export const ALL_TABS = [
   { id: 'personal',    label: '💰 Личен бюджет', roles: ['admin'],         tier: 'advanced' },
   { id: 'smart',       label: '⚡ Смарт',        roles: ['admin'],         tier: 'advanced' },
   { id: 'access_chips', label: '🔑 Чипове',      roles: ['admin'],         tier: 'advanced' },
+  { id: 'cameras',      label: '📹 Камери',      roles: ['admin'],         tier: 'advanced' },
   { id: 'billing',     label: '💳 Абонамент',  roles: ['admin'],           tier: 'system' },
   { id: 'settings',    label: '⚙️ Настройки',  roles: ['admin'],           tier: 'system' },
 ]

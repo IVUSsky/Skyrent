@@ -1173,7 +1173,157 @@ function Profile({ me, onChangePassword }) {
       </Card>
 
       <AutopayCard />
+      <CameraSection />
     </div>
+  )
+}
+
+function CameraSection() {
+  const [data, setData] = useState(null)
+  const [err, setErr] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [file, setFile] = useState(null)
+  const fileRef = useRef(null)
+
+  const load = () => {
+    apiFetch(`${API}/api/tenant/camera`)
+      .then(r => r.json())
+      .then(setData)
+      .catch(() => setErr('Грешка при зареждане'))
+  }
+  useEffect(load, [])
+
+  const toggleConsent = async (checked) => {
+    setBusy(true); setErr(null)
+    try {
+      const r = await apiFetch(`${API}/api/tenant/camera/consent`, {
+        method: 'POST',
+        body: JSON.stringify({ face_recognition_enabled: checked }),
+      })
+      const d = await r.json()
+      if (!r.ok) { setErr(d.error || 'Грешка'); return }
+      load()
+    } catch { setErr('Сървърна грешка') }
+    finally { setBusy(false) }
+  }
+
+  const uploadPhoto = async () => {
+    if (!file) return
+    setBusy(true); setErr(null)
+    try {
+      const fd = new FormData()
+      fd.append('photo', file)
+      const r = await apiFetch(`${API}/api/tenant/camera/reference-photo`, { method: 'POST', body: fd })
+      const d = await r.json()
+      if (!r.ok) { setErr(d.error || 'Грешка при качване'); return }
+      setFile(null); if (fileRef.current) fileRef.current.value = ''
+      load()
+    } catch { setErr('Сървърна грешка') }
+    finally { setBusy(false) }
+  }
+
+  const deletePhoto = async (id) => {
+    setBusy(true); setErr(null)
+    try {
+      const r = await apiFetch(`${API}/api/tenant/camera/reference-photo/${id}`, { method: 'DELETE' })
+      const d = await r.json()
+      if (!r.ok) { setErr(d.error || 'Грешка'); return }
+      load()
+    } catch { setErr('Сървърна грешка') }
+    finally { setBusy(false) }
+  }
+
+  // Все още не сме получили отговор, или наемателят няма камера на входа му — секцията не се показва.
+  if (!data || !data.has_camera) return null
+
+  const consentOn = !!data.consent?.face_recognition_enabled
+  const events = [...(data.events || [])].sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+  const photos = data.reference_photos || []
+  // Снимките се сервират през dedicated auth-защитен endpoint по id (не по суровия path).
+  const photoSrc = (photoId) => authUrl(`${API}/api/tenant/camera/reference-photo/${photoId}/file`)
+  const pct = (c) => { const n = Number(c || 0); return Math.round(n <= 1 ? n * 100 : n) }
+
+  return (
+    <Card title="📹 Видеонаблюдение">
+      {err && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg p-2 mb-3">{err}</div>}
+
+      <label className="flex items-center gap-2 text-sm font-medium text-slate-800">
+        <input
+          type="checkbox"
+          checked={consentOn}
+          disabled={busy}
+          onChange={e => toggleConsent(e.target.checked)}
+          className="w-4 h-4"
+        />
+        Разреши разпознаване по лице
+      </label>
+      <p className="text-xs text-slate-500 mt-1 mb-4">
+        Видеонаблюдението на входа е винаги активно за сигурност, независимо от този превключвател.
+        Този конкретен избор определя дали AI системата разпознава Вас по лице и свързва записите с
+        Вашето име — това са биометрични данни и изискват Вашето отделно съгласие, различно от общата
+        клауза за видеонаблюдение в договора.
+      </p>
+
+      {consentOn && (
+        <div className="border-t pt-3 mb-3">
+          <div className="text-xs text-slate-500 mb-2">
+            Качи 1-3 ясни снимки на лицето си, за да можем да те разпознаваме на входа.
+          </div>
+          {photos.length > 0 && (
+            <div className="grid grid-cols-3 gap-2 mb-3">
+              {photos.map(p => (
+                <div key={p.id} className="relative">
+                  <img
+                    src={photoSrc(p.id)}
+                    alt=""
+                    className="w-full aspect-square object-cover rounded-lg bg-slate-200"
+                  />
+                  <button
+                    onClick={() => deletePhoto(p.id)}
+                    disabled={busy}
+                    className="absolute -top-1.5 -right-1.5 bg-white shadow rounded-full w-6 h-6 flex items-center justify-center text-xs border border-gray-200"
+                  >
+                    🗑
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="flex gap-2">
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*"
+              onChange={e => setFile(e.target.files?.[0] || null)}
+              className="flex-1 text-xs"
+            />
+            <button
+              onClick={uploadPhoto}
+              disabled={busy || !file}
+              className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-semibold px-3 py-1.5 rounded-lg whitespace-nowrap"
+            >
+              {busy ? '...' : '📤 Качи'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="border-t pt-3">
+        <div className="text-xs font-medium text-slate-600 mb-2">Моята активност</div>
+        {events.length > 0 ? (
+          <div className="space-y-1 text-xs">
+            {events.map(ev => (
+              <div key={ev.id} className="flex justify-between py-1 border-b last:border-0">
+                <span className="text-slate-600">{(ev.created_at || '').slice(0, 16).replace('T', ' ')}</span>
+                <span className="text-slate-500">{pct(ev.confidence)}%</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-xs text-slate-400">Все още няма записи.</p>
+        )}
+      </div>
+    </Card>
   )
 }
 

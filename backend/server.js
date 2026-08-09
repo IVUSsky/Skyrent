@@ -255,6 +255,7 @@ async function main() {
 
   app.use('/api/smart', require('./routes/smart')(db));
   app.use('/api/access-chips', require('./routes/accessChips')(db));
+  app.use('/api/cameras', require('./routes/cameras')(db));
   app.use('/api/inventory', require('./routes/inventory')(db));
   app.use('/api/investments', require('./routes/investments')(db));
   app.use('/api/investments/bulgar', require('./routes/bulgar')(db));
@@ -393,6 +394,14 @@ async function main() {
     startInternetCron(orgMain);
   } catch (e) {
     console.error('Failed to register internet cron:', e.message);
+  }
+
+  // ─── Camera motion polling cron (every 20 сек) ────────────────────────────
+  try {
+    const { startCameraCron } = require('./lib/cameraCron');
+    startCameraCron(orgMain);
+  } catch (e) {
+    console.error('Failed to register camera cron:', e.message);
   }
 
   // ─── Express error-handling middleware (must be LAST, след всички routes) ──

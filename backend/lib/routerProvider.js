@@ -71,6 +71,11 @@ class MockProvider {
     console.log(`[router:mock] setPropertyAccess host=${r.host} allow=${allow}`);
     return { ok: true, provider: 'mock', access: allow ? 'enabled' : 'disabled' };
   }
+
+  async setupCameraForward(router, localIp, localPort, externalPort) {
+    console.log(`[router:mock] setupCameraForward host=${router.host} ${externalPort}->${localIp}:${localPort}`);
+    return { ok: true, provider: 'mock', message: `Mock OK — ${externalPort} → ${localIp}:${localPort}` };
+  }
 }
 
 // MikroTik provider — RouterOS API (TCP 8728 plain, 8729 SSL).
@@ -245,6 +250,39 @@ class MikrotikProvider {
     const r = db.prepare('SELECT * FROM routers WHERE id=?').get(routerId);
     if (!r) throw new Error('Рутерът не е намерен');
     return this._setFlatAccess(r, allow);
+  }
+
+  // Port-forward мост за камера на локалната мрежа на имота: външен порт на
+  // рутера (достъпен през router.host отвън, като API-то на самия рутер) →
+  // локалния IP:порт на камерата. Идемпотентно (comment-базирана проверка,
+  // както skyrent-api-allow/skyrent-flat-cutoff).
+  async setupCameraForward(router, localIp, localPort, externalPort) {
+    const conn = await this._connect(router);
+    try {
+      const comment = `skyrent-cam-${externalPort}`;
+
+      const existingNat = (await conn.write('/ip/firewall/nat/print')).filter(x => x.comment === comment);
+      if (!existingNat.length) {
+        await conn.write('/ip/firewall/nat/add', [
+          '=chain=dstnat', '=protocol=tcp', '=dst-port=' + externalPort,
+          '=in-interface-list=WAN', '=action=dst-nat',
+          '=to-addresses=' + localIp, '=to-ports=' + localPort,
+          '=comment=' + comment,
+        ]);
+      }
+
+      const existingFilter = (await conn.write('/ip/firewall/filter/print')).filter(x => x.comment === comment);
+      if (!existingFilter.length) {
+        await conn.write('/ip/firewall/filter/add', [
+          '=chain=forward', '=protocol=tcp', '=dst-port=' + localPort,
+          '=dst-address=' + localIp, '=action=accept', '=comment=' + comment,
+        ]);
+      }
+
+      return { ok: true, message: `✓ Порт ${externalPort} → ${localIp}:${localPort}` };
+    } finally {
+      try { conn.close(); } catch (_) {}
+    }
   }
 }
 

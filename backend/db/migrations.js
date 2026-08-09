@@ -614,6 +614,61 @@ function runTenantMigrations(db) {
   )`);
   try { db.exec("CREATE INDEX IF NOT EXISTS idx_access_chips_property ON access_chips(property_id)"); } catch(_) {}
 
+  // Видео домофон (Reolink) на входа на имот — движение + снимка. Камерата е зад
+  // MikroTik рутера на имота (routers таблицата); router-ът forward-ва един порт към
+  // локалния IP на камерата, Skyrent говори с него през router.host:forwarded_port,
+  // все едно е директна връзка (виж lib/reolinkClient.js).
+  db.exec(`CREATE TABLE IF NOT EXISTS cameras (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    property_id INTEGER REFERENCES properties(id),
+    router_id INTEGER REFERENCES routers(id),
+    name TEXT,
+    model TEXT DEFAULT 'Reolink D340W',
+    local_ip TEXT,
+    forwarded_port INTEGER,
+    camera_user TEXT DEFAULT 'admin',
+    camera_pass TEXT,
+    status TEXT DEFAULT 'unknown',
+    last_seen_at DATETIME,
+    last_error TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(property_id)
+  )`);
+
+  // Лог на засечено движение (снимка + час). detected_user_id/confidence остават
+  // NULL засега — идентификация по лице (biometric, изисква изрично tenant съгласие
+  // по GDPR) е отделна бъдеща стъпка, не е част от тази миграция.
+  db.exec(`CREATE TABLE IF NOT EXISTS camera_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    camera_id INTEGER REFERENCES cameras(id),
+    snapshot_path TEXT,
+    detected_user_id INTEGER REFERENCES users(id),
+    confidence REAL,
+    kind TEXT DEFAULT 'motion',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+  try { db.exec("CREATE INDEX IF NOT EXISTS idx_camera_events_camera ON camera_events(camera_id, created_at DESC)"); } catch(_) {}
+
+  // Наемателят сам управлява своето съгласие + референтни снимки за бъдещо
+  // разпознаване по лице (biometric, GDPR — отделно от общата видеонаблюдение
+  // клауза в договора). Съхранението тук НЕ включва самото разпознаване —
+  // cameraCron.js не прави face matching, само пази данните готови за момента,
+  // в който тази функция бъде включена.
+  db.exec(`CREATE TABLE IF NOT EXISTS camera_consent (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER REFERENCES users(id) UNIQUE,
+    face_recognition_enabled INTEGER DEFAULT 0,
+    consented_at DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+
+  db.exec(`CREATE TABLE IF NOT EXISTS camera_reference_photos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER REFERENCES users(id),
+    photo_path TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+
   db.exec(`CREATE TABLE IF NOT EXISTS internet_plans (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,

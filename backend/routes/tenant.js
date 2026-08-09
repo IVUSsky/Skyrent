@@ -35,6 +35,24 @@ const ticketStorage = multer.diskStorage({
 });
 const ticketUpload = multer({ storage: ticketStorage, limits: { fileSize: 10 * 1024 * 1024 } });
 
+const CAMERA_REF_DIR = path.join(DATA_DIR, 'camera_reference_photos');
+const cameraRefStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const dir = path.join(CAMERA_REF_DIR, String(req.user.id));
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    cb(null, dir);
+  },
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname);
+    cb(null, `${Date.now()}_${Math.random().toString(36).slice(2, 8)}${ext}`);
+  },
+});
+const cameraRefUpload = multer({
+  storage: cameraRefStorage,
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => cb(null, /^image\/(jpeg|png|webp)$/.test(file.mimetype)),
+});
+
 module.exports = function(db) {
   const router = express.Router();
 
@@ -514,6 +532,75 @@ module.exports = function(db) {
     db.prepare('UPDATE internet_accounts SET mac_address=? WHERE id=?')
       .run(mac || null, account.id);
     res.json({ ok: true, mac_address: mac || null });
+  });
+
+  // ── Видеонаблюдение: наемателят вижда/управлява само СВОЕТО съгласие,
+  // референтни снимки и собствената си (вече идентифицирана) активност —
+  // никога чужди данни. Разпознаването по лице все още не се изпълнява
+  // (виж cameraCron.js) — тук само се подготвя съгласието+снимките.
+  router.get('/camera', (req, res) => {
+    const propId = tenantPropertyId(req.user.id);
+    const camera = propId ? db.prepare('SELECT id FROM cameras WHERE property_id=?').get(propId) : null;
+    if (!camera) return res.json({ has_camera: false, consent: null, events: [], reference_photos: [] });
+
+    const consent = db.prepare('SELECT face_recognition_enabled, consented_at FROM camera_consent WHERE user_id=?').get(req.user.id) || null;
+    const events = db.prepare(`
+      SELECT id, snapshot_path, confidence, created_at FROM camera_events
+      WHERE camera_id=? AND kind='identified' AND detected_user_id=?
+      ORDER BY id DESC LIMIT 20
+    `).all(camera.id, req.user.id);
+    const referencePhotos = db.prepare('SELECT id, photo_path, created_at FROM camera_reference_photos WHERE user_id=? ORDER BY id DESC').all(req.user.id);
+
+    res.json({
+      has_camera: true,
+      consent: consent ? { face_recognition_enabled: !!consent.face_recognition_enabled, consented_at: consent.consented_at } : null,
+      events,
+      reference_photos: referencePhotos,
+    });
+  });
+
+  router.post('/camera/consent', (req, res) => {
+    const enabled = req.body.face_recognition_enabled ? 1 : 0;
+    const existing = db.prepare('SELECT id FROM camera_consent WHERE user_id=?').get(req.user.id);
+    if (existing) {
+      db.prepare(`UPDATE camera_consent SET face_recognition_enabled=?, consented_at=CASE WHEN ?=1 THEN datetime('now') ELSE consented_at END WHERE user_id=?`)
+        .run(enabled, enabled, req.user.id);
+    } else {
+      db.prepare(`INSERT INTO camera_consent (user_id, face_recognition_enabled, consented_at) VALUES (?, ?, CASE WHEN ?=1 THEN datetime('now') ELSE NULL END)`)
+        .run(req.user.id, enabled, enabled);
+    }
+    res.json({ ok: true });
+  });
+
+  router.post('/camera/reference-photo', cameraRefUpload.single('photo'), (req, res) => {
+    if (!req.file) return res.status(400).json({ error: 'Липсва снимка (jpeg/png/webp, до 5MB)' });
+    const relPath = path.relative(DATA_DIR, req.file.path).split(path.sep).join('/');
+    const r = db.prepare('INSERT INTO camera_reference_photos (user_id, photo_path) VALUES (?, ?)').run(req.user.id, relPath);
+    res.json({ ok: true, id: r.lastInsertRowid, photo_path: relPath });
+  });
+
+  router.delete('/camera/reference-photo/:id', (req, res) => {
+    const photo = db.prepare('SELECT * FROM camera_reference_photos WHERE id=? AND user_id=?').get(req.params.id, req.user.id);
+    if (!photo) return res.status(404).json({ error: 'Не е намерена' });
+    try { fs.unlinkSync(path.join(DATA_DIR, photo.photo_path)); } catch (_) {}
+    db.prepare('DELETE FROM camera_reference_photos WHERE id=?').run(photo.id);
+    res.json({ ok: true });
+  });
+
+  router.get('/camera/reference-photo/:id/file', (req, res) => {
+    const photo = db.prepare('SELECT * FROM camera_reference_photos WHERE id=? AND user_id=?').get(req.params.id, req.user.id);
+    if (!photo) return res.status(404).end();
+    const fp = path.join(DATA_DIR, photo.photo_path);
+    if (!fp.startsWith(CAMERA_REF_DIR) || !fs.existsSync(fp)) return res.status(404).end();
+    res.sendFile(fp);
+  });
+
+  router.get('/camera/events/:id/snapshot', (req, res) => {
+    const ev = db.prepare('SELECT * FROM camera_events WHERE id=? AND detected_user_id=?').get(req.params.id, req.user.id);
+    if (!ev || !ev.snapshot_path) return res.status(404).end();
+    const fp = path.join(DATA_DIR, 'camera_snapshots', path.basename(ev.snapshot_path));
+    if (!fp.startsWith(path.join(DATA_DIR, 'camera_snapshots')) || !fs.existsSync(fp)) return res.status(404).end();
+    res.sendFile(fp);
   });
 
   router.post('/internet/buy', async (req, res) => {
