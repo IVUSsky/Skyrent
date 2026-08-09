@@ -744,9 +744,13 @@ function Addons() {
             const disabled = !!sub || busy === svc.id
             return (
               <div key={svc.id} className="flex items-center justify-between gap-3 py-2 border-b last:border-0">
+                {svc.photo_path && (
+                  <img src={authUrl(`${API}/api/tenant/addons/catalog/${svc.id}/photo`)} alt=""
+                    className="w-12 h-12 object-cover rounded-lg border border-slate-200 flex-shrink-0" />
+                )}
                 <div className="min-w-0 flex-1">
                   <div className="font-semibold text-slate-800">
-                    <span className="mr-1 text-lg">{svc.icon}</span>{svc.name}
+                    {!svc.photo_path && <span className="mr-1 text-lg">{svc.icon}</span>}{svc.name}
                   </div>
                   {svc.description && (
                     <div className="text-xs text-slate-500">{svc.description}</div>
