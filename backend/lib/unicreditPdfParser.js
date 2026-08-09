@@ -165,7 +165,9 @@ function recordToTransaction(rec, accountCurrency) {
     for (let k = 0; k < body.length; k++) {
       const iLine = body[k].match(/(BG\d{2}[A-Z]{4}[A-Z0-9]{14,18})\s*\/\s*(.+?)\s*\/?$/);
       if (iLine) {
-        контрагент = iLine[2].trim();
+        // Нормализирано (не само trim) — вижте бележката в probankingPdfParser.js:
+        // разчупването на PDF колони кара интервалите между думите да варират.
+        контрагент = iLine[2].replace(/\s+/g, ' ').trim();
         nameIdx = k;
         break;
       }
