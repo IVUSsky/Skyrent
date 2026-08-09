@@ -505,6 +505,25 @@ function TransactionsTab({ API, properties, onRuleCreated }) {
     })
   }
 
+  // Смяна на имот за вече записана транзакция — минава през /category endpoint-а,
+  // защото той единствен пази и auto-learn правилото (следващи преводи от същия
+  // контрагент ще се разпознаят автоматично, без ръчна намеса всеки месец).
+  const updateProperty = (tx, newPropId) => {
+    apiFetch(`${API}/api/import/transactions/${tx.id}/category`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ категория: tx.категория, property_id: newPropId }),
+    }).then(r => r.json()).then(res => {
+      setRows(prev => prev.map(r => r.id === tx.id ? { ...r, property_id: newPropId, validated: 1 } : r))
+      if (res.affected > 0) {
+        showToast(`Правилото е запазено — още ${res.affected} транзакции от "${tx.контрагент}" актуализирани автоматично.`)
+        load()
+      } else if (res.rule_saved) {
+        showToast(`Правилото за "${tx.контрагент}" е запазено — бъдещи преводи от него/нея ще се разпознават автоматично.`)
+      }
+    })
+  }
+
   const totalIncome  = rows.filter(r => r.operation==='Кт').reduce((s,r) => s+(r.сума||0), 0)
   const totalExpense = rows.filter(r => r.operation==='Дт').reduce((s,r) => s+(r.сума||0), 0)
 
@@ -566,7 +585,7 @@ function TransactionsTab({ API, properties, onRuleCreated }) {
           <table className="min-w-full divide-y divide-gray-100 text-sm">
             <thead className="bg-gray-50 sticky top-0 z-10">
               <tr>
-                {['Дата','Контрагент','Основание','Сума','Оп.','Категория','★'].map(h => (
+                {['Дата','Контрагент','Основание','Сума','Оп.','Категория','Имот','★'].map(h => (
                   <th key={h} className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase whitespace-nowrap last:text-center">{h}</th>
                 ))}
               </tr>
@@ -591,6 +610,13 @@ function TransactionsTab({ API, properties, onRuleCreated }) {
                       {ALL_CATS.map(c => <option key={c} value={c}>{c}</option>)}
                     </select>
                   </td>
+                  <td className="px-3 py-2">
+                    <select value={tx.property_id||''} onChange={e => e.target.value && updateProperty(tx, Number(e.target.value))}
+                      className="text-xs border rounded px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-blue-400 bg-gray-50 text-gray-600 border-gray-200 max-w-[150px]">
+                      <option value="" disabled>— избери —</option>
+                      {properties.map(p => <option key={p.id} value={p.id}>#{p.id} {p['адрес']}</option>)}
+                    </select>
+                  </td>
                   <td className="px-3 py-2 text-center">
                     {tx.rule_id ? (
                       <span className="text-blue-500" title="Авто по правило">⚡</span>
@@ -601,7 +627,7 @@ function TransactionsTab({ API, properties, onRuleCreated }) {
                 </tr>
               ))}
               {!loading && rows.length === 0 && (
-                <tr><td colSpan={7} className="px-4 py-10 text-center text-gray-400">Няма транзакции за избраните филтри.</td></tr>
+                <tr><td colSpan={8} className="px-4 py-10 text-center text-gray-400">Няма транзакции за избраните филтри.</td></tr>
               )}
             </tbody>
           </table>
