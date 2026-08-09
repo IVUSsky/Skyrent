@@ -905,12 +905,21 @@ module.exports = function(db) {
       const params = [];
       if (месец) { where.push('месец = ?'); params.push(месец); }
       if (категория && категория !== 'all') { where.push('категория = ?'); params.push(категория); }
-      if (search) { where.push('(контрагент LIKE ? OR основание LIKE ?)'); params.push(`%${search}%`, `%${search}%`); }
       if (validated === '0') { where.push('validated = 0'); }
       else if (validated === '1') { where.push('validated = 1'); }
       const whereStr = where.length ? 'WHERE ' + where.join(' AND ') : '';
-      const rows  = db.prepare(`SELECT * FROM transactions ${whereStr} ORDER BY дата DESC, id DESC LIMIT ? OFFSET ?`).all(...params, Number(limit), Number(offset));
-      const total = db.prepare(`SELECT COUNT(*) as cnt FROM transactions ${whereStr}`).get(...params).cnt;
+      let all = db.prepare(`SELECT * FROM transactions ${whereStr} ORDER BY дата DESC, id DESC`).all(...params);
+
+      // SQLite LIKE прави case-insensitive само за ASCII — кирилски регистър
+      // (контрагент/основание почти винаги главни букви) не се разпознава.
+      // Филтрираме в JS, чийто toLowerCase() коректно борави с кирилица.
+      if (search) {
+        const q = search.toLowerCase();
+        all = all.filter(t => (t.контрагент || '').toLowerCase().includes(q) || (t.основание || '').toLowerCase().includes(q));
+      }
+
+      const total = all.length;
+      const rows  = all.slice(Number(offset), Number(offset) + Number(limit));
       res.json({ rows, total });
     } catch (err) {
       res.status(500).json({ error: err.message });
