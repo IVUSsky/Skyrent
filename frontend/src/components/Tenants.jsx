@@ -91,7 +91,10 @@ export default function Tenants({ API }) {
       }),
     })
       .then(r => r.json())
-      .then(() => { load(); showToast(`✅ ${prop.адрес} — маркиран като платен`) })
+      .then(data => {
+        if (!data.ok) throw new Error(data.error || 'Неуспешно записване')
+        load(); showToast(`✅ ${prop.адрес} — маркиран като платен`)
+      })
       .catch(e => showToast('Грешка: ' + e.message, 'error'))
   }
 
@@ -109,7 +112,10 @@ export default function Tenants({ API }) {
       body: JSON.stringify(contactForm),
     })
       .then(r => r.json())
-      .then(() => { setSavingContact(false); setEditingContact(null); load(); showToast('Контактите са запазени') })
+      .then(data => {
+        if (!data.success) throw new Error(data.error || 'Неуспешно записване')
+        setSavingContact(false); setEditingContact(null); load(); showToast('Контактите са запазени')
+      })
       .catch(e => { setSavingContact(false); showToast('Грешка: ' + e.message, 'error') })
   }
 
@@ -127,14 +133,20 @@ export default function Tenants({ API }) {
       body: JSON.stringify({ month, ...markForm, amount: Number(markForm.amount) || 0 }),
     })
       .then(r => r.json())
-      .then(() => { setSavingMark(false); setMarkingPaid(null); load(); showToast('Плащането е записано') })
+      .then(data => {
+        if (!data.ok) throw new Error(data.error || 'Неуспешно записване')
+        setSavingMark(false); setMarkingPaid(null); load(); showToast('Плащането е записано')
+      })
       .catch(e => { setSavingMark(false); showToast('Грешка: ' + e.message, 'error') })
   }
 
   const unmarkPaid = (propId) => {
     apiFetch(`${API}/api/properties/${propId}/mark-paid?month=${month}`, { method: 'DELETE' })
       .then(r => r.json())
-      .then(() => { load(); showToast('Плащането е премахнато') })
+      .then(data => {
+        if (!data.ok) throw new Error(data.error || 'Неуспешно премахване')
+        load(); showToast('Плащането е премахнато')
+      })
       .catch(e => showToast('Грешка: ' + e.message, 'error'))
   }
 
