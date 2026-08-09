@@ -461,6 +461,9 @@ function runTenantMigrations(db) {
   db.exec("UPDATE addon_services SET property_scope = 'residential' WHERE property_scope IS NULL OR property_scope = ''");
   db.exec("UPDATE addon_services SET property_scope = 'residential' WHERE property_scope = 'all' AND name IN ('Интернет','Телевизор','Кафемашина','Прахосмукачка','Робот-прахосмукачка','Микровълнова','PlayStation 5')");
   db.exec("UPDATE addon_services SET property_scope = 'storage' WHERE name = 'Стелаж'");
+  // Реална снимка на конкретния уред (модел/марка се пише в description) —
+  // вместо само generic emoji икона.
+  try { db.exec("ALTER TABLE addon_services ADD COLUMN photo_path TEXT"); console.log('Migration: added addon_services.photo_path'); } catch(_) {}
 
   db.exec(`CREATE TABLE IF NOT EXISTS tenant_addons (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

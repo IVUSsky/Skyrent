@@ -19,6 +19,7 @@ const DATA_DIR     = process.env.DATA_DIR || path.join(__dirname, '../data');
 const CONTRACTS_DIR = path.join(DATA_DIR, 'contracts');
 const INVOICES_DIR  = path.join(DATA_DIR, 'invoices');
 const PHOTOS_DIR    = path.join(DATA_DIR, 'property_photos');
+const ADDON_PHOTOS_DIR = path.join(DATA_DIR, 'addon_photos');
 const TICKETS_DIR   = supportMod.TICKETS_DIR;
 
 const ticketStorage = multer.diskStorage({
@@ -224,7 +225,7 @@ module.exports = function(db) {
   router.get('/addons/catalog', (req, res) => {
     const scopes = tenantScopes(req.user.id);
     const all = db.prepare(`
-      SELECT id, name, description, icon, monthly_price, deposit_amount, currency, property_scope
+      SELECT id, name, description, icon, monthly_price, deposit_amount, currency, property_scope, photo_path
       FROM addon_services
       WHERE active = 1
       ORDER BY sort_order ASC, id ASC
@@ -234,6 +235,14 @@ module.exports = function(db) {
       return sc === 'all' || scopes.has(sc);
     });
     res.json(filtered);
+  });
+
+  router.get('/addons/catalog/:id/photo', (req, res) => {
+    const svc = db.prepare('SELECT photo_path FROM addon_services WHERE id=?').get(req.params.id);
+    if (!svc || !svc.photo_path) return res.status(404).end();
+    const fp = path.join(ADDON_PHOTOS_DIR, path.basename(svc.photo_path));
+    if (!fp.startsWith(ADDON_PHOTOS_DIR) || !fs.existsSync(fp)) return res.status(404).end();
+    res.sendFile(fp);
   });
 
   router.get('/addons/mine', (req, res) => {

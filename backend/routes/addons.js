@@ -1,5 +1,23 @@
 const express = require('express');
+const multer  = require('multer');
+const path    = require('path');
+const fs      = require('fs');
 const { notifyAdmin, notifyTenant } = require('../lib/notify');
+const { optimizeImage } = require('../lib/imageOptimize');
+const { imagesOnly } = require('../lib/uploadFilter');
+
+const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '../data');
+const ADDON_PHOTOS_DIR = path.join(DATA_DIR, 'addon_photos');
+if (!fs.existsSync(ADDON_PHOTOS_DIR)) fs.mkdirSync(ADDON_PHOTOS_DIR, { recursive: true });
+
+const photoStorage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, ADDON_PHOTOS_DIR),
+  filename:    (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    cb(null, `addon_${req.params.id}_${Date.now()}${ext}`);
+  },
+});
+const uploadAddonPhoto = multer({ storage: photoStorage, limits: { fileSize: 10 * 1024 * 1024 }, fileFilter: imagesOnly });
 
 module.exports = function(db) {
   const router = express.Router();
@@ -67,6 +85,31 @@ module.exports = function(db) {
     }
   });
 
+  router.post('/catalog/:id/photo', uploadAddonPhoto.single('photo'), async (req, res) => {
+    try {
+      const svc = db.prepare('SELECT * FROM addon_services WHERE id=?').get(req.params.id);
+      if (!svc) return res.status(404).json({ error: 'Услугата не е намерена' });
+      if (!req.file) return res.status(400).json({ error: 'Липсва снимка' });
+      await optimizeImage(req.file.path);
+      // Изтрий старата снимка (ако има) — иначе се трупат сираци при преснимане
+      if (svc.photo_path) {
+        try { fs.unlinkSync(path.join(ADDON_PHOTOS_DIR, path.basename(svc.photo_path))); } catch (_) {}
+      }
+      db.prepare('UPDATE addon_services SET photo_path=? WHERE id=?').run(req.file.filename, req.params.id);
+      res.json({ ok: true, photo_path: req.file.filename });
+    } catch (err) {
+      res.status(err.status || 500).json({ error: err.message });
+    }
+  });
+
+  router.get('/catalog/:id/photo', (req, res) => {
+    const svc = db.prepare('SELECT photo_path FROM addon_services WHERE id=?').get(req.params.id);
+    if (!svc || !svc.photo_path) return res.status(404).end();
+    const fp = path.join(ADDON_PHOTOS_DIR, path.basename(svc.photo_path));
+    if (!fp.startsWith(ADDON_PHOTOS_DIR) || !fs.existsSync(fp)) return res.status(404).end();
+    res.sendFile(fp);
+  });
+
   router.delete('/catalog/:id', (req, res) => {
     try {
       // Soft delete — deactivate if there are subscriptions; hard delete only if no subs
@@ -74,6 +117,10 @@ module.exports = function(db) {
       if (subCount > 0) {
         db.prepare('UPDATE addon_services SET active=0 WHERE id=?').run(req.params.id);
         return res.json({ ok: true, deactivated: true, message: `Услугата е деактивирана (${subCount} абонамента я ползват/ползвали).` });
+      }
+      const svc = db.prepare('SELECT photo_path FROM addon_services WHERE id=?').get(req.params.id);
+      if (svc?.photo_path) {
+        try { fs.unlinkSync(path.join(ADDON_PHOTOS_DIR, path.basename(svc.photo_path))); } catch (_) {}
       }
       db.prepare('DELETE FROM addon_services WHERE id=?').run(req.params.id);
       res.json({ ok: true, deleted: true });

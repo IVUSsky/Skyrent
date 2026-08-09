@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react'
-import { apiFetch } from '../api'
+import React, { useEffect, useState, useRef } from 'react'
+import { apiFetch, authUrl } from '../api'
 
 const fmt = n => Number(n || 0).toLocaleString('bg-BG', { minimumFractionDigits: 0 })
 
@@ -10,7 +10,7 @@ const STATUS_LABEL = {
   rejected: { text: '✗ Отказана',  cls: 'bg-red-100 text-red-700 border-red-300' },
 }
 
-const EMPTY = { name: '', description: '', icon: '🛍️', monthly_price: '', deposit_amount: '', active: 1, sort_order: 0, property_scope: 'residential' }
+const EMPTY = { name: '', description: '', icon: '🛍️', monthly_price: '', deposit_amount: '', active: 1, sort_order: 0, property_scope: 'residential', photo_path: null }
 
 const SCOPE_LABEL = {
   all:         { text: 'Всички имоти',  icon: '🏘️' },
@@ -38,6 +38,10 @@ export default function Addons({ API }) {
   }
   useEffect(load, [API])
 
+  const [photoFile, setPhotoFile] = useState(null)
+  const [uploadingPhoto, setUploadingPhoto] = useState(false)
+  const photoInputRef = useRef()
+
   const startEdit = (svc) => {
     setEditing(svc.id)
     setForm({
@@ -45,9 +49,28 @@ export default function Addons({ API }) {
       monthly_price: svc.monthly_price, deposit_amount: svc.deposit_amount,
       active: svc.active, sort_order: svc.sort_order || 0,
       property_scope: svc.property_scope || 'all',
+      photo_path: svc.photo_path || null,
     })
+    setPhotoFile(null)
   }
-  const startNew = () => { setEditing('new'); setForm(EMPTY) }
+  const startNew = () => { setEditing('new'); setForm(EMPTY); setPhotoFile(null) }
+
+  const uploadPhoto = async () => {
+    if (!photoFile || editing === 'new') return
+    setUploadingPhoto(true)
+    try {
+      const fd = new FormData()
+      fd.append('photo', photoFile)
+      const r = await apiFetch(`${API}/api/addons/catalog/${editing}/photo`, { method: 'POST', body: fd })
+      const data = await r.json()
+      if (!r.ok) { showToast(data.error || 'Грешка при качване', 'error'); return }
+      setForm(f => ({ ...f, photo_path: data.photo_path }))
+      setPhotoFile(null)
+      if (photoInputRef.current) photoInputRef.current.value = ''
+      load(); showToast('Снимката е качена')
+    } catch (e) { showToast('Сървърна грешка', 'error') }
+    finally { setUploadingPhoto(false) }
+  }
 
   const save = async () => {
     if (!form.name?.trim()) { showToast('Името е задължително', 'error'); return }
@@ -176,9 +199,29 @@ export default function Addons({ API }) {
                     className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm" />
                 </div>
                 <div className="md:col-span-3">
-                  <label className="text-xs text-gray-500 font-medium">Описание</label>
+                  <label className="text-xs text-gray-500 font-medium">Описание <span className="text-gray-400 font-normal">(вид/марка/модел — напр. "DeLonghi Magnifica S, автоматична")</span></label>
                   <input value={form.description} onChange={e => setForm({ ...form, description: e.target.value })}
                     className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm" />
+                </div>
+                <div className="md:col-span-3">
+                  <label className="text-xs text-gray-500 font-medium block mb-1">Снимка на конкретния уред</label>
+                  {editing === 'new' ? (
+                    <div className="text-xs text-gray-500 italic">Запази услугата първо, после ще можеш да качиш снимка.</div>
+                  ) : (
+                    <div className="flex items-center gap-3">
+                      {form.photo_path && (
+                        <img src={authUrl(`${API}/api/addons/catalog/${editing}/photo`)} alt=""
+                          className="w-16 h-16 object-cover rounded-lg border border-gray-200" />
+                      )}
+                      <input ref={photoInputRef} type="file" accept="image/jpeg,image/png,image/webp"
+                        onChange={e => setPhotoFile(e.target.files?.[0] || null)}
+                        className="text-xs flex-1" />
+                      <button type="button" onClick={uploadPhoto} disabled={!photoFile || uploadingPhoto}
+                        className="text-xs px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg whitespace-nowrap">
+                        {uploadingPhoto ? '...' : '📤 Качи'}
+                      </button>
+                    </div>
+                  )}
                 </div>
                 <div>
                   <label className="text-xs text-gray-500 font-medium">Месечна цена €</label>
@@ -236,7 +279,14 @@ export default function Addons({ API }) {
               <tbody className="divide-y divide-gray-50">
                 {catalog.map(svc => (
                   <tr key={svc.id} className="hover:bg-gray-50">
-                    <td className="px-3 py-2 text-2xl">{svc.icon}</td>
+                    <td className="px-3 py-2">
+                      {svc.photo_path ? (
+                        <img src={authUrl(`${API}/api/addons/catalog/${svc.id}/photo`)} alt=""
+                          className="w-10 h-10 object-cover rounded-lg border border-gray-200" />
+                      ) : (
+                        <span className="text-2xl">{svc.icon}</span>
+                      )}
+                    </td>
                     <td className="px-3 py-2">
                       <div className="font-medium text-gray-800">{svc.name}</div>
                       {svc.description && <div className="text-xs text-gray-500">{svc.description}</div>}
