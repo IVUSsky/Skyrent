@@ -2,7 +2,6 @@ const express = require('express');
 const PDFDocument = require('pdfkit');
 const path = require('path');
 const fs = require('fs');
-const nodemailer = require('nodemailer');
 const { getAddonChargesForProperty, markDepositsCharged } = require('../lib/addonCharges');
 const { notifyTenant } = require('../lib/notify');
 const { nextInvoiceNumber, peekNextInvoiceNumber, counterKey } = require('../lib/invoiceNumber');
