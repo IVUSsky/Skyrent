@@ -8,10 +8,10 @@ Skyrent is a rental-property management system for Bulgarian landlords, evolving
 
 ## Commands
 
-**Backend** (`backend/`): `npm run dev` (nodemon) · `npm start` (prod) · `npm run seed` / `npm run seed:2026` (test data)
+**Backend** (`backend/`): `npm run dev` (nodemon) · `npm start` (prod) · `npm test` (vitest, one-shot) · `npm run test:watch` (vitest, watch mode) · `npm run seed` / `npm run seed:2026` (test data)
 **Frontend** (`frontend/`): `npm run dev` (Vite :5173, proxies `/api` → :3002) · `npm run build` · `npm start` (serve dist/)
 
-No test framework is configured. To validate changes: `node --check <file>` for backend syntax, `npm run build` for frontend (catches JSX/import errors). Ad-hoc logic is verified with standalone `node -e` scripts against an in-memory `better-sqlite3` DB (see this repo's history for the pattern).
+**Testing:** backend tests run on **Vitest** (`backend/vitest.config.mjs`, node env + globals). Test files live next to the source as `*.test.js` (e.g. `lib/integrityChecks.test.js`); keep them CommonJS (`require`) like the rest of the backend — `describe`/`it`/`expect` are injected globally. Prefer `npm test` for pure-logic modules (rule engines, parsers, scope/scope math). For everything else: `node --check <file>` for backend syntax, `npm run build` for frontend (catches JSX/import errors), and ad-hoc `node -e` scripts against an in-memory `better-sqlite3` DB (see this repo's history for the pattern).
 
 ## Workflow (important)
 
