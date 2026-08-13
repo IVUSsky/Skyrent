@@ -4,7 +4,6 @@ const PDFDocument = require('pdfkit');
 const path = require('path');
 const fs = require('fs');
 const multer = require('multer');
-const nodemailer = require('nodemailer');
 const { ensureTenantUser, sendWelcomeEmail } = require('../lib/tenantOnboarding');
 const { generateRentInvoice, autoInvoiceOnActivateOn } = require('./invoices');
 const { parseRecipients } = require('../lib/email');
