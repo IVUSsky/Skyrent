@@ -263,3 +263,112 @@ html[data-theme="skyrent"] main h2 {
   font-weight: 400;
   letter-spacing: -.012em;
 }
+
+/* ── Skyrent шел · ляв групиран сайдбар ─────────────────────────────────────
+   Компонентът (components/Sidebar.jsx) се рендира само под тази тема и само
+   от 900px нагоре, затова класовете не са допълнително скоупнати. */
+/* Логото и профилът стоят закотвени; скролва само списъкът с менюта — иначе
+   при 24 таба в Разширен режим профилът пада под сгъвката. */
+.sky-aside {
+  width: 232px; flex-shrink: 0;
+  background: var(--shell-bg);
+  padding: 22px 0 18px;
+  display: flex; flex-direction: column; gap: 22px;
+  height: 100vh; position: sticky; top: 0; align-self: flex-start; overflow: hidden;
+}
+.sky-aside[data-collapsed] { width: 62px; padding: 20px 0; gap: 14px; }
+
+.sky-brand {
+  display: flex; align-items: center; gap: 11px; padding: 0 22px;
+}
+.sky-aside[data-collapsed] .sky-brand { padding: 0; justify-content: center; }
+.sky-brand-name {
+  font-family: var(--font-display); font-size: 19px; color: #F4F1EA; line-height: 1;
+}
+
+.sky-nav {
+  display: flex; flex-direction: column; gap: 18px; padding: 0 12px;
+  flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin;
+  scrollbar-color: rgba(224,189,110,.25) transparent;
+}
+/* Chromium не чете scrollbar-width — иначе в ink сайдбара стои светла лента */
+.sky-nav::-webkit-scrollbar { width: 6px; }
+.sky-nav::-webkit-scrollbar-track { background: transparent; }
+.sky-nav::-webkit-scrollbar-thumb { background: rgba(224,189,110,.22); border-radius: 3px; }
+.sky-nav::-webkit-scrollbar-thumb:hover { background: rgba(224,189,110,.38); }
+.sky-aside[data-collapsed] .sky-nav { gap: 6px; padding: 0 8px; }
+.sky-nav-group {
+  font-size: 9.5px; font-weight: 700; letter-spacing: .22em; text-transform: uppercase;
+  color: #6C6758; padding: 0 10px 8px;
+}
+.sky-nav-items { display: flex; flex-direction: column; gap: 2px; }
+
+.sky-nav-row {
+  position: relative; width: 100%;
+  display: flex; align-items: center; gap: 11px;
+  padding: 9px 10px; border: 0; border-radius: 8px; background: none; cursor: pointer;
+  font-family: var(--font-sans); font-size: 13px; color: var(--shell-fg); text-align: left;
+  transition: background .14s ease, color .14s ease;
+}
+.sky-nav-row:hover { background: var(--shell-hover-bg); color: var(--shell-fg-strong); }
+.sky-nav-row[data-active] {
+  background: rgba(224,189,110,.14); color: #F4F1EA; font-weight: 600;
+}
+.sky-nav-row[data-active]::before {
+  content: ''; position: absolute; left: 0; top: 9px; bottom: 9px;
+  width: 2px; border-radius: 2px; background: #E0BD6E;
+}
+.sky-nav-icon { font-size: 12px; opacity: .7; line-height: 1; flex-shrink: 0; }
+.sky-nav-row[data-active] .sky-nav-icon { color: #E0BD6E; opacity: 1; }
+.sky-nav-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.sky-aside[data-collapsed] .sky-nav-row { padding: 8px; justify-content: center; }
+.sky-aside[data-collapsed] .sky-nav-row[data-active] {
+  background: rgba(224,189,110,.16); color: #E0BD6E;
+}
+.sky-aside[data-collapsed] .sky-nav-row[data-active]::before { content: none; }
+
+.sky-profile {
+  margin-top: auto; padding: 16px 22px 0; display: flex; align-items: center; gap: 10px;
+  border-top: 1px solid rgba(244,241,234,.1); margin-left: 22px; margin-right: 22px;
+  padding-left: 0; padding-right: 0;
+}
+.sky-aside[data-collapsed] .sky-profile { margin: auto 12px 0; justify-content: center; }
+.sky-avatar {
+  width: 30px; height: 30px; border-radius: 50%; flex-shrink: 0;
+  background: rgba(224,189,110,.16); color: #E0BD6E;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 700;
+}
+.sky-profile-name {
+  font-size: 12px; font-weight: 600; color: #F4F1EA;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.sky-profile-meta {
+  font-size: 10px; color: #7D786A;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.sky-logout {
+  background: none; border: 0; cursor: pointer; flex-shrink: 0;
+  font-family: var(--font-sans); font-size: 10.5px; color: #7D786A; padding: 4px 2px;
+}
+.sky-logout:hover { color: #E0BD6E; }
+
+/* Топбар над съдържанието — държи контролите, които нямат място в сайдбара */
+.sky-topbar {
+  display: flex; align-items: center; justify-content: flex-end; gap: 12px;
+  padding: 14px 32px; border-bottom: 1px solid #E1DACA; background: var(--page-bg);
+}
+
+/* В шел режим съдържанието ползва цялата ширина, не max-w-7xl */
+html[data-theme="skyrent"] .sky-content > main { max-width: none; padding: 24px 32px 40px; }
+
+.sky-brand-link {
+  display: flex; align-items: center; gap: 11px; min-width: 0;
+  background: none; border: 0; padding: 0; cursor: pointer; text-decoration: none;
+}
+.sky-collapse {
+  margin-left: auto; background: none; border: 0; cursor: pointer;
+  color: #6C6758; font-size: 14px; line-height: 1; padding: 2px 4px;
+}
+.sky-collapse:hover { color: #E0BD6E; }

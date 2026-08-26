@@ -9,8 +9,9 @@ import NotificationBell from './components/NotificationBell'
 import Onboarding from './components/Onboarding'
 import TaxSeasonReminder from './components/TaxSeasonReminder'
 import SetupWizard from './components/SetupWizard'
-import { ThemeProvider } from './components/ThemeProvider'
+import { ThemeProvider, useTheme } from './components/ThemeProvider'
 import ThemePicker from './components/ThemePicker'
+import Sidebar from './components/Sidebar'
 import ErrorBoundary from './components/ErrorBoundary'
 import { ALL_TABS, ORG1_ONLY_TABS, SIMPLE_TIERS, planAllowsTier, planAllowsCapability } from './menuTabs'
 import { apiFetch } from './api'
@@ -60,7 +61,50 @@ const TabFallback = () => (
   </div>
 )
 
+// Двата шела. Под темата `skyrent` (и само от 900px нагоре) менюто слиза
+// отляво като групиран сайдбар; всяка друга тема — и всеки тесен екран —
+// запазва историческия хоризонтален хедър непроменен. Превключва се от
+// ThemePicker-а, така че цялата нова визия е opt-in и обратима с един клик.
+// Мобилният изглед (долен таб-бар) е отделна стъпка от визуалната система.
+function ShellChrome({ sidebar, header, topbar, children }) {
+  const { effective } = useTheme()
+  const [wide, setWide] = useState(() => window.matchMedia('(min-width: 900px)').matches)
+
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 900px)')
+    const onChange = e => setWide(e.matches)
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
+  }, [])
+
+  if (effective === 'skyrent' && wide) {
+    return (
+      <div className="flex min-h-screen" style={{ background: 'var(--page-bg)' }}>
+        {sidebar}
+        <div className="sky-content flex-1 min-w-0 flex flex-col">
+          {topbar}
+          {children}
+        </div>
+      </div>
+    )
+  }
+  return (
+    <div className="min-h-screen" style={{ background: 'var(--page-bg)' }}>
+      {header}
+      {children}
+    </div>
+  )
+}
+
 const API = import.meta.env.VITE_API_URL || ''
+
+// Име на плана под профила в сайдбара. Каноничните са basic/pro/agency;
+// starter/business са legacy ключове (виж backend/lib/plans.js).
+const PLAN_LABELS = {
+  basic: 'Basic', starter: 'Basic',
+  pro: 'Pro', trial: 'Пробен',
+  agency: 'Agency', business: 'Agency',
+}
 
 function parseRole() {
   try {
@@ -303,16 +347,72 @@ export default function App() {
       && planAllowsCapability(orgCaps, orgPlatform, t)        // capability-гейтинг (план без функцията)
       && (t.tier === 'system' || !hiddenMenus.includes(t.id)) // собственик-скрити (без системните)
       && (uiMode === 'advanced' || SIMPLE_TIERS.has(t.tier) || role === 'broker')), // Лесен/Разширен (брокер вижда табовете си винаги)
-    ...(isSuper ? [{ id: 'platform', label: '🛸 Платформа', roles: ['admin'], tier: 'system' }] : []),
+    ...(isSuper ? [{ id: 'platform', label: '🛸 Платформа', roles: ['admin'], tier: 'system', group: 'system', icon: '◪', name: 'Платформа' }] : []),
   ]
 
   // Ensure activeTab is valid for this role
   const validTab = tabs.find(t => t.id === activeTab) ? activeTab : tabs[0]?.id
 
+  // Чисто име за сайдбара (без емоджи), със същото изключение за физически лица
+  const sidebarLabel = (tab) =>
+    tab.id === 'invoices' && entityInfo.individual && !entityInfo.vat
+      ? 'Доходи и данък'
+      : (tab.name || tab.label)
+
+  const notifyNavigate = (link) => {
+    if (link?.startsWith('tickets/')) setActiveTab('support')
+    else if (link === 'addons') setActiveTab('addons')
+    else if (link === 'invoices') setActiveTab('invoices')
+  }
+
   return (
     <ThemeProvider activeTab={validTab}>
-    <div className="min-h-screen" style={{ background: 'var(--page-bg)' }}>
-      {orgId !== 1 && <SetupWizard API={API} onDone={(et) => setEntityInfo(i => ({ ...i, individual: et === 'individual' }))} />}
+    {orgId !== 1 && <SetupWizard API={API} onDone={(et) => setEntityInfo(i => ({ ...i, individual: et === 'individual' }))} />}
+    <ShellChrome
+      sidebar={
+        <Sidebar
+          tabs={tabs}
+          activeTab={validTab}
+          onSelect={setActiveTab}
+          labelFor={sidebarLabel}
+          userName={userName}
+          orgName={orgId === 1 ? 'Sky Capital' : (brand?.name || null)}
+          planLabel={PLAN_LABELS[orgPlan] || null}
+          onLogout={handleLogout}
+          brandName={orgId !== 1 && brand?.name ? brand.name : 'Skyrent'}
+        />
+      }
+      topbar={
+        <div className="sky-topbar">
+          <button
+            onClick={toggleUiMode}
+            title={uiMode === 'simple'
+              ? 'Лесен изглед — само основните менюта. Натисни за всички.'
+              : 'Разширен изглед — всички менюта. Натисни за опростен.'}
+            className="text-xs px-2.5 py-1 rounded-full transition-colors whitespace-nowrap"
+            style={{ border: '1px solid #DCD4C2', color: 'var(--muted)' }}
+          >
+            {uiMode === 'simple' ? 'Разширен изглед' : 'Лесен изглед'}
+          </button>
+          <ThemePicker />
+          <NotificationBell API={API} basePath="/api/notifications" onNavigate={notifyNavigate} />
+          <button
+            onClick={() => setShowLearning(true)}
+            title="Учене от разговори (предложения от AI асистента)"
+            className="relative px-2 py-1 rounded text-sm"
+            style={{ color: 'var(--muted)' }}
+          >
+            🎓
+            {learningCount > 0 && (
+              <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold rounded-full min-w-[16px] h-[16px] px-1 flex items-center justify-center">
+                {learningCount}
+              </span>
+            )}
+          </button>
+          {role === 'broker' && <span className="text-xs bg-blue-800 text-blue-200 px-2 py-0.5 rounded-full">Брокер</span>}
+        </div>
+      }
+      header={
       <header className="shadow-lg" style={{ background: 'var(--shell-bg)' }}>
         <div className="max-w-7xl mx-auto px-4 py-2 flex items-center gap-5 flex-wrap">
           {/* Логото води към публичния сайт (/?site=1 работи и логнат) */}
@@ -357,15 +457,7 @@ export default function App() {
               API={API}
               basePath="/api/notifications"
               darkHeader
-              onNavigate={(link) => {
-                if (link?.startsWith('tickets/')) {
-                  setActiveTab('support')
-                } else if (link === 'addons') {
-                  setActiveTab('addons')
-                } else if (link === 'invoices') {
-                  setActiveTab('invoices')
-                }
-              }}
+              onNavigate={notifyNavigate}
             />
             <button
               onClick={() => setShowLearning(true)}
@@ -390,7 +482,8 @@ export default function App() {
           </div>
         </div>
       </header>
-
+      }
+    >
       {showLearning && (
         <Suspense fallback={null}>
           <ChatLearning API={API} onClose={() => setShowLearning(false)} onChanged={refreshLearningCount} />
@@ -435,7 +528,7 @@ export default function App() {
         </Suspense>
         </ErrorBoundary>
       </main>
-    </div>
+    </ShellChrome>
     </ThemeProvider>
   )
 }
