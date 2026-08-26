@@ -207,3 +207,59 @@ html[data-mode="dark"] .fin-surface .text-gray-700 { color: color-mix(in srgb, v
 html[data-mode="dark"] .fin-surface .text-blue-800 { color: #84BDE6 !important; }
 html[data-mode="dark"] .fin-surface .text-red-600  { color: #F0917E !important; }
 html[data-mode="dark"] .fin-surface .text-green-600{ color: #5FD3A0 !important; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Skyrent тема — ink + брас върху хартия
+   Всичко тук е скоупнато с html[data-theme="skyrent"], за да е темата напълно
+   opt-in: другите теми остават непроменени. Стойностите идват от визуалната
+   система (design handoff, стъпка 1) — не добавяй нови наизуст.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Семантика на парите — по-плътни от общите, за контраст върху хартия */
+html[data-theme="skyrent"] {
+  --pos:  #1F7A55;   /* платено / положително */
+  --neg:  #C0483C;   /* просрочено / отрицателно */
+  --warn: #B5872F;   /* внимание / частично (текст: #8A6A21) */
+  --info: #3F7FA0;   /* информация (текст: #2F6A88) */
+}
+
+/* Суми, дати, IBAN — моно с табулярни цифри, за да се четат в колона.
+   (В другите теми това важи само за Bloomberg — виж горе.) */
+html[data-theme="skyrent"] table { font-variant-numeric: tabular-nums; }
+html[data-theme="skyrent"] .tabular,
+html[data-theme="skyrent"] [class*="tabular"],
+html[data-theme="skyrent"] [data-fin],
+html[data-theme="skyrent"] main td.text-right {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Претониране на съдържанието ────────────────────────────────────────────
+   Dashboard и Import още рендират сурови Tailwind неутрали. Същият pattern
+   като .fin-surface, но скоупнат към main и само в тази тема — компонентите
+   не се пипат. */
+html[data-theme="skyrent"] main .bg-white          { background: var(--surface) !important; }
+html[data-theme="skyrent"] main .bg-gray-50,
+html[data-theme="skyrent"] main .bg-slate-50       { background: color-mix(in srgb, var(--surface) 92%, var(--page-fg) 8%) !important; }
+html[data-theme="skyrent"] main .bg-slate-100      { background: color-mix(in srgb, var(--surface) 85%, var(--page-fg) 15%) !important; }
+html[data-theme="skyrent"] main .text-gray-900,
+html[data-theme="skyrent"] main .text-gray-800     { color: var(--page-fg) !important; }
+html[data-theme="skyrent"] main .text-gray-700,
+html[data-theme="skyrent"] main .text-gray-600     { color: #4F4B44 !important; }
+html[data-theme="skyrent"] main .text-gray-500,
+html[data-theme="skyrent"] main .text-gray-400,
+html[data-theme="skyrent"] main .text-gray-300     { color: var(--muted) !important; }
+html[data-theme="skyrent"] main .border,
+html[data-theme="skyrent"] main .border-gray-100,
+html[data-theme="skyrent"] main .border-gray-200   { border-color: var(--surface-border) !important; }
+html[data-theme="skyrent"] main .divide-gray-100 > * + *,
+html[data-theme="skyrent"] main .divide-gray-200 > * + * { border-color: #F3EFE6 !important; }
+html[data-theme="skyrent"] main .bg-blue-50        { background: rgba(63,127,160,.12) !important; }
+
+/* Дисплей шрифт за заглавията в съдържанието (Playfair 400, никога по-тежко) */
+html[data-theme="skyrent"] main h1,
+html[data-theme="skyrent"] main h2 {
+  font-family: var(--font-display);
+  font-weight: 400;
+  letter-spacing: -.012em;
+}
