@@ -390,7 +390,14 @@ async function generateRentInvoice(db, { property_id, month, payment_type, notes
   const prop = db.prepare('SELECT * FROM properties WHERE id = ?').get(property_id);
   if (!prop) return { ok: false, reason: 'no_property' };
   if (!prop.invoice_enabled) return { ok: false, reason: 'not_enabled' };
-  const existing = db.prepare("SELECT id FROM rent_invoices WHERE property_id=? AND month=? AND type='invoice'").get(property_id, month);
+  // Дубликат = вече издадена фактура за НАЕМ за същия имот и месец. Филтърът по
+  // продукт е задължителен: без него интернет фактурата за същия месец блокира
+  // наема. Старите записи са с product NULL — те са наеми.
+  const existing = db.prepare(`
+    SELECT id FROM rent_invoices
+    WHERE property_id=? AND month=? AND type='invoice'
+      AND (product IS NULL OR product='наем')
+  `).get(property_id, month);
   if (existing) return { ok: false, reason: 'duplicate', id: existing.id };
 
   let recipient = {};
@@ -614,6 +621,13 @@ module.exports = function(db) {
         original.payment_type, issued_at, issued_at, filename, inv.notes
       );
 
+      // Авто-изпращане към счетоводител — best-effort, както при фактурите.
+      // Без него в отчета остава приход, който вече не съществува.
+      if (kontrolisiAutoOn(db)) {
+        const fresh = db.prepare('SELECT * FROM rent_invoices WHERE id=?').get(r.lastInsertRowid);
+        sendInvoiceToKontrolisi(db, fresh).catch(e => console.warn('kontrolisi auto-send failed:', e.message));
+      }
+
       res.json({ ok: true, id: r.lastInsertRowid, invoice_number });
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -701,6 +715,12 @@ module.exports = function(db) {
         inv.amount, inv.vat_rate, inv.vat_amount, inv.total,
         inv.payment_type, issued_at, issued_at, filename, cn.notes
       );
+
+      // Авто-изпращане към счетоводител — best-effort, както при фактурите.
+      if (kontrolisiAutoOn(db)) {
+        const freshCn = db.prepare('SELECT * FROM rent_invoices WHERE id=?').get(r.lastInsertRowid);
+        sendInvoiceToKontrolisi(db, freshCn).catch(e => console.warn('kontrolisi auto-send failed:', e.message));
+      }
 
       res.json({
         ok: true,
