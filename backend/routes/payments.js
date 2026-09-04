@@ -389,8 +389,23 @@ function webhookHandler(db) {
       }
 
       switch (event.type) {
-        case 'checkout.session.completed': {
+        // `checkout.session.completed` НЕ значи „парите са дошли". Stripe го праща
+        // щом клиентът приключи сесията; при асинхронните методи (SEPA Direct
+        // Debit — така се плащат наемите тук) дебитът се движи с дни и може да
+        // се провали. Тогава идва async_payment_failed, а не succeeded.
+        // Затова изпълняваме само реално платени сесии; асинхронните изчакват
+        // `checkout.session.async_payment_succeeded`, който минава по същия път.
+        case 'checkout.session.completed':
+        case 'checkout.session.async_payment_succeeded': {
           const session = event.data.object;
+
+          if (session.payment_status !== 'paid' && session.payment_status !== 'no_payment_required') {
+            console.log(
+              `Stripe: сесия ${session.id} е приключена, но payment_status='${session.payment_status}' — ` +
+              `нищо не се изпълнява, чакам async_payment_succeeded`
+            );
+            break;
+          }
 
           // Internet purchase flow: metadata.kind = 'internet'
           if (session.metadata?.kind === 'internet') {
@@ -541,6 +556,45 @@ function webhookHandler(db) {
           }
           break;
         }
+        // Асинхронният дебит се провали (SEPA върнат, картата отказана след
+        // приключване на сесията). Нищо не е изпълнявано — сесията не е минала
+        // през payment_status='paid' — така че тук само отбелязваме провала.
+        case 'checkout.session.async_payment_failed': {
+          const session = event.data.object;
+
+          if (session.metadata?.kind === 'internet') {
+            const purchaseId = Number(session.metadata?.purchase_id);
+            if (purchaseId) {
+              db.prepare("UPDATE internet_purchases SET status='failed' WHERE id=? AND status='pending'").run(purchaseId);
+              console.warn(`Stripe: интернет покупка ${purchaseId} — плащането се провали (сесия ${session.id})`);
+            }
+            break;
+          }
+
+          orgDb.prepare("UPDATE stripe_payments SET status='failed' WHERE session_id=?").run(session.id);
+          const failedInvId = session.metadata?.invoice_id;
+          const failedInv = failedInvId
+            ? orgDb.prepare('SELECT * FROM rent_invoices WHERE id=?').get(failedInvId)
+            : null;
+          console.warn(`Stripe: плащането по сесия ${session.id} се провали (фактура ${failedInv?.invoice_number || '—'})`);
+          for (const adminEmail of getAdminEmails(orgDb)) {
+            sendPaymentEmail({
+              to: adminEmail,
+              subject: `Skyrent: неуспешно плащане (№ ${failedInv?.invoice_number || session.id})`,
+              html: paymentEmailShell(`
+                <p style="color:#991b1b;"><strong>⚠️ Асинхронното плащане се провали</strong></p>
+                <ul>
+                  <li>Фактура: <strong>№ ${failedInv?.invoice_number || '—'}</strong></li>
+                  <li>Сума: <strong>${fmtMoney(failedInv?.total || (session.amount_total || 0) / 100)} EUR</strong></li>
+                  <li>Наемател: ${failedInv?.tenant_name || '—'}</li>
+                  <li>Сесия: ${session.id}</li>
+                </ul>
+                <p>Фактурата НЕ е маркирана като платена. Наемателят може да опита отново от портала.</p>`),
+            });
+          }
+          break;
+        }
+
         case 'payment_intent.succeeded': {
           // For SEPA DD autopay: PaymentIntent starts 'processing' and turns
           // 'succeeded' 3-5 days later when the debit clears. Mark invoice paid.
