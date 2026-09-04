@@ -23,6 +23,15 @@ function monthLabel(ym) {
   return `${BG_MONTHS[parseInt(m) - 1]} ${y}`;
 }
 
+// ISO дата/време → 24.08.2026. Ползва се за периода на интернет услугата върху
+// фактурата — два платежа в един месец трябва да се различават по документ.
+function fmtDate(d) {
+  if (!d) return '';
+  const dt = new Date(d);
+  if (Number.isNaN(dt.getTime())) return '';
+  return `${String(dt.getDate()).padStart(2, '0')}.${String(dt.getMonth() + 1).padStart(2, '0')}.${dt.getFullYear()}`;
+}
+
 function fmtMoney(n) {
   return Number(n || 0).toLocaleString('bg-BG', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
@@ -419,21 +428,42 @@ function webhookHandler(db) {
               try {
                 if (!purchase.invoice_id) {
                   const user = db.prepare('SELECT name FROM users WHERE id=?').get(acc.user_id);
-                  const prop = db.prepare('SELECT адрес, наемател FROM properties WHERE id=?').get(acc.property_id);
-                  const month = (purchase.paid_at || new Date().toISOString()).slice(0, 7);
-                  const recip = user?.name || prop?.['наемател'] || '';
+                  const prop = db.prepare('SELECT адрес, наемател, invoice_recipient FROM properties WHERE id=?').get(acc.property_id);
+
+                  // Всяко плащане получава своя фактура. За да са различими,
+                  // документът описва КУПЕНИЯ ПЕРИОД, а не деня на плащането:
+                  // две плащания в един месец иначе излизат с еднакъв текст
+                  // („Интернет услуга за Август 2026") и стават неразличими.
+                  // applyPurchase връща свеж запис, така че valid_from/until са
+                  // вече попълнени; paid_at е резерва за стари записи.
+                  const periodFrom = purchase.valid_from  || purchase.paid_at || new Date().toISOString();
+                  const periodTo   = purchase.valid_until || null;
+                  const month      = periodFrom.slice(0, 7);
+                  const period     = periodTo ? `${fmtDate(periodFrom)} – ${fmtDate(periodTo)}` : monthLabel(month);
+
+                  // Фирмените данни на получателя стоят в properties.invoice_recipient —
+                  // същият източник, който ползват фактурите за наем. Без тях
+                  // фактурата към фирма излиза само с малкото име на портал-потребителя.
+                  let recipient = {};
+                  try { recipient = JSON.parse(prop?.invoice_recipient || '{}'); } catch {}
+                  const fallback = user?.name || prop?.['наемател'] || '';
+
                   const inv = await createSimpleInvoice(db, {
                     property_id: acc.property_id, month,
                     gross: purchase.amount, payment_type: 'карта',
-                    tenant_name: recip, recipient_name: recip,
+                    tenant_name:       fallback,
+                    recipient_name:    recipient.name    || fallback,
+                    recipient_address: recipient.address || '',
+                    recipient_eik:     recipient.eik     || '',
+                    recipient_mol:     recipient.mol     || '',
                     product: 'интернет',
-                    line_description: `Интернет услуга за ${monthLabel(month)}` +
+                    line_description: `Интернет услуга ${period}` +
                                       (prop?.['адрес'] ? ` — ${prop['адрес']}` : ''),
                     notes: `Интернет услуга — ${purchase.plan_name}` +
                            (prop?.['адрес'] ? ` (${prop['адрес']})` : ''),
                   });
                   db.prepare('UPDATE internet_purchases SET invoice_id=? WHERE id=?').run(inv.id, purchaseId);
-                  console.log(`Stripe: internet invoice ${inv.invoice_number} created for purchase ${purchaseId}`);
+                  console.log(`Stripe: internet invoice ${inv.invoice_number} created for purchase ${purchaseId} (${period})`);
                 }
               } catch (e) {
                 console.error('internet auto-invoice failed:', e.message);

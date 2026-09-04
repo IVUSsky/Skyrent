@@ -390,7 +390,14 @@ async function generateRentInvoice(db, { property_id, month, payment_type, notes
   const prop = db.prepare('SELECT * FROM properties WHERE id = ?').get(property_id);
   if (!prop) return { ok: false, reason: 'no_property' };
   if (!prop.invoice_enabled) return { ok: false, reason: 'not_enabled' };
-  const existing = db.prepare("SELECT id FROM rent_invoices WHERE property_id=? AND month=? AND type='invoice'").get(property_id, month);
+  // Дубликат = вече издадена фактура за НАЕМ за същия имот и месец. Филтърът по
+  // продукт е задължителен: без него интернет фактурата за същия месец блокира
+  // наема. Старите записи са с product NULL — те са наеми.
+  const existing = db.prepare(`
+    SELECT id FROM rent_invoices
+    WHERE property_id=? AND month=? AND type='invoice'
+      AND (product IS NULL OR product='наем')
+  `).get(property_id, month);
   if (existing) return { ok: false, reason: 'duplicate', id: existing.id };
 
   let recipient = {};
