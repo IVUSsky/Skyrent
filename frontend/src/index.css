@@ -207,3 +207,266 @@ html[data-mode="dark"] .fin-surface .text-gray-700 { color: color-mix(in srgb, v
 html[data-mode="dark"] .fin-surface .text-blue-800 { color: #84BDE6 !important; }
 html[data-mode="dark"] .fin-surface .text-red-600  { color: #F0917E !important; }
 html[data-mode="dark"] .fin-surface .text-green-600{ color: #5FD3A0 !important; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Skyrent тема — ink + брас върху хартия
+   Всичко тук е скоупнато с html[data-theme="skyrent"], за да е темата напълно
+   opt-in: другите теми остават непроменени. Стойностите идват от визуалната
+   система (design handoff, стъпка 1) — не добавяй нови наизуст.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Семантика на парите — по-плътни от общите, за контраст върху хартия */
+html[data-theme="skyrent"] {
+  --pos:  #1F7A55;   /* платено / положително */
+  --neg:  #C0483C;   /* просрочено / отрицателно */
+  --warn: #B5872F;   /* внимание / частично (текст: #8A6A21) */
+  --info: #3F7FA0;   /* информация (текст: #2F6A88) */
+}
+
+/* Суми, дати, IBAN — моно с табулярни цифри, за да се четат в колона.
+   (В другите теми това важи само за Bloomberg — виж горе.) */
+html[data-theme="skyrent"] table { font-variant-numeric: tabular-nums; }
+html[data-theme="skyrent"] .tabular,
+html[data-theme="skyrent"] [class*="tabular"],
+html[data-theme="skyrent"] [data-fin],
+html[data-theme="skyrent"] main td.text-right {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Претониране на съдържанието ────────────────────────────────────────────
+   Dashboard и Import още рендират сурови Tailwind неутрали. Същият pattern
+   като .fin-surface, но скоупнат към main и само в тази тема — компонентите
+   не се пипат. */
+html[data-theme="skyrent"] main .bg-white          { background: var(--surface) !important; }
+html[data-theme="skyrent"] main .bg-gray-50,
+html[data-theme="skyrent"] main .bg-slate-50       { background: color-mix(in srgb, var(--surface) 92%, var(--page-fg) 8%) !important; }
+html[data-theme="skyrent"] main .bg-slate-100      { background: color-mix(in srgb, var(--surface) 85%, var(--page-fg) 15%) !important; }
+html[data-theme="skyrent"] main .text-gray-900,
+html[data-theme="skyrent"] main .text-gray-800     { color: var(--page-fg) !important; }
+html[data-theme="skyrent"] main .text-gray-700,
+html[data-theme="skyrent"] main .text-gray-600     { color: #4F4B44 !important; }
+html[data-theme="skyrent"] main .text-gray-500,
+html[data-theme="skyrent"] main .text-gray-400,
+html[data-theme="skyrent"] main .text-gray-300     { color: var(--muted) !important; }
+html[data-theme="skyrent"] main .border,
+html[data-theme="skyrent"] main .border-gray-100,
+html[data-theme="skyrent"] main .border-gray-200   { border-color: var(--surface-border) !important; }
+html[data-theme="skyrent"] main .divide-gray-100 > * + *,
+html[data-theme="skyrent"] main .divide-gray-200 > * + * { border-color: #F3EFE6 !important; }
+html[data-theme="skyrent"] main .bg-blue-50        { background: rgba(63,127,160,.12) !important; }
+
+/* Дисплей шрифт за заглавията в съдържанието (Playfair 400, никога по-тежко) */
+html[data-theme="skyrent"] main h1,
+html[data-theme="skyrent"] main h2 {
+  font-family: var(--font-display);
+  font-weight: 400;
+  letter-spacing: -.012em;
+}
+
+/* ── Skyrent шел · ляв групиран сайдбар ─────────────────────────────────────
+   Компонентът (components/Sidebar.jsx) се рендира само под тази тема и само
+   от 900px нагоре, затова класовете не са допълнително скоупнати. */
+/* Логото и профилът стоят закотвени; скролва само списъкът с менюта — иначе
+   при 24 таба в Разширен режим профилът пада под сгъвката. */
+.sky-aside {
+  width: 232px; flex-shrink: 0;
+  background: var(--shell-bg);
+  padding: 22px 0 18px;
+  display: flex; flex-direction: column; gap: 22px;
+  height: 100vh; position: sticky; top: 0; align-self: flex-start; overflow: hidden;
+}
+.sky-aside[data-collapsed] { width: 62px; padding: 20px 0; gap: 14px; }
+
+.sky-brand {
+  display: flex; align-items: center; gap: 11px; padding: 0 22px;
+}
+.sky-aside[data-collapsed] .sky-brand { padding: 0; justify-content: center; }
+.sky-brand-name {
+  font-family: var(--font-display); font-size: 19px; color: #F4F1EA; line-height: 1;
+}
+
+.sky-nav {
+  display: flex; flex-direction: column; gap: 18px; padding: 0 12px;
+  flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin;
+  scrollbar-color: rgba(224,189,110,.25) transparent;
+}
+/* Chromium не чете scrollbar-width — иначе в ink сайдбара стои светла лента */
+.sky-nav::-webkit-scrollbar { width: 6px; }
+.sky-nav::-webkit-scrollbar-track { background: transparent; }
+.sky-nav::-webkit-scrollbar-thumb { background: rgba(224,189,110,.22); border-radius: 3px; }
+.sky-nav::-webkit-scrollbar-thumb:hover { background: rgba(224,189,110,.38); }
+.sky-aside[data-collapsed] .sky-nav { gap: 6px; padding: 0 8px; }
+.sky-nav-group {
+  font-size: 9.5px; font-weight: 700; letter-spacing: .22em; text-transform: uppercase;
+  color: #6C6758; padding: 0 10px 8px;
+}
+.sky-nav-items { display: flex; flex-direction: column; gap: 2px; }
+
+.sky-nav-row {
+  position: relative; width: 100%;
+  display: flex; align-items: center; gap: 11px;
+  padding: 9px 10px; border: 0; border-radius: 8px; background: none; cursor: pointer;
+  font-family: var(--font-sans); font-size: 13px; color: var(--shell-fg); text-align: left;
+  transition: background .14s ease, color .14s ease;
+}
+.sky-nav-row:hover { background: var(--shell-hover-bg); color: var(--shell-fg-strong); }
+.sky-nav-row[data-active] {
+  background: rgba(224,189,110,.14); color: #F4F1EA; font-weight: 600;
+}
+.sky-nav-row[data-active]::before {
+  content: ''; position: absolute; left: 0; top: 9px; bottom: 9px;
+  width: 2px; border-radius: 2px; background: #E0BD6E;
+}
+.sky-nav-icon { font-size: 12px; opacity: .7; line-height: 1; flex-shrink: 0; }
+.sky-nav-row[data-active] .sky-nav-icon { color: #E0BD6E; opacity: 1; }
+.sky-nav-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.sky-aside[data-collapsed] .sky-nav-row { padding: 8px; justify-content: center; }
+.sky-aside[data-collapsed] .sky-nav-row[data-active] {
+  background: rgba(224,189,110,.16); color: #E0BD6E;
+}
+.sky-aside[data-collapsed] .sky-nav-row[data-active]::before { content: none; }
+
+.sky-profile {
+  margin-top: auto; padding: 16px 22px 0; display: flex; align-items: center; gap: 10px;
+  border-top: 1px solid rgba(244,241,234,.1); margin-left: 22px; margin-right: 22px;
+  padding-left: 0; padding-right: 0;
+}
+.sky-aside[data-collapsed] .sky-profile { margin: auto 12px 0; justify-content: center; }
+.sky-avatar {
+  width: 30px; height: 30px; border-radius: 50%; flex-shrink: 0;
+  background: rgba(224,189,110,.16); color: #E0BD6E;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 700;
+}
+.sky-profile-name {
+  font-size: 12px; font-weight: 600; color: #F4F1EA;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.sky-profile-meta {
+  font-size: 10px; color: #7D786A;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.sky-logout {
+  background: none; border: 0; cursor: pointer; flex-shrink: 0;
+  font-family: var(--font-sans); font-size: 10.5px; color: #7D786A; padding: 4px 2px;
+}
+.sky-logout:hover { color: #E0BD6E; }
+
+/* Топбар над съдържанието — държи контролите, които нямат място в сайдбара */
+.sky-topbar {
+  display: flex; align-items: center; justify-content: flex-end; gap: 12px;
+  padding: 14px 32px; border-bottom: 1px solid #E1DACA; background: var(--page-bg);
+}
+
+/* В шел режим съдържанието ползва цялата ширина, не max-w-7xl */
+html[data-theme="skyrent"] .sky-content > main { max-width: none; padding: 24px 32px 40px; }
+
+.sky-brand-link {
+  display: flex; align-items: center; gap: 11px; min-width: 0;
+  background: none; border: 0; padding: 0; cursor: pointer; text-decoration: none;
+}
+.sky-collapse {
+  margin-left: auto; background: none; border: 0; cursor: pointer;
+  color: #6C6758; font-size: 14px; line-height: 1; padding: 2px 4px;
+}
+.sky-collapse:hover { color: #E0BD6E; }
+
+/* ── Табло · оперативен блок „кой е платил" (components/RentPulse.jsx) ──────
+   Ползва темовите променливи, така че работи под всяка тема; типографията и
+   плътността идват от Skyrent визията. */
+.rp { margin-bottom: 26px; }
+
+.rp-kpis {
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-bottom: 18px;
+}
+@media (max-width: 900px) { .rp-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 520px) { .rp-kpis { grid-template-columns: 1fr; } }
+
+.rp-kpi {
+  position: relative; overflow: hidden;
+  background: var(--surface); border: 1px solid var(--surface-border);
+  border-radius: 13px; padding: 17px 18px;
+  box-shadow: var(--shadow-card);
+  transition: transform .18s ease, box-shadow .18s ease;
+}
+.rp-kpi:hover { transform: translateY(-2px); box-shadow: 0 14px 34px -22px rgba(0,0,0,.45); }
+.rp-rule { position: absolute; top: 0; left: 18px; right: 18px; height: 2px; border-radius: 0 0 2px 2px; opacity: .9; }
+
+.rp-eyebrow {
+  font-size: 10px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase;
+  color: var(--muted);
+}
+.rp-value {
+  font-family: var(--font-display, Georgia, serif); font-weight: 400;
+  font-size: clamp(24px, 2.3vw, 30px); line-height: 1.05; letter-spacing: -.012em;
+  color: var(--page-fg); font-variant-numeric: tabular-nums; margin-top: 10px;
+}
+.rp-sub { font-size: 11px; line-height: 1.4; color: var(--muted); margin-top: 6px; }
+
+.rp-grid { display: grid; grid-template-columns: minmax(0, 1.62fr) minmax(0, 1fr); gap: 18px; align-items: start; }
+@media (max-width: 1100px) { .rp-grid { grid-template-columns: 1fr; } }
+
+.rp-card {
+  background: var(--surface); border: 1px solid var(--surface-border);
+  border-radius: 14px; box-shadow: var(--shadow-card); overflow: hidden;
+}
+.rp-card-head {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+  padding: 16px 20px 12px;
+}
+.rp-h {
+  font-family: var(--font-display, Georgia, serif); font-weight: 400; font-size: 18px;
+  letter-spacing: -.01em; color: var(--page-fg); margin: 0;
+  display: flex; align-items: center; gap: 9px;
+}
+.rp-h::before { content: ''; width: 14px; height: 1.5px; background: var(--accent); opacity: .8; }
+.rp-meta { font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
+
+.rp-table-wrap { overflow-x: auto; }
+.rp-table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.rp-table thead th {
+  font-size: 9.5px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase;
+  color: var(--muted); text-align: left; padding: 10px 20px;
+  border-bottom: 1px solid var(--surface-border); white-space: nowrap;
+}
+.rp-table td { padding: 12px 20px; border-bottom: 1px solid var(--surface-border); font-size: 12.5px; }
+.rp-table tbody tr:last-child td { border-bottom: 0; }
+.rp-table tbody tr { transition: background .14s ease; }
+.rp-table tbody tr:hover { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.rp-table tbody tr[data-st="due"]  { background: color-mix(in srgb, var(--neg) 4%, transparent); }
+.rp-table tbody tr[data-st="part"] { background: color-mix(in srgb, var(--warn) 6%, transparent); }
+.ta-r { text-align: right; }
+.rp-addr   { font-weight: 600; color: var(--page-fg); }
+.rp-tenant { color: var(--muted); }
+.rp-num    { font-family: var(--font-mono); white-space: nowrap; }
+
+.rp-pill {
+  display: inline-block; padding: 3px 9px; border-radius: 20px;
+  font-size: 10.5px; font-weight: 700; white-space: nowrap;
+}
+.rp-paid { background: color-mix(in srgb, var(--pos) 12%, transparent); color: var(--pos); }
+.rp-due  { background: color-mix(in srgb, var(--neg) 12%, transparent); color: var(--neg); }
+.rp-part { background: color-mix(in srgb, var(--warn) 14%, transparent); color: var(--warn); }
+.rp-free { background: color-mix(in srgb, var(--page-fg) 8%, transparent); color: var(--muted); }
+
+/* Панелът „изисква действие" е единственият ink блок в съдържанието */
+.rp-action {
+  background: var(--shell-bg); border-radius: 14px; padding: 19px 20px;
+  display: flex; flex-direction: column; gap: 14px;
+}
+.rp-eyebrow-ink { color: var(--shell-fg); }
+.rp-act { display: flex; gap: 10px; align-items: flex-start; }
+.rp-dot { width: 6px; height: 6px; border-radius: 50%; margin-top: 6px; flex-shrink: 0; }
+.rp-act-t { font-size: 12.5px; font-weight: 600; color: var(--shell-fg-strong); }
+.rp-act-s { font-size: 11px; color: var(--shell-fg); margin-top: 2px; }
+.rp-act-empty { font-size: 12px; color: var(--shell-fg); }
+.rp-act-btn {
+  margin-top: auto; align-self: flex-start;
+  background: none; border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  color: var(--accent); border-radius: 9px; padding: 7px 14px;
+  font-family: var(--font-sans); font-size: 12px; font-weight: 600; cursor: pointer;
+  transition: background .14s ease;
+}
+.rp-act-btn:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }

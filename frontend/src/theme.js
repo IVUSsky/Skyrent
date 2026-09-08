@@ -3,6 +3,32 @@ export const FINANCE_TABS = new Set([
 ])
 
 export const THEMES = {
+  // ── Skyrent — ink + брас върху хартия: тон на частна банка, плътност на ────
+  //    финансов терминал. Playfair (заглавия/KPI) · Manrope (интерфейс) ·
+  //    JetBrains Mono (суми, IBAN, ЕИК, дати — винаги tabular-nums).
+  skyrent: {
+    label: 'Skyrent',
+    hint: 'ink · брас · хартия',
+    icon: '◆',
+    vars: {
+      '--page-bg': '#F4F1EA',
+      '--page-fg': '#1B1B22',
+      '--shell-bg': '#15151E',
+      '--shell-fg': '#9A9488',
+      '--shell-fg-strong': '#F4F1EA',
+      '--shell-hover-bg': 'rgba(224,189,110,0.14)',
+      '--accent': '#C9A24B',
+      '--accent-fg': '#15151E',
+      '--surface': '#FFFDF8',
+      '--surface-border': '#E5DFD1',
+      '--muted': '#6E6A60',
+      '--font-display': "'Playfair Display', Georgia, serif",
+      '--font-sans': "'Manrope', system-ui, sans-serif",
+      '--font-mono': "'JetBrains Mono', ui-monospace, monospace",
+      '--radius': '12px',
+      '--shadow-card': '0 1px 2px rgba(20,15,5,.04), 0 18px 40px -30px rgba(20,15,5,.25)',
+    }
+  },
   // ── Capital — флагман: частен wealth terminal (ink + brass + sage) ──────────
   capital: {
     label: 'Capital',
@@ -142,4 +168,4 @@ export const THEMES = {
   }
 }
 
-export const THEME_ORDER = ['ivory', 'capital', 'current', 'linear', 'stripe', 'bloomberg']
+export const THEME_ORDER = ['skyrent', 'ivory', 'capital', 'current', 'linear', 'stripe', 'bloomberg']
