@@ -240,8 +240,20 @@ export default function Invoices({ API, role }) {
       )}
 
       {/* Header */}
-      <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
-        <h2 className="text-2xl font-bold text-gray-800">🧾 Фактури</h2>
+      <div className="iv-mast mb-6">
+        <div>
+          {/* Жива бройка: издадени фактури и кредитни известия */}
+          <div className="iv-mast-eyebrow">
+            {(() => {
+              const inv = invoices.filter(i => i.type !== 'credit_note')
+              const cn  = invoices.length - inv.length
+              const a = `${inv.length} ${inv.length === 1 ? 'издадена' : 'издадени'}`
+              const b = cn === 1 ? '1 кредитно известие' : `${cn} кредитни известия`
+              return cn ? `${a} · ${b}` : a
+            })()}
+          </div>
+          <h2 className="iv-mast-title">Фактури</h2>
+        </div>
         <button onClick={exportCSV}
           className="flex items-center gap-2 px-4 py-2 text-sm font-medium bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg">
           📊 Експорт CSV (Controlisy)

@@ -714,8 +714,23 @@ export default function Contracts({ API }) {
       )}
 
       {/* Header tabs */}
-      <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
-        <h2 className="text-2xl font-bold text-gray-800">📋 Договори</h2>
+      <div className="iv-mast mb-5">
+        <div>
+          {/* Жива бройка: активни + колко изтичат до 60 дни */}
+          <div className="iv-mast-eyebrow">
+            {(() => {
+              const active = contracts.filter(c => c.status === 'active')
+              const soon = active.filter(c => {
+                if (!c.end_date) return false
+                const d = Math.ceil((new Date(c.end_date) - Date.now()) / 86400000)
+                return d >= 0 && d <= 60
+              })
+              const a = `${active.length} ${active.length === 1 ? 'активен' : 'активни'}`
+              return soon.length ? `${a} · ${soon.length} за подновяване` : a
+            })()}
+          </div>
+          <h2 className="iv-mast-title">Договори</h2>
+        </div>
         <div className="flex gap-2">
           {[['list','📁 Архив'],['new','+ Нов договор'],['upload','📎 Качи съществуващ'],['templates','📝 Шаблони']].map(([t,l]) => (
             <button key={t} onClick={() => setTab(t)}

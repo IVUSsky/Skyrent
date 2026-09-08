@@ -273,7 +273,15 @@ export default function Portfolio({ API, role }) {
     <div className="fin-surface">
       <header className="iv-mast mb-5">
         <div>
-          <div className="iv-mast-eyebrow">Активи · имоти</div>
+          {/* Живата бройка вместо статичен надпис — визуалната система иска
+              шапката на регистъра да казва какво има вътре. */}
+          <div className="iv-mast-eyebrow">
+            {properties.length} {properties.length === 1 ? "имот" : "имота"}
+            {(() => {
+              const rent = properties.reduce((s, p) => s + Number(p['наем'] || 0), 0)
+              return rent > 0 ? ` · ${Math.round(rent).toLocaleString('bg-BG')} € месечен наем` : ''
+            })()}
+          </div>
           <h2 className="iv-mast-title">Портфолио</h2>
         </div>
         <div className="flex items-center gap-3">
