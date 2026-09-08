@@ -37,6 +37,7 @@ function DepositsTab({ API, properties }) {
   const [loading, setLoading]     = useState(true)
   const [showDetails, setShowDetails] = useState(false)
   const [retaining, setRetaining] = useState(null)
+  const [learnMsg, setLearnMsg]   = useState('')
 
   const load = () => {
     setLoading(true)
@@ -47,11 +48,24 @@ function DepositsTab({ API, properties }) {
   }
   useEffect(() => { load() }, [API])
 
+  // Присвояването се запомня — следващото извлечение разпознава платеца само.
+  // Сървърът връща колко други негови транзакции са получили имота наведнъж.
   const assignProperty = (txId, propertyId) => {
     apiFetch(`${API}/api/import/transactions/${txId}`, {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ property_id: propertyId }),
-    }).then(load)
+    })
+      .then(r => r.json())
+      .then(d => {
+        if (d?.rule_saved) {
+          setLearnMsg(d.affected
+            ? `Запомнено — и още ${d.affected} плащания на този платец получиха имота.`
+            : 'Запомнено — следващото извлечение ще го разпознае само.')
+          setTimeout(() => setLearnMsg(''), 6000)
+        }
+        load()
+      })
+      .catch(() => load())
   }
 
   const retainDeposit = (txId) => {
@@ -170,6 +184,12 @@ function DepositsTab({ API, properties }) {
               })}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {learnMsg && (
+        <div className="bg-green-50 border border-green-200 text-green-800 rounded-xl px-4 py-2.5 text-sm">
+          ✓ {learnMsg}
         </div>
       )}
 
