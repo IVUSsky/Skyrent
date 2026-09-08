@@ -14,12 +14,31 @@ module.exports = function(req, res, next) {
   } catch {
     return res.status(401).json({ error: 'Invalid token' });
   }
+  // Подписът НЕ е достатъчен — трябва и правилното ПРЕДНАЗНАЧЕНИЕ на токена.
+  // Стейдж токенът от 2FA (`{ id, stage:'totp' }`, издаван СЛЕД паролата и ПРЕДИ
+  // кода) се подписва със същия ключ. Без тази проверка той минаваше за сесия:
+  // няма organization_id → падаше на org 1, няма role → подминаваше оградите за
+  // tenant/broker в server.js. Всеки наемател, който си включи 2FA, получаваше
+  // достъп до данните на org 1. Виж RFC 8725 §3.12 — различните типове токени
+  // трябва да са взаимно изключващи се.
+  if (payload.stage) return res.status(401).json({ error: 'Invalid token' });
+
+  // Задължителни права. Липсваща роля минаваше `role !== 'tenant'` проверките.
+  const ROLES = new Set(['admin', 'broker', 'tenant']);
+  if (!payload.id || !ROLES.has(payload.role)) {
+    return res.status(401).json({ error: 'Invalid token' });
+  }
+
+  // Задължителна организация — без fallback към 1. Всички издавани токени носят
+  // organization_id от Phase 1 насам, а токените живеят 7 дни, тоест наследени
+  // без това поле отдавна са изтекли.
+  const orgId = Number(payload.organization_id);
+  if (!orgId) return res.status(401).json({ error: 'Invalid token' });
+
   try {
-    req.user = payload; // { id, username, role, organization_id?, is_superadmin? }
+    req.user = payload; // { id, username, role, organization_id, is_superadmin? }
     // Multi-tenant: org базата на потребителя влиза в ALS контекста на заявката
     // → dbProxy.prepare() в route-овете вижда САМО нея (физическа изолация).
-    // Стар token без organization_id (отпреди Phase 1) → org 1.
-    const orgId = Number(payload.organization_id) || 1;
     req.user.organization_id = orgId;
     const orgDb = getOrgDb(orgId);
     als.run({ orgDb, orgId }, next);

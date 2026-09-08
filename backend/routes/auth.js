@@ -152,13 +152,23 @@ function consumeBackupCode(db, userId, code) {
 }
 
 // Inline auth middleware (so this router can self-protect a subset of routes)
+// Пази 2FA маршрутите. Изисква ПЪЛНА сесия — стейдж токенът от 2FA се подписва
+// със същия ключ, но няма роля, тоест минаваше проверките от вида
+// `role === 'tenant'` в самите handler-и. Виж бележката в middleware/auth.js.
 function requireAuth(req, res, next) {
   const token = req.headers.authorization?.split(' ')[1];
   if (!token) return res.status(401).json({ error: 'Unauthorized' });
+  let payload;
   try {
-    req.user = jwt.verify(token, JWT_SECRET);
-    next();
-  } catch { res.status(401).json({ error: 'Invalid token' }); }
+    payload = jwt.verify(token, JWT_SECRET);
+  } catch { return res.status(401).json({ error: 'Invalid token' }); }
+
+  const ROLES = new Set(['admin', 'broker', 'tenant']);
+  if (payload.stage || !payload.id || !ROLES.has(payload.role)) {
+    return res.status(401).json({ error: 'Invalid token' });
+  }
+  req.user = payload;
+  next();
 }
 
 // Multi-tenant (Phase 1): users + login_audit живеят в control.db → модулът
