@@ -1,4 +1,5 @@
 import { apiFetch } from '../api'
+import RentPulse from './RentPulse'
 import React, { useState, useEffect } from 'react'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell
@@ -80,7 +81,7 @@ function LegendModal({ onClose }) {
   )
 }
 
-export default function Dashboard({ API }) {
+export default function Dashboard({ API, onNavigate }) {
   const [metrics, setMetrics] = useState(null)
   const [showLegend, setShowLegend] = useState(false)
   const [monthly, setMonthly] = useState([])
@@ -200,6 +201,10 @@ export default function Dashboard({ API }) {
         </button>
       </header>
       {showLegend && <LegendModal onClose={() => setShowLegend(false)} />}
+
+      {/* „Кой е платил и какво чака мен" — първият въпрос, на който екранът
+          отговаря. Финансовите показатели остават непроменени под него. */}
+      <RentPulse API={API} onNavigate={onNavigate} />
 
       {/* KPI Grid — ОПЕРАТИВЕН месечен пулс. Портфейлните метрики (NOI/DSCR/
           LTV/Cap Rate/Капитал/Активи) живеят в 📊 Инвеститор — без дублаж. */}

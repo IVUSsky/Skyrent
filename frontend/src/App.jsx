@@ -497,7 +497,7 @@ export default function App() {
         {role !== 'tenant' && entityInfo.individual && <TaxSeasonReminder onGoToTax={() => setActiveTab('invoices')} />}
         <ErrorBoundary resetKey={validTab}>
         <Suspense fallback={<TabFallback/>}>
-          {validTab === 'dashboard' && <Dashboard API={API} />}
+          {validTab === 'dashboard' && <Dashboard API={API} onNavigate={navigateTo} />}
           {validTab === 'investor'  && <InvestorView API={API} />}
           {validTab === 'portfolio' && <Portfolio API={API} role={role} />}
           {validTab === 'deeds' && <Deeds API={API} />}

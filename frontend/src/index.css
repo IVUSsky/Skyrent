@@ -372,3 +372,101 @@ html[data-theme="skyrent"] .sky-content > main { max-width: none; padding: 24px 
   color: #6C6758; font-size: 14px; line-height: 1; padding: 2px 4px;
 }
 .sky-collapse:hover { color: #E0BD6E; }
+
+/* ── Табло · оперативен блок „кой е платил" (components/RentPulse.jsx) ──────
+   Ползва темовите променливи, така че работи под всяка тема; типографията и
+   плътността идват от Skyrent визията. */
+.rp { margin-bottom: 26px; }
+
+.rp-kpis {
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-bottom: 18px;
+}
+@media (max-width: 900px) { .rp-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 520px) { .rp-kpis { grid-template-columns: 1fr; } }
+
+.rp-kpi {
+  position: relative; overflow: hidden;
+  background: var(--surface); border: 1px solid var(--surface-border);
+  border-radius: 13px; padding: 17px 18px;
+  box-shadow: var(--shadow-card);
+  transition: transform .18s ease, box-shadow .18s ease;
+}
+.rp-kpi:hover { transform: translateY(-2px); box-shadow: 0 14px 34px -22px rgba(0,0,0,.45); }
+.rp-rule { position: absolute; top: 0; left: 18px; right: 18px; height: 2px; border-radius: 0 0 2px 2px; opacity: .9; }
+
+.rp-eyebrow {
+  font-size: 10px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase;
+  color: var(--muted);
+}
+.rp-value {
+  font-family: var(--font-display, Georgia, serif); font-weight: 400;
+  font-size: clamp(24px, 2.3vw, 30px); line-height: 1.05; letter-spacing: -.012em;
+  color: var(--page-fg); font-variant-numeric: tabular-nums; margin-top: 10px;
+}
+.rp-sub { font-size: 11px; line-height: 1.4; color: var(--muted); margin-top: 6px; }
+
+.rp-grid { display: grid; grid-template-columns: minmax(0, 1.62fr) minmax(0, 1fr); gap: 18px; align-items: start; }
+@media (max-width: 1100px) { .rp-grid { grid-template-columns: 1fr; } }
+
+.rp-card {
+  background: var(--surface); border: 1px solid var(--surface-border);
+  border-radius: 14px; box-shadow: var(--shadow-card); overflow: hidden;
+}
+.rp-card-head {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+  padding: 16px 20px 12px;
+}
+.rp-h {
+  font-family: var(--font-display, Georgia, serif); font-weight: 400; font-size: 18px;
+  letter-spacing: -.01em; color: var(--page-fg); margin: 0;
+  display: flex; align-items: center; gap: 9px;
+}
+.rp-h::before { content: ''; width: 14px; height: 1.5px; background: var(--accent); opacity: .8; }
+.rp-meta { font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
+
+.rp-table-wrap { overflow-x: auto; }
+.rp-table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.rp-table thead th {
+  font-size: 9.5px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase;
+  color: var(--muted); text-align: left; padding: 10px 20px;
+  border-bottom: 1px solid var(--surface-border); white-space: nowrap;
+}
+.rp-table td { padding: 12px 20px; border-bottom: 1px solid var(--surface-border); font-size: 12.5px; }
+.rp-table tbody tr:last-child td { border-bottom: 0; }
+.rp-table tbody tr { transition: background .14s ease; }
+.rp-table tbody tr:hover { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.rp-table tbody tr[data-st="due"]  { background: color-mix(in srgb, var(--neg) 4%, transparent); }
+.rp-table tbody tr[data-st="part"] { background: color-mix(in srgb, var(--warn) 6%, transparent); }
+.ta-r { text-align: right; }
+.rp-addr   { font-weight: 600; color: var(--page-fg); }
+.rp-tenant { color: var(--muted); }
+.rp-num    { font-family: var(--font-mono); white-space: nowrap; }
+
+.rp-pill {
+  display: inline-block; padding: 3px 9px; border-radius: 20px;
+  font-size: 10.5px; font-weight: 700; white-space: nowrap;
+}
+.rp-paid { background: color-mix(in srgb, var(--pos) 12%, transparent); color: var(--pos); }
+.rp-due  { background: color-mix(in srgb, var(--neg) 12%, transparent); color: var(--neg); }
+.rp-part { background: color-mix(in srgb, var(--warn) 14%, transparent); color: var(--warn); }
+.rp-free { background: color-mix(in srgb, var(--page-fg) 8%, transparent); color: var(--muted); }
+
+/* Панелът „изисква действие" е единственият ink блок в съдържанието */
+.rp-action {
+  background: var(--shell-bg); border-radius: 14px; padding: 19px 20px;
+  display: flex; flex-direction: column; gap: 14px;
+}
+.rp-eyebrow-ink { color: var(--shell-fg); }
+.rp-act { display: flex; gap: 10px; align-items: flex-start; }
+.rp-dot { width: 6px; height: 6px; border-radius: 50%; margin-top: 6px; flex-shrink: 0; }
+.rp-act-t { font-size: 12.5px; font-weight: 600; color: var(--shell-fg-strong); }
+.rp-act-s { font-size: 11px; color: var(--shell-fg); margin-top: 2px; }
+.rp-act-empty { font-size: 12px; color: var(--shell-fg); }
+.rp-act-btn {
+  margin-top: auto; align-self: flex-start;
+  background: none; border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  color: var(--accent); border-radius: 9px; padding: 7px 14px;
+  font-family: var(--font-sans); font-size: 12px; font-weight: 600; cursor: pointer;
+  transition: background .14s ease;
+}
+.rp-act-btn:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
