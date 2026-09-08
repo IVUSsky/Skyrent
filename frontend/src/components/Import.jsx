@@ -1282,6 +1282,33 @@ function ImportTab({ API, onSaved }) {
       )}
 
       {/* Preview */}
+      {transactions.length > 0 && (() => {
+        // „Лента с резултата" от визуалната система: колко е разпознато само и
+        // колко наистина чака теб. unknownTenants идва от бекенда и брои точно
+        // наемните преводи, за които НИТО tenant_map, НИТО правило са дали имот.
+        const waiting = unknownTenants.length
+        const auto    = Math.max(0, transactions.length - waiting)
+        const pct     = transactions.length ? (auto / transactions.length) * 100 : 0
+        return (
+          <div className="ip-result">
+            <div className="ip-result-text">
+              <strong>{auto} от {transactions.length}</strong> превода са разпознати автоматично
+              {waiting > 0
+                ? <> · <span className="ip-waiting">{waiting} чакат решение</span></>
+                : <> · нищо не чака теб</>}
+            </div>
+            <div className="ip-bar" role="img"
+              aria-label={`${pct.toFixed(0)} процента разпознати автоматично`}>
+              <span className="ip-bar-auto" style={{ width: `${pct}%` }} />
+              {waiting > 0 && <span className="ip-bar-wait" style={{ width: `${100 - pct}%` }} />}
+            </div>
+            {dupCount > 0 && (
+              <div className="ip-result-note">{dupCount} дублирани ще се пропуснат при запис</div>
+            )}
+          </div>
+        )
+      })()}
+
       {transactions.length > 0 && (
         <div>
           <div className="flex flex-wrap gap-3 items-center justify-between mb-4">

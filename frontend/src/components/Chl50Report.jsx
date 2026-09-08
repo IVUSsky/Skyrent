@@ -42,12 +42,31 @@ export default function Chl50Report({ API = '' }) {
             ? <div className="text-gray-400 py-6 text-center text-sm">Няма записан наемен доход за {year} г. Щом има, тук ще се появи готова справка.</div>
             : (
               <>
-                {/* Демистифициращото число — голямо, приятелско */}
-                <div className="rounded-xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-white p-5 mb-4">
-                  <div className="text-sm text-gray-500">Данъкът ти за {year}</div>
-                  <div className="text-3xl font-bold text-emerald-700 mt-0.5">~ {fmt0(data.tax)} €</div>
-                  <div className="text-sm text-gray-600 mt-2">
-                    От {fmt0(data.gross)} € наем. Облага се само 90% (10% са признати разходи), с плосък данък 10%. По-малко, отколкото звучи. 🙂
+                {/* Ink резюме — четирите числа наведнъж, данъкът е единственият
+                    брас акцент. Замества стария зелен блок И решетката отдолу,
+                    за да няма две резюмета на един екран. */}
+                <div className="tx-ink">
+                  <div className="tx-ink-grid">
+                    <div>
+                      <div className="tx-eyebrow">Наемен доход</div>
+                      <div className="tx-val">{fmt0(data.gross)} €</div>
+                    </div>
+                    <div>
+                      <div className="tx-eyebrow">Нормативни разходи 10 %</div>
+                      <div className="tx-val">− {fmt0(data.deductible)} €</div>
+                    </div>
+                    <div>
+                      <div className="tx-eyebrow">Данъчна основа</div>
+                      <div className="tx-val">{fmt0(data.base)} €</div>
+                    </div>
+                    <div>
+                      <div className="tx-eyebrow tx-eyebrow-accent">Дължим данък 10 %</div>
+                      <div className="tx-val tx-val-accent">{fmt0(data.tax)} €</div>
+                    </div>
+                  </div>
+                  <div className="tx-ink-note">
+                    Облага се 90 % от наема — 10 % са признати разходи, данъкът е плосък 10 %.
+                    По-малко, отколкото звучи.
                   </div>
                 </div>
 
@@ -62,12 +81,26 @@ export default function Chl50Report({ API = '' }) {
                   </button>
                 </div>
 
-                {/* Числата (по избор за детайли) */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
-                  <Box label="Брутен наем" val={`${fmt(data.gross)} €`} />
-                  <Box label="Норм. разходи (10%)" val={`− ${fmt(data.deductible)} €`} muted />
-                  <Box label="Облагаема основа" val={`${fmt(data.base)} €`} muted />
-                  <Box label="Дължим данък (10%)" val={`${fmt(data.tax)} €`} accent />
+                {/* Срокът е 30 април на СЛЕДВАЩАТА година спрямо отчетната */}
+                {(() => {
+                  const due  = new Date(`${Number(year) + 1}-04-30T23:59:59`)
+                  const days = Math.ceil((due - Date.now()) / 86400000)
+                  return (
+                    <div className="tx-due">
+                      Срок за деклариране: <b>30 април {Number(year) + 1}</b>
+                      {days > 0
+                        ? <> · остават <b>{days}</b> {days === 1 ? 'ден' : 'дни'}</>
+                        : <> · срокът е минал</>}
+                    </div>
+                  )
+                })()}
+
+                {/* Точните стойности до стотинка — резюмето отгоре е закръглено */}
+                <div className="tx-exact">
+                  <span>Брутен наем <b>{fmt(data.gross)} €</b></span>
+                  <span>Норм. разходи <b>− {fmt(data.deductible)} €</b></span>
+                  <span>Основа <b>{fmt(data.base)} €</b></span>
+                  <span>Данък <b>{fmt(data.tax)} €</b></span>
                 </div>
 
                 {data.has_estimates && (
@@ -129,11 +162,4 @@ export default function Chl50Report({ API = '' }) {
   )
 }
 
-function Box({ label, val, muted, accent }) {
-  return (
-    <div className={`rounded-lg border px-3 py-2.5 ${accent ? 'border-emerald-200 bg-emerald-50' : 'border-gray-200 bg-gray-50'}`}>
-      <div className="text-xs text-gray-500 mb-1">{label}</div>
-      <div className={`font-bold ${accent ? 'text-emerald-700 text-lg' : muted ? 'text-gray-600' : 'text-gray-800'}`}>{val}</div>
-    </div>
-  )
-}
+
