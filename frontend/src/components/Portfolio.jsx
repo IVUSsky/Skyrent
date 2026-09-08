@@ -46,6 +46,7 @@ export default function Portfolio({ API, role }) {
   const [knowledgeProp, setKnowledgeProp] = useState(null)
   const [photos, setPhotos] = useState([])
   const [uploading, setUploading] = useState(false)
+  const [photoErr, setPhotoErr] = useState('')
   const photoInputRef = React.useRef()
   const [inquiries, setInquiries] = useState([])
   const [showInquiries, setShowInquiries] = useState(false)
@@ -206,14 +207,49 @@ export default function Portfolio({ API, role }) {
       .then(r => r.json()).then(setPhotos)
   }
 
+  // Досега отказът минаваше мълчаливо: нямаше проверка на r.ok, нито .catch —
+  // при 400 (грешен формат / голям файл) кодът презареждаше списъка все едно
+  // всичко е наред, спинърът спираше и потребителят не разбираше защо няма
+  // снимка. Сървърът връща ясно съобщение (server.js error handler) — показваме
+  // го. Плюс пред-проверка на клиента със същите правила като
+  // backend/lib/uploadFilter.js, за да не се хаби качване.
+  const OK_EXT = /\.(jpe?g|png|webp)$/i
+  const MAX_BYTES = 10 * 1024 * 1024
+
   const uploadPhotos = (files) => {
-    if (!files.length) return
+    const list = Array.from(files || [])
+    if (!list.length) return
+    setPhotoErr('')
+
+    const wrongType = list.filter(f => !OK_EXT.test(f.name))
+    const tooBig    = list.filter(f => OK_EXT.test(f.name) && f.size > MAX_BYTES)
+    const ok        = list.filter(f => OK_EXT.test(f.name) && f.size <= MAX_BYTES)
+
+    const problems = []
+    if (wrongType.length) {
+      const heic = wrongType.some(f => /\.(heic|heif)$/i.test(f.name))
+      problems.push(
+        `${wrongType.map(f => f.name).join(', ')} — приемат се само JPG, PNG и WEBP.` +
+        (heic ? ' HEIC е форматът на iPhone по подразбиране: в Настройки → Камера → Формати избери „Най-съвместим", или прати снимката като JPEG.' : '')
+      )
+    }
+    if (tooBig.length) {
+      problems.push(`${tooBig.map(f => `${f.name} (${(f.size / 1048576).toFixed(1)} MB)`).join(', ')} — над 10 MB.`)
+    }
+    if (problems.length) setPhotoErr(problems.join(' '))
+    if (!ok.length) return
+
     setUploading(true)
     const fd = new FormData()
-    Array.from(files).forEach(f => fd.append('photos', f))
+    ok.forEach(f => fd.append('photos', f))
     apiFetch(`${API}/api/properties/${photosProp.id}/photos`, { method: 'POST', body: fd })
-      .then(r => r.json())
+      .then(async r => {
+        const d = await r.json().catch(() => ({}))
+        if (!r.ok) throw new Error(d.error || `Сървърът отказа (${r.status})`)
+        return d
+      })
       .then(() => apiFetch(`${API}/api/properties/${photosProp.id}/photos`).then(r => r.json()).then(setPhotos))
+      .catch(e => setPhotoErr(prev => [prev, e.message].filter(Boolean).join(' ')))
       .finally(() => setUploading(false))
   }
 
@@ -626,8 +662,18 @@ export default function Portfolio({ API, role }) {
                     </>
                 }
               </div>
-              <input ref={photoInputRef} type="file" accept="image/*" multiple className="hidden"
-                onChange={e => uploadPhotos(e.target.files)} />
+              {/* accept ограничава и диалога — иначе iPhone предлага HEIC,
+                  който сървърът отхвърля чак след качването */}
+              <input ref={photoInputRef} type="file" multiple className="hidden"
+                accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
+                onChange={e => { uploadPhotos(e.target.files); e.target.value = '' }} />
+
+              {photoErr && (
+                <div className="mb-5 -mt-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 flex items-start justify-between gap-3">
+                  <span>{photoErr}</span>
+                  <button onClick={() => setPhotoErr('')} className="text-red-400 hover:text-red-600 shrink-0">✕</button>
+                </div>
+              )}
 
               {/* Photo grid */}
               {photos.length === 0
