@@ -470,3 +470,21 @@ html[data-theme="skyrent"] .sky-content > main { max-width: none; padding: 24px 
   transition: background .14s ease;
 }
 .rp-act-btn:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+
+/* ── Банков импорт · лента с резултата ─────────────────────────────────────
+   „24 от 27 превода са разпознати автоматично · 3 чакат решение" */
+.ip-result {
+  background: var(--surface); border: 1px solid var(--surface-border);
+  border-radius: 14px; padding: 15px 18px; margin-bottom: 16px;
+  box-shadow: var(--shadow-card);
+}
+.ip-result-text { font-size: 13px; color: var(--page-fg); }
+.ip-result-text strong { font-variant-numeric: tabular-nums; }
+.ip-waiting { color: var(--warn); font-weight: 600; }
+.ip-bar {
+  display: flex; height: 6px; border-radius: 3px; overflow: hidden;
+  background: color-mix(in srgb, var(--page-fg) 7%, transparent); margin-top: 11px;
+}
+.ip-bar-auto { background: var(--pos); }
+.ip-bar-wait { background: var(--accent); }
+.ip-result-note { font-size: 11px; color: var(--muted); margin-top: 8px; }
