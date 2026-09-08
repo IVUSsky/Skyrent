@@ -603,12 +603,57 @@ module.exports = function(db) {
   });
 
   // ── PATCH /transactions/:id — assign property_id ───────────
+  // Auto-learns, точно както PATCH /category: записва правило за платеца и го
+  // прилага към останалите му транзакции без имот. Без това всяко следващо
+  // извлечение показваше същия наемател като „неразпознат" и присвояването се
+  // повтаряше ръчно всеки месец.
+  // learn:false — за еднократен случай (някой е платил вместо друг), когато
+  // не искаме бъдещите преводи на този платец да отиват към този имот.
   router.patch('/transactions/:id', (req, res) => {
     try {
-      const { property_id } = req.body;
+      const { property_id, learn } = req.body;
       if (!property_id) return res.status(400).json({ error: 'property_id е задължителен' });
-      db.prepare('UPDATE transactions SET property_id = ? WHERE id = ?').run(Number(property_id), req.params.id);
-      res.json({ ok: true });
+      const pid = Number(property_id);
+      db.prepare('UPDATE transactions SET property_id = ? WHERE id = ?').run(pid, req.params.id);
+
+      let rule_saved = false, affected = 0;
+      const tx = db.prepare('SELECT * FROM transactions WHERE id=?').get(req.params.id);
+
+      if (learn !== false && tx && tx.контрагент) {
+        // Същата нормализация като в enrichTransaction — PDF/Excel извличането
+        // дава различен брой вътрешни интервали между импортите.
+        const pattern  = tx.контрагент.replace(/\s+/g, ' ').trim();
+        const patLower = pattern.toLowerCase();
+
+        // Upsert. Категорията на съществуващо правило НЕ се пипа — тук учим
+        // само „кой плаща за кой имот".
+        const allRules = db.prepare('SELECT id, pattern FROM tx_rules').all();
+        const existing = allRules.find(r => r.pattern.replace(/\s+/g, ' ').trim().toLowerCase() === patLower);
+        if (existing) {
+          db.prepare('UPDATE tx_rules SET pattern=?, property_id=? WHERE id=?').run(pattern, pid, existing.id);
+        } else {
+          db.prepare('INSERT INTO tx_rules (pattern, категория, property_id, scope) VALUES (?,?,?,?)')
+            .run(pattern, tx.категория || 'наем', pid, tx.scope || 'business');
+        }
+        rule_saved = true;
+
+        // Прилага се към останалите транзакции на същия платец, които още нямат
+        // имот. За разлика от /category тук НЕ пипаме validated — присвояването
+        // на имот не е потвърждение на категорията.
+        const others = db.prepare(
+          'SELECT id, контрагент FROM transactions WHERE (property_id IS NULL OR property_id = 0) AND id != ?'
+        ).all(req.params.id);
+        const toUpdate = others.filter(t => t.контрагент &&
+          t.контрагент.replace(/\s+/g, ' ').trim().toLowerCase().includes(patLower));
+        if (toUpdate.length) {
+          const upd = db.prepare('UPDATE transactions SET property_id=? WHERE id=?');
+          const run = db.transaction(list => list.forEach(t => upd.run(pid, t.id)));
+          run(toUpdate);
+          affected = toUpdate.length;
+        }
+      }
+
+      res.json({ ok: true, rule_saved, affected });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
