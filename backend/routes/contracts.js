@@ -7,8 +7,8 @@ const multer = require('multer');
 const { ensureTenantUser, sendWelcomeEmail } = require('../lib/tenantOnboarding');
 const { generateRentInvoice, autoInvoiceOnActivateOn } = require('./invoices');
 const { parseRecipients } = require('../lib/email');
-const { optimizeMany } = require('../lib/imageOptimize');
-const { imagesOnly } = require('../lib/uploadFilter');
+const { optimizeMany, isDisplayable } = require('../lib/imageOptimize');
+const { imagesOnly, safeExt } = require('../lib/uploadFilter');
 const { getIssuer, issuerComplete } = require('../lib/branding');
 
 const FONT_REGULAR = path.join(__dirname, '../fonts/arial.ttf');
@@ -34,7 +34,13 @@ const upload = multer({ storage, limits: { fileSize: 5 * 1024 * 1024 } });
 // Отделен multer за снимки на лична карта (по-голям лимит за телефонни снимки)
 const idStorage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, ID_DIR),
-  filename: (req, file, cb) => cb(null, `${Date.now()}_${file.fieldname}_${file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_')}`),
+  filename: (req, file, cb) => {
+    // Разширението идва от mimetype (safeExt), не от името на клиента: HEIC се
+    // записва още от начало като .jpg и optimizeImage конвертира съдържанието.
+    const raw = file.originalname || 'id';
+    const base = path.basename(raw, path.extname(raw)).replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 40) || 'id';
+    cb(null, `${Date.now()}_${file.fieldname}_${base}${safeExt(file)}`);
+  },
 });
 const idUpload = multer({ storage: idStorage, limits: { fileSize: 10 * 1024 * 1024 }, fileFilter: imagesOnly });
 
@@ -899,8 +905,26 @@ module.exports = function(db) {
       const front = req.files?.front?.[0];
       const back  = req.files?.back?.[0];
       if (!front) return res.status(400).json({ error: 'Качи поне лицевата страна на личната карта' });
-      // Компресирай преди четене за Claude + дългосрочно съхранение
-      await optimizeMany([front.path, back?.path].filter(Boolean));
+      // Компресирай преди четене за Claude + дългосрочно съхранение.
+      // HEIC от телефон се записва като .jpg и тук съдържанието става jpeg.
+      const paths = [front.path, back?.path].filter(Boolean);
+      await optimizeMany(paths);
+
+      // Ако libheif тук не може да разкодира HEVC, конверсията тихо се проваля
+      // и на диска остава HEIF под .jpg — Claude ще го отхвърли, а снимката не
+      // би се показала. По-добре чист отказ с обяснение.
+      for (const p of paths) {
+        const chk = await isDisplayable(p);
+        if (!chk.ok) {
+          paths.forEach(x => { try { fs.unlinkSync(x); } catch {} });
+          console.warn('[extract-id] неразчетен формат:', chk.format || chk.error);
+          return res.status(400).json({
+            error: 'Снимката е в HEIC/HEIF и сървърът не може да я преобразува. '
+                 + 'Изключи HEIF от камерата (Samsung: Настройки на камерата → Разширени опции за снимане → HEIF снимки; '
+                 + 'iPhone: Настройки → Камера → Формати → „Най-съвместим") или прати снимката като JPEG.',
+          });
+        }
+      }
 
       let Anthropic;
       try { Anthropic = require('@anthropic-ai/sdk'); }

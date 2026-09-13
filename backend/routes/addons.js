@@ -4,7 +4,7 @@ const path    = require('path');
 const fs      = require('fs');
 const { notifyAdmin, notifyTenant } = require('../lib/notify');
 const { optimizeImage } = require('../lib/imageOptimize');
-const { imagesOnly } = require('../lib/uploadFilter');
+const { imagesOnly, safeExt } = require('../lib/uploadFilter');
 
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '../data');
 const ADDON_PHOTOS_DIR = path.join(DATA_DIR, 'addon_photos');
@@ -13,7 +13,7 @@ if (!fs.existsSync(ADDON_PHOTOS_DIR)) fs.mkdirSync(ADDON_PHOTOS_DIR, { recursive
 const photoStorage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, ADDON_PHOTOS_DIR),
   filename:    (req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase();
+    const ext = safeExt(file); // от mimetype — клиентът не избира разширението
     cb(null, `addon_${req.params.id}_${Date.now()}${ext}`);
   },
 });

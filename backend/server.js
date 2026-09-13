@@ -77,9 +77,16 @@ async function main() {
   // Railway контейнера буден и предотвратява 20-30s cold-start след престой.
   // НЕ докосва базата → нулева цена.
   app.get('/api/health', (req, res) => {
-    let sharp = false, sharp_error = null;
-    try { const io = require('./lib/imageOptimize'); sharp = io.sharpAvailable(); if (!sharp) sharp_error = io.sharpError(); } catch (e) { sharp_error = e.message; }
-    res.json({ ok: true, ts: Date.now(), sharp, sharp_error });
+    let sharp = false, sharp_error = null, formats = null;
+    try {
+      const io = require('./lib/imageOptimize');
+      sharp = io.sharpAvailable();
+      if (!sharp) sharp_error = io.sharpError();
+      // Кои формати чете libvips тук — за да се види дали HEIC от телефон
+      // изобщо може да бъде разкодиран на този сървър.
+      else formats = io.inputFormats();
+    } catch (e) { sharp_error = e.message; }
+    res.json({ ok: true, ts: Date.now(), sharp, sharp_error, formats });
   });
 
   // Auth (public)

@@ -3,8 +3,8 @@ const { orgContext } = require('../db/db');
 const multer  = require('multer');
 const path    = require('path');
 const fs      = require('fs');
-const { optimizeMany } = require('../lib/imageOptimize');
-const { imagesOnly } = require('../lib/uploadFilter');
+const { optimizeMany, isDisplayable } = require('../lib/imageOptimize');
+const { imagesOnly, safeExt } = require('../lib/uploadFilter');
 const { renovationByProperty } = require('../lib/renovationCosts');
 
 const DATA_DIR   = process.env.DATA_DIR || path.join(__dirname, '../data');
@@ -14,7 +14,7 @@ if (!fs.existsSync(PHOTOS_DIR)) fs.mkdirSync(PHOTOS_DIR, { recursive: true });
 const photoStorage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, PHOTOS_DIR),
   filename:    (req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase();
+    const ext = safeExt(file); // от mimetype — клиентът не избира разширението
     cb(null, `prop_${req.params.id}_${Date.now()}${ext}`);
   },
 });
@@ -659,9 +659,27 @@ module.exports = function(db) {
 
   router.post('/:id/photos', uploadPhoto.array('photos', 20), orgContext, async (req, res) => {
     if (!req.files || req.files.length === 0) return res.status(400).json({ error: 'Няма файлове' });
-    // Компресирай/resize преди запис — спестява място (телефонни снимки ~2.5MB→~0.3MB)
+    // Компресирай/resize преди запис — спестява място (телефонни снимки ~2.5MB→~0.3MB).
+    // HEIC се записва като .jpg и тук съдържанието става jpeg.
     await optimizeMany(req.files.map(f => f.path));
-    const inserted = req.files.map(f => {
+
+    // Отсей тези, които не са станали показваем растер (HEIC, който libheif тук
+    // не може да разкодира) — иначе в галерията влиза счупена снимка.
+    const usable = [];
+    for (const f of req.files) {
+      const chk = await isDisplayable(f.path);
+      if (chk.ok) usable.push(f);
+      else { try { fs.unlinkSync(f.path); } catch {} }
+    }
+    if (!usable.length) {
+      return res.status(400).json({
+        error: 'Снимката е в HEIC/HEIF и сървърът не може да я преобразува. '
+             + 'Изключи HEIF от камерата (Samsung: Настройки на камерата → Разширени опции за снимане → HEIF снимки; '
+             + 'iPhone: Настройки → Камера → Формати → „Най-съвместим") или прати снимката като JPEG.',
+      });
+    }
+
+    const inserted = usable.map(f => {
       const caption = req.body.caption || '';
       const r = db.prepare('INSERT INTO property_photos (property_id, filename, caption) VALUES (?,?,?)').run(req.params.id, f.filename, caption);
       return { id: r.lastInsertRowid, filename: f.filename, caption };
