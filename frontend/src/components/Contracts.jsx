@@ -1,4 +1,5 @@
 import { apiFetch } from '../api'
+import { shrinkImage, describeRejected } from '../lib/shrinkImage'
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 
 const STATUS_LABELS = {
@@ -420,9 +421,17 @@ export default function Contracts({ API }) {
     if (!idFront) { showToast('Качи поне лицевата страна на личната карта', 'error'); return }
     setExtractingId(true)
     try {
+      // Смаляване преди качване — снимка на лична карта от телефон редовно
+      // надхвърля 10 MB и сървърът я отказваше още на входа. От компютър
+      // файловете са малки, затова там работеше. 1600px стигат за четене на
+      // документа; сървърът и без това смалява до същото преди да го прати.
+      const [front, back] = await Promise.all([shrinkImage(idFront), idBack ? shrinkImage(idBack) : null])
+      const { ok, message } = describeRejected([front, back].filter(Boolean))
+      if (message) { showToast(message, 'error'); if (!ok.length) return }
+
       const fd = new FormData()
-      fd.append('front', idFront)
-      if (idBack) fd.append('back', idBack)
+      fd.append('front', front)
+      if (back) fd.append('back', back)
       const r = await apiFetch(`${API}/api/contracts/extract-id`, { method: 'POST', body: fd })
       const d = await r.json()
       if (!r.ok) { showToast(d.error || 'Грешка при извличане', 'error'); return }
@@ -1035,11 +1044,11 @@ export default function Contracts({ API }) {
                   <div className="text-sm font-semibold text-blue-900 mb-2">📷 Попълни автоматично от лична карта</div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-2">
                     <label className="text-xs text-gray-600">Лице (задължително)
-                      <input type="file" accept="image/*" onChange={e => setIdFront(e.target.files[0] || null)}
+                      <input type="file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" onChange={e => setIdFront(e.target.files[0] || null)}
                         className="block w-full text-xs mt-1 file:mr-2 file:px-2 file:py-1 file:rounded file:border-0 file:bg-blue-100 file:text-blue-700" />
                     </label>
                     <label className="text-xs text-gray-600">Гръб (по желание)
-                      <input type="file" accept="image/*" onChange={e => setIdBack(e.target.files[0] || null)}
+                      <input type="file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" onChange={e => setIdBack(e.target.files[0] || null)}
                         className="block w-full text-xs mt-1 file:mr-2 file:px-2 file:py-1 file:rounded file:border-0 file:bg-blue-100 file:text-blue-700" />
                     </label>
                   </div>
