@@ -13,6 +13,15 @@ const { getIssuer, issuerComplete } = require('../lib/branding');
 
 const FONT_REGULAR = path.join(__dirname, '../fonts/arial.ttf');
 const FONT_BOLD    = path.join(__dirname, '../fonts/arialbd.ttf');
+// Playfair Display (OFL, с кирилица) — заглавия и номер на документа.
+// Визуалната система: Playfair само за заглавия и ключови числа, никога за текст.
+const FONT_DISPLAY = path.join(__dirname, '../fonts/PlayfairDisplay.ttf');
+
+// Палитра на визуалната система — ink + брас върху хартия.
+const INK    = '#15151E';   // заглавия, основен текст
+const BRASS  = '#C9A24B';   // единственият акцент — линии и номер
+const MUTED  = '#6E6A60';   // второстепенен текст, английската колона
+const HAIR   = '#DCD4C2';   // тънки разделители
 const DATA_DIR     = process.env.DATA_DIR || path.join(__dirname, '../data');
 const PDF_DIR      = path.join(DATA_DIR, 'contracts');
 const LOGO_DIR     = path.join(DATA_DIR, 'logos');
@@ -237,6 +246,7 @@ function generateContractPDF(contract, template, issuer, photos = [], opts = {})
     doc.pipe(ws);
     doc.registerFont('R', FONT_REGULAR);
     doc.registerFont('B', FONT_BOLD);
+    try { doc.registerFont('D', FONT_DISPLAY); } catch (_) { /* липсва → пада на B */ }
 
     const PW = doc.page.width - ML - MR;       // printable width
     const PH = doc.page.height;
@@ -280,24 +290,26 @@ function generateContractPDF(contract, template, issuer, photos = [], opts = {})
 
       infoRows.forEach(({ text, bold, y }) => {
         doc.save();
-        doc.font(bold ? 'B' : 'R').fontSize(bold ? 8 : 7).fillColor(bold ? '#111827' : '#4b5563');
+        doc.font(bold ? 'B' : 'R').fontSize(bold ? 8 : 7).fillColor(bold ? INK : MUTED);
         // Clip to prevent overflow into logo area
         doc.rect(infoX, y, infoW, 12).clip();
         doc.text(text, infoX, y, { width: infoW, align: 'right', lineBreak: false });
         doc.restore();
       });
 
-      // Blue separator line
-      doc.moveTo(ML, 82).lineTo(W - MR, 82).lineWidth(2).strokeColor('#4AABCC').stroke();
+      // Разделител: тънка линия на цялата ширина + къс брас акцент отляво.
+      // Визуалната система: брасът е за акцент, никога за големи площи.
+      doc.moveTo(ML, 82).lineTo(W - MR, 82).lineWidth(0.6).strokeColor(HAIR).stroke();
+      doc.moveTo(ML, 82).lineTo(ML + 46, 82).lineWidth(1.6).strokeColor(BRASS).stroke();
 
       // Footer — draw in bottom margin area, temporarily disable bottom margin check
       const fy = PH - 32;
       const savedBottom = doc.page.margins.bottom;
       doc.page.margins.bottom = 0;
-      doc.moveTo(ML, fy).lineTo(W - MR, fy).lineWidth(0.4).strokeColor('#d1d5db').stroke();
-      doc.font('R').fontSize(7).fillColor('#9ca3af');
+      doc.moveTo(ML, fy).lineTo(W - MR, fy).lineWidth(0.4).strokeColor(HAIR).stroke();
+      doc.font('R').fontSize(7).fillColor(MUTED);
       doc.text(issuer.name || '', ML, fy + 6, { width: PW / 2, lineBreak: false });
-      doc.text(`${pageNum}`, ML, fy + 6, { width: PW, align: 'right', lineBreak: false });
+      doc.text(`с. ${pageNum}`, ML, fy + 6, { width: PW, align: 'right', lineBreak: false });
       doc.page.margins.bottom = savedBottom;
 
       // Force cursor to content start — both x AND y
@@ -317,23 +329,28 @@ function generateContractPDF(contract, template, issuer, photos = [], opts = {})
       const cy = doc.y; // capture y before rendering
 
       if (line.startsWith('###')) {
-        doc.font('B').fontSize(9.5).fillColor('#374151')
+        doc.font('B').fontSize(9).fillColor(MUTED)
            .text(line.replace(/^#+\s*/, ''), ML, cy, { width: PW });
         doc.moveDown(0.3);
 
       } else if (line.startsWith('##')) {
-        doc.moveDown(0.4);
-        doc.font('B').fontSize(10.5).fillColor('#0e3d52')
-           .text(line.replace(/^#+\s*/, '').toUpperCase(), ML, doc.y, { width: PW });
-        doc.moveTo(ML, doc.y + 2).lineTo(ML + PW, doc.y + 2)
-           .lineWidth(0.6).strokeColor('#4AABCC').stroke();
-        doc.moveDown(0.5);
+        // Раздел: късо брас правило над заглавието, без цветна линия отдолу.
+        doc.moveDown(0.55);
+        const y0 = doc.y;
+        doc.moveTo(ML, y0).lineTo(ML + 22, y0).lineWidth(1.4).strokeColor(BRASS).stroke();
+        doc.font('D').fontSize(12).fillColor(INK)
+           .text(line.replace(/^#+\s*/, ''), ML, y0 + 6, { width: PW });
+        doc.moveDown(0.45);
 
       } else if (line.startsWith('#')) {
+        // Заглавие на документа — Playfair, центрирано, с тънки правила
         doc.moveDown(0.5);
-        doc.font('B').fontSize(13).fillColor('#0e3d52')
+        doc.font('D').fontSize(19).fillColor(INK)
            .text(line.replace(/^#+\s*/, ''), ML, doc.y, { width: PW, align: 'center' });
-        doc.moveDown(0.7);
+        const y1 = doc.y + 7;
+        doc.moveTo(ML + PW / 2 - 26, y1).lineTo(ML + PW / 2 + 26, y1)
+           .lineWidth(1.2).strokeColor(BRASS).stroke();
+        doc.moveDown(0.8);
 
       } else if (line === '' || line === '---') {
         doc.moveDown(0.25);
@@ -346,29 +363,76 @@ function generateContractPDF(contract, template, issuer, photos = [], opts = {})
         const en = (enRaw || '').replace(/\*\*/g, '');
         const gap = 14;
         const colWd = (PW - gap) / 2;
-        const isBold = bgRaw.startsWith('**') || /^(Чл\.|Art\.)/.test(bg);
-        doc.font(isBold ? 'B' : 'R').fontSize(9).fillColor('#111827');
+        // `**ред**` = целият ред е удебелен (заглавия на страни, подписи).
+        // Ред „Чл. N. ..." = удебелен е САМО номерът — иначе цялата клауза е bold.
+        const isStarBold = bgRaw.startsWith('**');
+        const isBold = isStarBold;
+        // Българската колона носи документа, английската е превод — затова е в
+        // по-тих цвят. Досега и двете бяха еднакво удебелени и страницата
+        // изглеждаше като плътен блок без йерархия.
+        // Удебелен е само номерът на члена, както в едноколонния режим — цяла
+        // клауза в bold прави страницата плътен блок без йерархия.
+        const ART = /^((?:Чл\.|Art\.)\s*[\d.]+[.)]?)\s*(.*)$/s;
+        const drawCol = (txt, x, y, colour) => {
+          const m = !isBold && ART.exec(txt);
+          if (m) {
+            doc.font('B').fontSize(9).fillColor(colour).text(m[1] + ' ', x, y, { width: colWd, continued: !!m[2] });
+            if (m[2]) doc.font('R').fillColor(colour).text(m[2], { width: colWd });
+          } else {
+            doc.font(isBold ? 'B' : 'R').fontSize(9).fillColor(colour).text(txt, x, y, { width: colWd });
+          }
+        };
+        doc.font(isBold ? 'B' : 'R').fontSize(9);
         const h = Math.max(doc.heightOfString(bg, { width: colWd }), doc.heightOfString(en, { width: colWd }));
         let y0 = cy;
         if (y0 + h > PH - FOOTER_H - 20) { doc.addPage(); y0 = doc.y; }
-        doc.text(bg, ML, y0, { width: colWd });
-        doc.text(en, ML + colWd + gap, y0, { width: colWd });
+        drawCol(bg, ML, y0, INK);
+        drawCol(en, ML + colWd + gap, y0, MUTED);
+        // Тънка вертикална нишка между езиците — държи колоните разделени
+        doc.moveTo(ML + colWd + gap / 2, y0).lineTo(ML + colWd + gap / 2, y0 + h)
+           .lineWidth(0.4).strokeColor(HAIR).stroke();
         doc.y = y0 + h;
-        doc.moveDown(0.25);
+        doc.moveDown(0.3);
 
       } else if (line.startsWith('**') && line.endsWith('**')) {
-        doc.font('B').fontSize(10).fillColor('#111827')
+        doc.font('B').fontSize(10).fillColor(INK)
            .text(line.replace(/\*\*/g, ''), ML, cy, { width: PW });
         doc.moveDown(0.25);
 
       } else {
-        // All other lines (articles, normal text) — render as plain text, no continued
-        // Strip any leading ** markers for bold-whole-line
-        const clean = line.replace(/^\*\*|\*\*$/g, '');
-        const isArticle = /^(Чл\.|Art\.)/.test(clean);
-        doc.font(isArticle ? 'B' : 'R').fontSize(9.5).fillColor('#111827')
-           .text(clean, ML, cy, { width: PW, align: isArticle ? 'left' : 'justify' });
-        doc.moveDown(0.2);
+        // Ред с удебелен НАЧАЛЕН етикет: `**НАЕМОДАТЕЛ / LANDLORD:** Скай ...`
+        // Старият код чистеше ** само в началото и края на реда, затова
+        // затварящите маркери в средата излизаха на хартия като „LANDLORD:**".
+        const m = line.match(/^\*\*(.+?)\*\*\s*(.*)$/);
+        if (m) {
+          const [, label, rest] = m;
+          doc.font('B').fontSize(9.5).fillColor(INK)
+             .text(label + ' ', ML, cy, { width: PW, continued: !!rest });
+          if (rest) doc.font('R').fillColor(INK).text(rest.replace(/\*\*/g, ''), { width: PW });
+          doc.moveDown(0.2);
+        } else {
+          // Всички останали редове. Чистим ВСИЧКИ ** — маркер, останал в текста,
+          // е дефект, който клиентът вижда на подписания документ.
+          const clean = line.replace(/\*\*/g, '');
+
+          // Само НОМЕРЪТ на члена е удебелен, не целият текст. Досега цялата
+          // клауза беше bold и страницата излизаше като плътен черен блок без
+          // йерархия — точно затова договорът се четеше тежко.
+          const art = clean.match(/^((?:Чл\.|Art\.)\s*\d+[.)]?)\s*(.*)$/s);
+          // Английският превод е второстепенен спрямо българския оригинал.
+          const isEn = /^Art\./.test(clean) || (!/[Ѐ-ӿ]/.test(clean) && /[A-Za-z]{4}/.test(clean));
+          const body = isEn ? MUTED : '#2B2B33';
+
+          doc.fontSize(9.5);
+          if (art) {
+            doc.font('B').fillColor(isEn ? MUTED : INK)
+               .text(art[1] + ' ', ML, cy, { width: PW, continued: !!art[2] });
+            if (art[2]) doc.font('R').fillColor(body).text(art[2], { width: PW });
+          } else {
+            doc.font('R').fillColor(body).text(clean, ML, cy, { width: PW, align: 'left' });
+          }
+          doc.moveDown(0.22);
+        }
       }
     }
 
@@ -722,6 +786,7 @@ function generateAnnexPDF(annex, contract, issuer) {
     doc.pipe(ws);
     doc.registerFont('R', FONT_REGULAR);
     doc.registerFont('B', FONT_BOLD);
+    try { doc.registerFont('D', FONT_DISPLAY); } catch (_) { /* липсва → пада на B */ }
 
     const PW = doc.page.width - ML - MR;
     const PH = doc.page.height;
@@ -758,10 +823,10 @@ function generateAnnexPDF(annex, contract, issuer) {
       const fy = PH - 32;
       const saved = doc.page.margins.bottom;
       doc.page.margins.bottom = 0;
-      doc.moveTo(ML, fy).lineTo(W - MR, fy).lineWidth(0.4).strokeColor('#d1d5db').stroke();
-      doc.font('R').fontSize(7).fillColor('#9ca3af');
+      doc.moveTo(ML, fy).lineTo(W - MR, fy).lineWidth(0.4).strokeColor(HAIR).stroke();
+      doc.font('R').fontSize(7).fillColor(MUTED);
       doc.text(issuer.name || '', ML, fy + 6, { width: PW / 2, lineBreak: false });
-      doc.text(`${pageNum}`, ML, fy + 6, { width: PW, align: 'right', lineBreak: false });
+      doc.text(`с. ${pageNum}`, ML, fy + 6, { width: PW, align: 'right', lineBreak: false });
       doc.page.margins.bottom = saved;
       doc.y = HEADER_H; doc.x = ML;
       inHeader = false;
@@ -1750,3 +1815,6 @@ module.exports = function(db) {
 
   return router;
 };
+
+// Изнесена за тестове и локален преглед на оформлението (както при фактурите).
+module.exports.generateContractPDF = generateContractPDF;
