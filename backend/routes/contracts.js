@@ -1305,6 +1305,26 @@ module.exports = function(db) {
       const contract = db.prepare('SELECT * FROM contracts WHERE id=?').get(req.params.id);
       if (!contract) return res.status(404).json({ error: 'Not found' });
 
+      // Един имот — един действащ договор. Активирането е моментът, в който
+      // щетата става реална: два активни договора върху един имот означават
+      // двойно фактуриране, объркан наемател в имота и грешна заетост.
+      // Черновите нарочно НЕ се спират — подготовка на следващия договор, докато
+      // текущият още тече, е нормална работа. Подновяване минава през анекс.
+      if (contract.property_id && contract.status !== 'active') {
+        const other = db.prepare(
+          "SELECT id, contract_number, tenant_name, end_date FROM contracts WHERE property_id=? AND status='active' AND id<>?"
+        ).get(contract.property_id, contract.id);
+        if (other) {
+          return res.status(409).json({
+            error: `Имотът вече има действащ договор ${other.contract_number || '#' + other.id}`
+                 + (other.tenant_name ? ` с ${other.tenant_name}` : '')
+                 + (other.end_date ? ` (до ${other.end_date})` : '')
+                 + '. Прекрати го или направи анекс към него, преди да активираш нов.',
+            conflict_contract_id: other.id,
+          });
+        }
+      }
+
       db.prepare("UPDATE contracts SET status='active', activated_at=datetime('now') WHERE id=?").run(contract.id);
 
       // Update property

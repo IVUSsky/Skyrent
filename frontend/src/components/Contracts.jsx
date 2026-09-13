@@ -509,6 +509,24 @@ export default function Contracts({ API }) {
     }).catch(e => { setLoading(false); showToast(e.message, 'error') })
   }, [API, filterStatus, search])
 
+  // Заетите имоти се смятат от ОТДЕЛНА, нефилтрирана заявка. Списъкът
+  // `contracts` горе зависи от филтъра и търсенето в интерфейса — ако се смята
+  // от него, при филтър „чернови" всички имоти ще изглеждат свободни.
+  const [activeByProp, setActiveByProp] = useState({})
+  const loadActive = useCallback(() => {
+    apiFetch(`${API}/api/contracts?status=active`)
+      .then(r => r.json())
+      .then(list => {
+        const map = {}
+        for (const c of (Array.isArray(list) ? list : [])) {
+          if (c.property_id) map[c.property_id] = c
+        }
+        setActiveByProp(map)
+      })
+      .catch(() => setActiveByProp({}))
+  }, [API])
+  useEffect(() => { loadActive() }, [loadActive])
+
   useEffect(() => { load() }, [load])
   useEffect(() => { loadDirectory() }, [])
 
@@ -959,11 +977,37 @@ export default function Contracts({ API }) {
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-gray-600 mb-1">Имот (по желание)</label>
-                    <select value={newForm.property_id} onChange={e => onPropertyChange(e.target.value)}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                      <option value="">— Изберете имот —</option>
-                      {properties.map(p => <option key={p.id} value={p.id}>#{p.id} {p['адрес']}</option>)}
-                    </select>
+                    {(() => {
+                      // Имот с ДЕЙСТВАЩ договор не може да се избере — иначе се
+                      // стига до два договора върху един имот. Показваме го, но
+                      // заключен и с номера на съществуващия договор: ако просто
+                      // изчезне, изглежда като че имотът липсва от системата.
+                      // Подновяване минава през анекс, не през нов договор.
+                      const free  = properties.filter(p => !activeByProp[p.id])
+                      const taken = properties.filter(p => activeByProp[p.id])
+                      return (
+                        <select value={newForm.property_id} onChange={e => onPropertyChange(e.target.value)}
+                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                          <option value="">— Изберете имот —</option>
+                          {free.map(p => <option key={p.id} value={p.id}>#{p.id} {p['адрес']}</option>)}
+                          {taken.length > 0 && (
+                            <optgroup label="── С действащ договор — не могат да се избират ──">
+                              {taken.map(p => (
+                                <option key={p.id} value={p.id} disabled>
+                                  #{p.id} {p['адрес']} · договор {activeByProp[p.id].contract_number || activeByProp[p.id].id}
+                                  {activeByProp[p.id].tenant_name ? ` · ${activeByProp[p.id].tenant_name}` : ''}
+                                </option>
+                              ))}
+                            </optgroup>
+                          )}
+                        </select>
+                      )
+                    })()}
+                    {properties.length > 0 && properties.every(p => activeByProp[p.id]) && (
+                      <div className="text-xs text-amber-700 mt-1">
+                        Всички имоти имат действащ договор. За подновяване направи анекс към съществуващия.
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
