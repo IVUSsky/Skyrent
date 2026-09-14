@@ -340,11 +340,15 @@ async function createSimpleInvoice(db, {
   property_id, month, gross, payment_type = 'банков превод',
   tenant_name = '', recipient_name = '', recipient_address = '',
   recipient_eik = '', recipient_mol = '', notes = null,
-  product = 'наем', line_description = null,
+  product = 'наем', line_description = null, vat_rate: vatOverride,
 }) {
   const issuer = getIssuer(db);
   const invoice_number = nextInvoiceNumber(db, { rent: product === 'наем' });
-  const vat_rate   = issuer.vat_rate ? Number(issuer.vat_rate) : 0;
+  // Ставката идва от издателя, освен когато викащият я налага изрично —
+  // депозитът може да се издаде и без ДДС (връщаема гаранция).
+  const vat_rate   = vatOverride !== undefined && vatOverride !== null
+    ? Number(vatOverride)
+    : (issuer.vat_rate ? Number(issuer.vat_rate) : 0);
   const grossN     = Math.round(Number(gross || 0) * 100) / 100;
   const net        = vat_rate > 0 ? Math.round(grossN / (1 + vat_rate / 100) * 100) / 100 : grossN;
   const vat_amount = Math.round((grossN - net) * 100) / 100;
@@ -496,6 +500,74 @@ async function generateRentInvoice(db, { property_id, month, payment_type, notes
   return { ok: true, id: r.lastInsertRowid, invoice_number, filename, addons_total };
 }
 
+// Гаранционният депозит по договор за наем не е наем: носи продукт 'депозит',
+// затова не влиза в проверката за дубликат на наемната фактура и може да
+// съществува в същия месец. Пази се от двойно издаване по договор — депозитът
+// се плаща веднъж.
+//
+// ДАНЪЧНА БЕЛЕЖКА: депозитът подлежи на връщане по договора, а върнатите
+// гаранции не са данъчна основа по чл.26 ал.5 ЗДДС. По подразбиране затова
+// издаваме БЕЗ ДДС. С with_vat=true се начислява ставката на издателя — тогава
+// при връщането на депозита е нужно кредитно известие, за да се възстанови
+// начисленото ДДС.
+//
+// Флагът е булев нарочно: ако беше „vat_rate или undefined", липсващото поле в
+// JSON тялото щеше да падне върху подразбирането и изборът „с ДДС" тихо да се
+// превърне в „без ДДС".
+async function generateDepositInvoice(db, { property_id, amount, with_vat = false, month, notes, payment_type }) {
+  const prop = db.prepare('SELECT * FROM properties WHERE id = ?').get(property_id);
+  if (!prop) return { ok: false, reason: 'no_property' };
+
+  const contract = db.prepare(`
+    SELECT * FROM contracts WHERE property_id=? AND status='active'
+    ORDER BY id DESC LIMIT 1
+  `).get(property_id);
+
+  const gross = Math.round(Number(amount != null ? amount : (contract?.deposit || 0)) * 100) / 100;
+  if (!(gross > 0)) return { ok: false, reason: 'no_amount' };
+
+  const existing = db.prepare(`
+    SELECT id, invoice_number FROM rent_invoices
+    WHERE property_id=? AND type='invoice' AND product='депозит'
+  `).get(property_id);
+  if (existing) return { ok: false, reason: 'duplicate', id: existing.id, invoice_number: existing.invoice_number };
+
+  let recipient = {};
+  try { recipient = JSON.parse(prop.invoice_recipient || '{}'); } catch {}
+
+  const label = contract?.contract_number
+    ? `Гаранционен депозит по договор за наем № ${contract.contract_number}`
+    : 'Гаранционен депозит по договор за наем';
+
+  const r = await createSimpleInvoice(db, {
+    property_id,
+    month: month || new Date().toISOString().slice(0, 7),
+    gross,
+    // undefined → createSimpleInvoice взима ставката на издателя
+    vat_rate: with_vat ? undefined : 0,
+    product: 'депозит',
+    line_description: `${label} — ${prop['адрес'] || ''}`.trim().replace(/ —\s*$/, ''),
+    payment_type: payment_type || contract?.payment_method || 'банков превод',
+    tenant_name:       contract?.tenant_name || prop['наемател'] || '',
+    recipient_name:    recipient.name    || contract?.tenant_name || prop['наемател'] || '',
+    recipient_address: recipient.address || contract?.tenant_address || '',
+    recipient_eik:     recipient.eik     || contract?.tenant_egn || '',
+    recipient_mol:     recipient.mol     || contract?.tenant_mol || '',
+    notes: notes || 'Депозитът подлежи на връщане при прекратяване на договора съгласно Чл.8.',
+  });
+
+  if (contract?.tenant_user_id) {
+    notifyTenant(db, contract.tenant_user_id, {
+      kind: 'invoice_new',
+      title: `Нова фактура № ${r.invoice_number}`,
+      body: `${gross.toLocaleString('bg-BG', { minimumFractionDigits: 2 })} EUR — гаранционен депозит`,
+      link: 'invoices', ref_type: 'invoice', ref_id: r.id,
+    });
+  }
+
+  return { ok: true, ...r };
+}
+
 // ─── Router ────────────────────────────────────────────────────────────────
 module.exports = function(db) {
   const router = express.Router();
@@ -573,6 +645,47 @@ module.exports = function(db) {
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
+  });
+
+  // Кои действащи договори имат депозит, за който още няма фактура.
+  router.get('/deposit-pending', (req, res) => {
+    try {
+      const rows = db.prepare(`
+        SELECT c.id AS contract_id, c.contract_number, c.property_id, c.deposit,
+               c.tenant_name, c.start_date, p.адрес AS address
+        FROM contracts c
+        JOIN properties p ON p.id = c.property_id
+        WHERE c.status='active' AND c.deposit > 0
+          AND NOT EXISTS (
+            SELECT 1 FROM rent_invoices i
+            WHERE i.property_id = c.property_id AND i.type='invoice' AND i.product='депозит'
+          )
+        ORDER BY c.start_date DESC
+      `).all();
+      res.json({ contracts: rows });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  // Фактура за гаранционен депозит. Без ДДС по подразбиране — депозитът е
+  // връщаема гаранция, а не данъчна основа (чл.26 ал.5 ЗДДС). with_vat=true
+  // начислява ставката на издателя.
+  router.post('/deposit', async (req, res) => {
+    try {
+      const { property_id, amount, with_vat, month, notes, payment_type } = req.body;
+      if (!property_id) return res.status(400).json({ error: 'property_id е задължителен' });
+      if (!issuerComplete(getIssuer(db))) return res.status(400).json({ error: 'Попълнете фирмените данни (Настройки → Данни на издателя) преди да издавате фактури.', code: 'ISSUER_INCOMPLETE' });
+      const r = await generateDepositInvoice(db, { property_id, amount, with_vat: !!with_vat, month, notes, payment_type });
+      if (!r.ok) {
+        const map = {
+          no_property: ['Имотът не е намерен', 404],
+          no_amount:   ['Няма депозит по договора — задайте сума', 400],
+          duplicate:   [`Вече има фактура за депозит: ${r.invoice_number}`, 400],
+        };
+        const [msg, code] = map[r.reason] || ['Грешка при генериране', 500];
+        return res.status(code).json({ error: msg });
+      }
+      res.json({ ok: true, id: r.id, invoice_number: r.invoice_number, filename: r.filename, total: r.total });
+    } catch (err) { res.status(500).json({ error: err.message }); }
   });
 
   // Generate credit note for an existing invoice

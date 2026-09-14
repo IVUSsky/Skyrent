@@ -34,6 +34,11 @@ export default function Invoices({ API, role }) {
   const [loading, setLoading]         = useState(true)
   const [toast, setToast]             = useState(null)
 
+  // Депозити по действащи договори, за които още няма фактура
+  const [depositPending, setDepositPending] = useState([])
+  const [depositModal, setDepositModal]     = useState(null)
+  const [depositForm, setDepositForm]       = useState({ amount: 0, withVat: false })
+
   // Actions
   const [generating, setGenerating]   = useState(null)
   const [sending, setSending]         = useState(null)
@@ -70,9 +75,11 @@ export default function Invoices({ API, role }) {
     Promise.all([
       apiFetch(`${API}/api/invoices?${buildQuery()}`).then(r => r.json()),
       apiFetch(`${API}/api/properties`).then(r => r.json()),
-    ]).then(([inv, props]) => {
+      apiFetch(`${API}/api/invoices/deposit-pending`).then(r => r.json()).catch(() => ({ contracts: [] })),
+    ]).then(([inv, props, dep]) => {
       setInvoices(Array.isArray(inv) ? inv : [])
       setProperties(props)
+      setDepositPending(dep?.contracts || [])
       setLoading(false)
     }).catch(e => { setLoading(false); showToast(e.message, 'error') })
   }, [API, buildQuery])
@@ -144,6 +151,31 @@ export default function Invoices({ API, role }) {
     })
       .then(r => r.json())
       .then(d => { setGenerating(null); d.ok ? (showToast(`Фактура ${d.invoice_number} генерирана`), load()) : showToast('Грешка: ' + d.error, 'error') })
+      .catch(e => { setGenerating(null); showToast(e.message, 'error') })
+  }
+
+  const openDeposit = (c) => {
+    setDepositForm({ amount: c.deposit, withVat: false })
+    setDepositModal(c)
+  }
+
+  const createDepositInvoice = () => {
+    const c = depositModal
+    setGenerating('dep-' + c.contract_id)
+    apiFetch(`${API}/api/invoices/deposit`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        property_id: c.property_id,
+        amount: Number(depositForm.amount),
+        with_vat: depositForm.withVat,
+      }),
+    })
+      .then(r => r.json())
+      .then(d => {
+        setGenerating(null)
+        if (d.ok) { setDepositModal(null); showToast(`Фактура ${d.invoice_number} за депозит`); load() }
+        else showToast('Грешка: ' + d.error, 'error')
+      })
       .catch(e => { setGenerating(null); showToast(e.message, 'error') })
   }
 
@@ -392,6 +424,19 @@ export default function Invoices({ API, role }) {
         </div>
       </div>
 
+      {/* Депозити по действащи договори без издадена фактура */}
+      {depositPending.length > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 mb-4 flex flex-wrap gap-2 items-center">
+          <span className="text-sm text-amber-900 font-medium">🔐 Депозит без фактура:</span>
+          {depositPending.map(c => (
+            <button key={c.contract_id} onClick={() => openDeposit(c)}
+              className="text-xs px-3 py-1 bg-white border border-amber-300 text-amber-900 hover:bg-amber-100 rounded-lg">
+              + {c.address} · {fmtMoney(c.deposit)} €
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* Generate buttons for enabled properties without invoice */}
       {useMonthFilter && enabledProps.filter(p => !invoiceMap[`${p.id}_${filterMonth}`]).length > 0 && (
         <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-3 mb-4 flex flex-wrap gap-2 items-center">
@@ -456,6 +501,8 @@ export default function Invoices({ API, role }) {
                         }
                         {inv.product === 'интернет' &&
                           <span className="inline-block ml-1 bg-teal-100 text-teal-700 text-xs font-semibold px-2 py-0.5 rounded-full">🌐 Интернет</span>}
+                        {inv.product === 'депозит' &&
+                          <span className="inline-block ml-1 bg-amber-100 text-amber-700 text-xs font-semibold px-2 py-0.5 rounded-full">🔐 Депозит</span>}
                       </td>
                       <td className="px-3 py-2 text-xs text-gray-600 whitespace-nowrap">{fmtDate(inv.issued_at)}</td>
                       <td className="px-3 py-2 text-xs text-gray-800 max-w-[130px] truncate" title={inv.recipient_name}>
@@ -562,6 +609,50 @@ export default function Invoices({ API, role }) {
             <div className="px-6 py-4 border-t flex justify-end gap-2 shrink-0">
               <button onClick={() => setRecipientModal(null)} className="px-4 py-2 text-sm text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg">Отказ</button>
               <button onClick={saveRecipient} className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg">Запази</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Deposit invoice modal */}
+      {depositModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm">
+            <div className="px-6 py-4 border-b">
+              <h3 className="font-bold text-gray-900">Фактура за гаранционен депозит</h3>
+              <p className="text-sm text-gray-500">
+                {depositModal.address} · {depositModal.tenant_name}
+                {depositModal.contract_number ? ` · договор ${depositModal.contract_number}` : ''}
+              </p>
+            </div>
+            <div className="px-6 py-4 space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Сума (EUR)</label>
+                <input type="number" step="0.01" value={depositForm.amount}
+                  onChange={e => setDepositForm(f => ({ ...f, amount: e.target.value }))}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input type="checkbox" checked={depositForm.withVat}
+                  onChange={e => setDepositForm(f => ({ ...f, withVat: e.target.checked }))}
+                  className="mt-0.5" />
+                <span className="text-sm text-gray-700">
+                  Начисли ДДС
+                  <span className="block text-xs text-gray-500 mt-0.5">
+                    Депозитът се връща по договора, а връщаемите гаранции не са данъчна
+                    основа (чл.26 ал.5 ЗДДС). Начислиш ли ДДС, при връщането на депозита
+                    ще е нужно кредитно известие, за да си го възстановиш.
+                  </span>
+                </span>
+              </label>
+            </div>
+            <div className="px-6 py-4 border-t flex justify-end gap-2">
+              <button onClick={() => setDepositModal(null)} className="px-4 py-2 text-sm text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg">Отказ</button>
+              <button onClick={createDepositInvoice}
+                disabled={generating === 'dep-' + depositModal.contract_id || !(Number(depositForm.amount) > 0)}
+                className="px-4 py-2 text-sm font-medium text-white bg-amber-600 hover:bg-amber-700 rounded-lg disabled:opacity-50">
+                {generating === 'dep-' + depositModal.contract_id ? '...' : 'Издай фактура'}
+              </button>
             </div>
           </div>
         </div>
