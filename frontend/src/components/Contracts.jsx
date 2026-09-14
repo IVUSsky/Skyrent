@@ -489,6 +489,7 @@ export default function Contracts({ API }) {
 
   // Actions
   const [sending, setSending] = useState(null)
+  const [sendingKontrolisi, setSendingKontrolisi] = useState(null)
   const [termModal, setTermModal] = useState(null)
   const [termDate, setTermDate] = useState(new Date().toISOString().slice(0,10))
   const [annexModal, setAnnexModal] = useState(null)
@@ -637,6 +638,16 @@ export default function Contracts({ API }) {
       .then(r => r.json())
       .then(d => { setSending(null); d.ok ? (showToast('Договорът е изпратен'), load()) : showToast('Грешка: ' + d.error, 'error') })
       .catch(e => { setSending(null); showToast(e.message, 'error') })
+  }
+
+  const sendContractKontrolisi = (c) => {
+    setSendingKontrolisi(c.id)
+    apiFetch(`${API}/api/contracts/${c.id}/send-kontrolisi`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+    })
+      .then(r => r.json())
+      .then(d => { setSendingKontrolisi(null); d.ok ? showToast('Изпратено към Kontrolisi') : showToast('Грешка: ' + d.error, 'error') })
+      .catch(e => { setSendingKontrolisi(null); showToast(e.message, 'error') })
   }
 
   const terminateContract = () => {
@@ -927,6 +938,10 @@ export default function Contracts({ API }) {
                             <button onClick={() => sendContract(c)} disabled={sending===c.id}
                               className="px-2 py-1 text-xs bg-orange-50 border border-orange-200 text-orange-700 hover:bg-orange-100 rounded disabled:opacity-50" title="Изпрати по мейл">
                               {sending===c.id ? '...' : '📧'}
+                            </button>
+                            <button onClick={() => sendContractKontrolisi(c)} disabled={sendingKontrolisi===c.id}
+                              className="px-2 py-1 text-xs bg-purple-50 border border-purple-200 text-purple-700 hover:bg-purple-100 rounded disabled:opacity-50" title="Изпрати към счетоводителя (Kontrolisi)">
+                              {sendingKontrolisi===c.id ? '...' : '📊'}
                             </button>
                             {c.status === 'draft' && (
                               <button onClick={() => activateContract(c)}
