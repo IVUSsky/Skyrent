@@ -10,6 +10,33 @@ const { getIssuer, issuerComplete, brandEmailHtml } = require('../lib/branding')
 
 const FONT_REGULAR = path.join(__dirname, '../fonts/arial.ttf');
 const FONT_BOLD    = path.join(__dirname, '../fonts/arialbd.ttf');
+
+// Геометрия на фактурата. Изнесена, за да може тест да я премери срещу
+// истинската ширина на етикетите — иначе всяка промяна на текст или на колона
+// мълчаливо връща пренасянето и застъпването.
+//
+// A4 е 595.28 широка, с полета 50 → таблицата стига до 545.28. Всяка колона
+// трябва да побира етикета си на ЕДИН ред при 8pt получер, а последната да
+// свършва вътре в 545.28.
+const PDF_LAYOUT = {
+  pageWidth: 595.28,
+  margin: 50,
+  // блокове ДОСТАВЧИК / ПОЛУЧАТЕЛ.
+  // colW беше 240 → десният блок свършваше на 550 при страница до 545.28, тоест
+  // дълго име или адрес на получателя се режеше отдясно. 235 го прибира вътре.
+  col1: 50, col2: 310, colW: 235,
+  // таблица: начало и ширина на всяка колона
+  cols: { desc: 50, qty: 305, unit: 340, base: 406, total: 478 },
+  cw:   { desc: 250, qty: 30, unit: 62, base: 68, total: 65 },
+  // блок със сумите
+  tX: 355, tW: 188, tLabelW: 114,
+  // етикетите, които трябва да се поберат
+  headers: {
+    desc: 'Описание на стоката/услугата', qty: 'Кол.', unit: 'Ед. цена',
+    base: 'Данъчна основа', total: 'Сума с ДДС',
+  },
+  totalsLabel: 'ОБЩО ЗА ПЛАЩАНЕ:',
+};
 // Use DATA_DIR if set (Railway mounts persistent volume at /data) so PDFs
 // survive redeploys; fall back to local backend/data for dev.
 const DATA_DIR     = process.env.DATA_DIR || path.join(__dirname, '../data');
@@ -70,6 +97,45 @@ function bgIntToWords(n) {
   }
   return res.replace(/\s+/g, ' ').trim();
 }
+// Данните на получателя по ред на достоверност:
+//   1. `properties.invoice_recipient` — изричната настройка, ако някой я е
+//      попълнил (напр. фактура на фирма, различна от наемателя);
+//   2. действащият договор — единственото място с трите имена, ЕГН-то и адреса,
+//      попълнени от личната карта при подписването;
+//   3. полето `properties.наемател` — кратко работно име („Емо", „Никола"),
+//      само за да не остане празно.
+//
+// Втората стъпка липсваше и затова фактурите излизаха без ЕГН и без адрес на
+// получателя — и двете са задължителни реквизити по чл.114 ЗДДС. При 36 от 38
+// имота настройката е празна, тоест засягаше почти всички.
+function buildRecipient(explicit, contract, prop) {
+  const e = explicit || {};
+  const c = contract || {};
+  const p = prop || {};
+  return {
+    name:    e.name    || c.tenant_name    || p['наемател'] || '',
+    address: e.address || c.tenant_address || '',
+    eik:     e.eik     || c.tenant_egn     || '',
+    mol:     e.mol     || c.tenant_mol     || '',
+  };
+}
+
+// Етикетът на идентификатора на страната по фактурата.
+//
+// Досега винаги се печаташе „ЕИК:", включително за физически лица — счетоводно
+// това е грешен реквизит. ЕГН е точно 10 цифри, ЕИК/Булстат е 9 или 13, а
+// наличието на МОЛ еднозначно значи дружество. Чуждестранните документи
+// (напр. белгийски номер „87.05.23-081.24") не са нито едното и се надписват
+// неутрално, вместо да им се лепва български реквизит.
+function idLabel(value, mol) {
+  const raw = String(value || '').trim();
+  if (!raw) return 'ЕГН/ЕИК';
+  if (mol) return 'ЕИК';
+  if (/^\d{10}$/.test(raw)) return 'ЕГН';
+  if (/^\d{9}$/.test(raw) || /^\d{13}$/.test(raw)) return 'ЕИК';
+  return 'ЕГН/ЕИК';
+}
+
 // напр. 25.98 → "двадесет и пет евро и 98 евроцента"
 function amountToWordsBG(amount) {
   const x = Math.round(Math.abs(Number(amount || 0)) * 100);
@@ -179,7 +245,7 @@ function generatePDF(inv, issuer) {
 
     // ── Issuer / Recipient
     y += 30;
-    const col1 = 50, col2 = 310, colW = 240;
+    const { col1, col2, colW } = PDF_LAYOUT;
     doc.rect(col1, y, colW, 14).fill('#f3f4f6');
     doc.rect(col2, y, colW, 14).fill('#f3f4f6');
     doc.font('B').fontSize(8).fillColor('#6b7280');
@@ -187,60 +253,78 @@ function generatePDF(inv, issuer) {
     doc.text('ПОЛУЧАТЕЛ', col2 + 4, y + 3);
     y += 16;
 
+    // Всеки ред се вдига с ИСТИНСКАТА си височина, а не с фиксирани 12 точки.
+    // Фиксираното отстояние чупеше оформлението веднага щом текстът се пренесе:
+    // дълъг адрес на получателя заемаше два реда, но следващият ред (ЕГН) се
+    // чертаеше 12 точки по-долу и падаше върху втория ред на адреса.
+    const lineAt = (text, x, yy, width) => {
+      doc.text(text, x, yy, { width });
+      return yy + doc.heightOfString(text, { width });
+    };
+
     // Issuer block
     let iy = y;
-    doc.font('B').fontSize(10).fillColor('#111827').text(issuer.name || 'Skyrent', col1, iy, { width: colW });
-    iy += 14;
+    doc.font('B').fontSize(10).fillColor('#111827');
+    iy = lineAt(issuer.name || 'Skyrent', col1, iy, colW) + 2;
     doc.font('R').fontSize(9).fillColor('#374151');
-    if (issuer.address)    { doc.text(issuer.address,                     col1, iy, { width: colW }); iy += 12; }
-    if (issuer.eik)        { doc.text(`ЕИК: ${issuer.eik}`,               col1, iy, { width: colW }); iy += 12; }
-    if (issuer.mol)        { doc.text(`МОЛ: ${issuer.mol}`,               col1, iy, { width: colW }); iy += 12; }
-    if (issuer.vat_number) { doc.text(`ДДС №: ${issuer.vat_number}`,      col1, iy, { width: colW }); iy += 12; }
-    if (issuer.iban)       { doc.text(`IBAN: ${issuer.iban}`,             col1, iy, { width: colW }); iy += 12; }
-    if (issuer.bic)        { doc.text(`BIC: ${issuer.bic}`,               col1, iy, { width: colW }); iy += 12; }
+    for (const t of [
+      issuer.address,
+      issuer.eik        && `${idLabel(issuer.eik, issuer.mol)}: ${issuer.eik}`,
+      issuer.mol        && `МОЛ: ${issuer.mol}`,
+      issuer.vat_number && `ДДС №: ${issuer.vat_number}`,
+      issuer.iban       && `IBAN: ${issuer.iban}`,
+      issuer.bic        && `BIC: ${issuer.bic}`,
+    ]) if (t) iy = lineAt(t, col1, iy, colW) + 1;
 
     // Recipient block
     let ry = y;
-    doc.font('B').fontSize(10).fillColor('#111827').text(inv.recipient_name || inv.tenant_name, col2, ry, { width: colW });
-    ry += 14;
+    doc.font('B').fontSize(10).fillColor('#111827');
+    ry = lineAt(inv.recipient_name || inv.tenant_name || '', col2, ry, colW) + 2;
     doc.font('R').fontSize(9).fillColor('#374151');
-    if (inv.recipient_address) { doc.text(inv.recipient_address, col2, ry, { width: colW }); ry += 12; }
-    if (inv.recipient_eik)     { doc.text(`ЕИК: ${inv.recipient_eik}`, col2, ry, { width: colW }); ry += 12; }
-    if (inv.recipient_mol)     { doc.text(`МОЛ: ${inv.recipient_mol}`, col2, ry, { width: colW }); ry += 12; }
+    for (const t of [
+      inv.recipient_address,
+      inv.recipient_eik && `${idLabel(inv.recipient_eik, inv.recipient_mol)}: ${inv.recipient_eik}`,
+      inv.recipient_mol && `МОЛ: ${inv.recipient_mol}`,
+    ]) if (t) ry = lineAt(t, col2, ry, colW) + 1;
 
     y = Math.max(iy, ry) + 20;
 
     // ── Table
-    const cols = { desc: 50, qty: 330, unit: 370, base: 430, total: 490 };
+    const { cols, cw } = PDF_LAYOUT;
     doc.rect(50, y, PW, 20).fill('#1e40af');
     doc.font('B').fontSize(8).fillColor('#ffffff');
-    doc.text('Описание на стоката/услугата', cols.desc + 4, y + 6, { width: 270 });
-    doc.text('Кол.', cols.qty, y + 6, { width: 35, align: 'center' });
-    doc.text('Ед. цена', cols.unit, y + 6, { width: 55, align: 'right' });
-    doc.text('Данъчна основа', cols.base, y + 6, { width: 55, align: 'right' });
-    doc.text('Сума с ДДС', cols.total, y + 6, { width: 58, align: 'right' });
+    doc.text('Описание на стоката/услугата', cols.desc + 4, y + 6, { width: cw.desc });
+    doc.text('Кол.', cols.qty, y + 6, { width: cw.qty, align: 'center' });
+    doc.text('Ед. цена', cols.unit, y + 6, { width: cw.unit, align: 'right' });
+    doc.text('Данъчна основа', cols.base, y + 6, { width: cw.base, align: 'right' });
+    doc.text('Сума с ДДС', cols.total, y + 6, { width: cw.total, align: 'right' });
     y += 20;
 
     const sign = isCreditNote ? -1 : 1;
-    const rowH = 22;
-    doc.rect(50, y, PW, rowH).fill('#f9fafb');
-    doc.font('R').fontSize(9).fillColor('#111827');
     const desc = inv.line_description || `Наем за ${monthLabel(inv.month)}${inv.property_address ? ' — ' + inv.property_address : ''}`;
-    doc.text(desc, cols.desc + 4, y + 7, { width: 270 });
-    doc.text('1', cols.qty, y + 7, { width: 35, align: 'center' });
-    doc.text(`${fmtMoney(sign * inv.amount)} EUR`, cols.unit, y + 7, { width: 55, align: 'right' });
-    doc.text(`${fmtMoney(sign * inv.amount)} EUR`, cols.base, y + 7, { width: 55, align: 'right' });
-    doc.text(`${fmtMoney(sign * inv.total)} EUR`,  cols.total, y + 7, { width: 58, align: 'right' });
+    // Редът расте с описанието. При фиксирани 22 точки дълго описание — напр.
+    // депозит с номер на договора и пълния адрес на имота — се пренасяше на
+    // втори ред, а долният ръб на реда го режеше наполовина.
+    // Текстът се чертае на y+7, затова височината е горно поле 7 + текста + 5.
+    doc.font('R').fontSize(9);
+    const rowH = Math.max(22, doc.heightOfString(desc, { width: cw.desc }) + 12);
+    doc.rect(50, y, PW, rowH).fill('#f9fafb');
+    doc.fillColor('#111827');
+    doc.text(desc, cols.desc + 4, y + 7, { width: cw.desc });
+    doc.text('1', cols.qty, y + 7, { width: cw.qty, align: 'center' });
+    doc.text(`${fmtMoney(sign * inv.amount)} EUR`, cols.unit, y + 7, { width: cw.unit, align: 'right' });
+    doc.text(`${fmtMoney(sign * inv.amount)} EUR`, cols.base, y + 7, { width: cw.base, align: 'right' });
+    doc.text(`${fmtMoney(sign * inv.total)} EUR`,  cols.total, y + 7, { width: cw.total, align: 'right' });
     y += rowH;
     doc.moveTo(50, y).lineTo(50 + PW, y).stroke('#e5e7eb');
     y += 12;
 
     // ── Totals
-    const tX = 370, tW = 178;
+    const { tX, tW, tLabelW } = PDF_LAYOUT;
     const addRow = (label, value, bold = false) => {
       if (bold) { doc.font('B').fontSize(10); } else { doc.font('R').fontSize(9); }
-      doc.fillColor('#374151').text(label, tX, y, { width: 100 });
-      doc.text(value, tX + 100, y, { width: tW - 100, align: 'right' });
+      doc.fillColor('#374151').text(label, tX, y, { width: tLabelW });
+      doc.text(value, tX + tLabelW, y, { width: tW - tLabelW, align: 'right' });
       y += bold ? 14 : 13;
     };
     addRow('Данъчна основа:', `${fmtMoney(sign * inv.amount)} EUR`);
@@ -407,6 +491,21 @@ async function generateRentInvoice(db, { property_id, month, payment_type, notes
   let recipient = {};
   try { recipient = JSON.parse(prop.invoice_recipient || '{}'); } catch {}
 
+  // Данните на получателя по ред: изричната настройка на имота → действащият
+  // договор → голото поле „наемател".
+  //
+  // Договорът е единственото място с трите имена, ЕГН-то и адреса — те идват
+  // от личната карта при подписването. Полето „наемател" на имота е кратко
+  // работно име („Емо", „Никола"), а `invoice_recipient` е празен при 36 от 38
+  // имота, затова фактурите излизаха без ЕГН и без адрес на получателя —
+  // и двете са задължителни реквизити по чл.114 ЗДДС.
+  const tenantC = db.prepare(`
+    SELECT tenant_name, tenant_egn, tenant_address, tenant_mol
+    FROM contracts WHERE property_id=? AND status='active'
+    ORDER BY id DESC LIMIT 1
+  `).get(property_id);
+  const rcp = buildRecipient(recipient, tenantC, prop);
+
   const issuer = getIssuer(db);
   const invoice_number = nextInvoiceNumber(db, { rent: true });
   const vat_rate  = prop.vat_exempt ? 0 : (issuer.vat_rate ? Number(issuer.vat_rate) : 0);
@@ -446,10 +545,10 @@ async function generateRentInvoice(db, { property_id, month, payment_type, notes
     invoice_number, type: 'invoice',
     property_id, property_address: prop['адрес'], month,
     tenant_name:       prop['наемател'] || '',
-    recipient_name:    recipient.name    || prop['наемател'] || '',
-    recipient_address: recipient.address || '',
-    recipient_eik:     recipient.eik     || '',
-    recipient_mol:     recipient.mol     || '',
+    recipient_name:    rcp.name,
+    recipient_address: rcp.address,
+    recipient_eik:     rcp.eik,
+    recipient_mol:     rcp.mol,
     amount, vat_rate, vat_amount, total,
     payment_type: payment_type || 'банков превод',
     tax_event_date: tax_event_date || issued_at,
@@ -980,6 +1079,13 @@ module.exports = function(db) {
       );
       // Regenerate PDF
       const updated = db.prepare('SELECT * FROM rent_invoices WHERE id=?').get(inv.id);
+      // Адресът на имота НЕ се пази в rent_invoices — влиза в описанието само
+      // при първото генериране. Без този ред всяка редакция мълчаливо смъкваше
+      // реда до голото „Наем за <месец>" и фактурата преставаше да казва кой
+      // имот се наема.
+      const upProp = updated.property_id
+        ? db.prepare('SELECT адрес FROM properties WHERE id=?').get(updated.property_id) : null;
+      updated.property_address = upProp?.['адрес'] || '';
       const issuer  = getIssuer(db);
       const { filename } = await generatePDF(updated, issuer);
       db.prepare('UPDATE rent_invoices SET pdf_path=? WHERE id=?').run(filename, inv.id);
@@ -1021,3 +1127,9 @@ module.exports = function(db) {
 module.exports.createSimpleInvoice = createSimpleInvoice;
 module.exports.generateRentInvoice = generateRentInvoice;
 module.exports.autoInvoiceOnActivateOn = autoInvoiceOnActivateOn;
+// Изнесена, за да може оформлението да се провери с истински рендер, а не
+// само по числа — дълъг адрес/име трябва да се види, че не застъпва.
+module.exports.generatePDF = generatePDF;
+module.exports.PDF_LAYOUT  = PDF_LAYOUT;
+module.exports.idLabel     = idLabel;
+module.exports.buildRecipient = buildRecipient;
