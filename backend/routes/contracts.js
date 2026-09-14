@@ -10,6 +10,7 @@ const { parseRecipients } = require('../lib/email');
 const { optimizeMany, isDisplayable } = require('../lib/imageOptimize');
 const { imagesOnly, safeExt } = require('../lib/uploadFilter');
 const { getIssuer, issuerComplete } = require('../lib/branding');
+const { kontrolisiContractsOn, sendContractToKontrolisi } = require('../lib/kontrolisiContract');
 
 const FONT_REGULAR = path.join(__dirname, '../fonts/arial.ttf');
 const FONT_BOLD    = path.join(__dirname, '../fonts/arialbd.ttf');
@@ -1472,13 +1473,49 @@ module.exports = function(db) {
         console.error('Auto-invoice on activate failed:', e.message);
       }
 
+      // Договорът отива и при счетоводителя, за да го види навреме, а не в края
+      // на месеца. Best-effort: провален имейл не бива да отменя активирането —
+      // договорът вече е в сила, а изпращането се повтаря от бутона.
+      let kontrolisi = null;
+      try {
+        if (kontrolisiContractsOn(db)) {
+          const fresh = db.prepare('SELECT * FROM contracts WHERE id=?').get(contract.id);
+          const r = await sendContractToKontrolisi(db, fresh, PDF_DIR);
+          kontrolisi = r.ok ? { sent: true } : { sent: false, reason: r.reason };
+          if (!r.ok) console.warn('kontrolisi contract send failed:', r.reason);
+        }
+      } catch (e) {
+        kontrolisi = { sent: false, reason: e.message };
+        console.error('kontrolisi contract send threw:', e.message);
+      }
+
       res.json({
         ok: true,
         tenant_account: tenantInfo.user
           ? { id: tenantInfo.user.id, username: tenantInfo.user.username, email: tenantInfo.user.email, created: tenantInfo.isNew, email_sent: emailResult.sent }
           : null,
         invoice,
+        kontrolisi,
       });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  // Ръчно изпращане на договор към счетоводителя — и за заварените договори,
+  // активирани преди настройката да съществува.
+  router.post('/:id/send-kontrolisi', async (req, res) => {
+    try {
+      const contract = db.prepare('SELECT * FROM contracts WHERE id=?').get(req.params.id);
+      if (!contract) return res.status(404).json({ error: 'Not found' });
+      const r = await sendContractToKontrolisi(db, contract, PDF_DIR);
+      if (!r.ok) {
+        const map = {
+          no_email:  'Счетоводен имейл не е зададен в Настройки',
+          no_resend: 'RESEND_API_KEY не е конфигуриран',
+          no_pdf:    'PDF на договора не е намерен — регенерирайте го',
+        };
+        return res.status(400).json({ error: map[r.reason] || r.reason || 'Грешка при изпращане' });
+      }
+      res.json({ ok: true });
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
 

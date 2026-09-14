@@ -18,6 +18,7 @@ export default function Settings({ API }) {
   const [entityType, setEntityType] = useState('company') // 'company' | 'individual'
   const [kontrolisiEmail, setKontrolisiEmail] = useState('')
   const [kontrolisiAuto, setKontrolisiAuto] = useState(false)
+  const [kontrolisiContracts, setKontrolisiContracts] = useState(false)
   const [autoInvoiceActivate, setAutoInvoiceActivate] = useState(false)
   const [counter, setCounter] = useState(null)
   const [nextMain, setNextMain] = useState('')
@@ -86,6 +87,7 @@ export default function Settings({ API }) {
         if (data.entity_type === 'individual' || data.entity_type === 'company') setEntityType(data.entity_type)
         if (data.kontrolisi_email) setKontrolisiEmail(data.kontrolisi_email)
         setKontrolisiAuto(data.kontrolisi_auto === true || data.kontrolisi_auto === 'true' || data.kontrolisi_auto === 1)
+        setKontrolisiContracts(data.kontrolisi_contracts === true || data.kontrolisi_contracts === 'true' || data.kontrolisi_contracts === 1)
         setAutoInvoiceActivate(data.auto_invoice_on_activate === true || data.auto_invoice_on_activate === 'true' || data.auto_invoice_on_activate === 1)
         try { setHiddenMenus(Array.isArray(data.menu_hidden) ? data.menu_hidden : JSON.parse(data.menu_hidden || '[]')) } catch { setHiddenMenus([]) }
         setLoading(false)
@@ -130,7 +132,7 @@ export default function Settings({ API }) {
     apiFetch(`${API}/api/settings`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tenant_map, expense_cats: expenseCats, smtp, issuer, entity_type: entityType, kontrolisi_email: kontrolisiEmail, kontrolisi_auto: kontrolisiAuto, auto_invoice_on_activate: autoInvoiceActivate }),
+      body: JSON.stringify({ tenant_map, expense_cats: expenseCats, smtp, issuer, entity_type: entityType, kontrolisi_email: kontrolisiEmail, kontrolisi_auto: kontrolisiAuto, kontrolisi_contracts: kontrolisiContracts, auto_invoice_on_activate: autoInvoiceActivate }),
     })
       .then(r => r.json())
       .then(data => {
@@ -332,7 +334,14 @@ export default function Settings({ API }) {
             {!kontrolisiEmail && <span className="text-amber-600"> (първо въведи имейл)</span>}
           </span>
         </label>
-        <p className="text-xs text-gray-400 mt-2">Запиши настройките. Бутонът 📊 за ръчно изпращане остава до всяка фактура.</p>
+        <label className={`flex items-center gap-2 rounded-lg border p-3 cursor-pointer mt-2 ${kontrolisiContracts ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-200'}`}>
+          <input type="checkbox" checked={kontrolisiContracts} onChange={e => setKontrolisiContracts(e.target.checked)} className="w-4 h-4" />
+          <span className="text-sm text-gray-700">
+            <strong>Изпращай и договорите</strong> — при активиране договорът отива към Контролиси с условията в текста
+            {!kontrolisiEmail && <span className="text-amber-600"> (първо въведи имейл)</span>}
+          </span>
+        </label>
+        <p className="text-xs text-gray-400 mt-2">Запиши настройките. Бутонът 📊 за ръчно изпращане остава до всяка фактура и до всеки договор.</p>
       </div>
 
       {/* Backup */}
