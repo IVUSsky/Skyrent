@@ -10,6 +10,33 @@ const { getIssuer, issuerComplete, brandEmailHtml } = require('../lib/branding')
 
 const FONT_REGULAR = path.join(__dirname, '../fonts/arial.ttf');
 const FONT_BOLD    = path.join(__dirname, '../fonts/arialbd.ttf');
+
+// Геометрия на фактурата. Изнесена, за да може тест да я премери срещу
+// истинската ширина на етикетите — иначе всяка промяна на текст или на колона
+// мълчаливо връща пренасянето и застъпването.
+//
+// A4 е 595.28 широка, с полета 50 → таблицата стига до 545.28. Всяка колона
+// трябва да побира етикета си на ЕДИН ред при 8pt получер, а последната да
+// свършва вътре в 545.28.
+const PDF_LAYOUT = {
+  pageWidth: 595.28,
+  margin: 50,
+  // блокове ДОСТАВЧИК / ПОЛУЧАТЕЛ.
+  // colW беше 240 → десният блок свършваше на 550 при страница до 545.28, тоест
+  // дълго име или адрес на получателя се режеше отдясно. 235 го прибира вътре.
+  col1: 50, col2: 310, colW: 235,
+  // таблица: начало и ширина на всяка колона
+  cols: { desc: 50, qty: 305, unit: 340, base: 406, total: 478 },
+  cw:   { desc: 250, qty: 30, unit: 62, base: 68, total: 65 },
+  // блок със сумите
+  tX: 355, tW: 188, tLabelW: 114,
+  // етикетите, които трябва да се поберат
+  headers: {
+    desc: 'Описание на стоката/услугата', qty: 'Кол.', unit: 'Ед. цена',
+    base: 'Данъчна основа', total: 'Сума с ДДС',
+  },
+  totalsLabel: 'ОБЩО ЗА ПЛАЩАНЕ:',
+};
 // Use DATA_DIR if set (Railway mounts persistent volume at /data) so PDFs
 // survive redeploys; fall back to local backend/data for dev.
 const DATA_DIR     = process.env.DATA_DIR || path.join(__dirname, '../data');
@@ -179,7 +206,7 @@ function generatePDF(inv, issuer) {
 
     // ── Issuer / Recipient
     y += 30;
-    const col1 = 50, col2 = 310, colW = 240;
+    const { col1, col2, colW } = PDF_LAYOUT;
     doc.rect(col1, y, colW, 14).fill('#f3f4f6');
     doc.rect(col2, y, colW, 14).fill('#f3f4f6');
     doc.font('B').fontSize(8).fillColor('#6b7280');
@@ -187,60 +214,78 @@ function generatePDF(inv, issuer) {
     doc.text('ПОЛУЧАТЕЛ', col2 + 4, y + 3);
     y += 16;
 
+    // Всеки ред се вдига с ИСТИНСКАТА си височина, а не с фиксирани 12 точки.
+    // Фиксираното отстояние чупеше оформлението веднага щом текстът се пренесе:
+    // дълъг адрес на получателя заемаше два реда, но следващият ред (ЕГН) се
+    // чертаеше 12 точки по-долу и падаше върху втория ред на адреса.
+    const lineAt = (text, x, yy, width) => {
+      doc.text(text, x, yy, { width });
+      return yy + doc.heightOfString(text, { width });
+    };
+
     // Issuer block
     let iy = y;
-    doc.font('B').fontSize(10).fillColor('#111827').text(issuer.name || 'Skyrent', col1, iy, { width: colW });
-    iy += 14;
+    doc.font('B').fontSize(10).fillColor('#111827');
+    iy = lineAt(issuer.name || 'Skyrent', col1, iy, colW) + 2;
     doc.font('R').fontSize(9).fillColor('#374151');
-    if (issuer.address)    { doc.text(issuer.address,                     col1, iy, { width: colW }); iy += 12; }
-    if (issuer.eik)        { doc.text(`ЕИК: ${issuer.eik}`,               col1, iy, { width: colW }); iy += 12; }
-    if (issuer.mol)        { doc.text(`МОЛ: ${issuer.mol}`,               col1, iy, { width: colW }); iy += 12; }
-    if (issuer.vat_number) { doc.text(`ДДС №: ${issuer.vat_number}`,      col1, iy, { width: colW }); iy += 12; }
-    if (issuer.iban)       { doc.text(`IBAN: ${issuer.iban}`,             col1, iy, { width: colW }); iy += 12; }
-    if (issuer.bic)        { doc.text(`BIC: ${issuer.bic}`,               col1, iy, { width: colW }); iy += 12; }
+    for (const t of [
+      issuer.address,
+      issuer.eik        && `ЕИК: ${issuer.eik}`,
+      issuer.mol        && `МОЛ: ${issuer.mol}`,
+      issuer.vat_number && `ДДС №: ${issuer.vat_number}`,
+      issuer.iban       && `IBAN: ${issuer.iban}`,
+      issuer.bic        && `BIC: ${issuer.bic}`,
+    ]) if (t) iy = lineAt(t, col1, iy, colW) + 1;
 
     // Recipient block
     let ry = y;
-    doc.font('B').fontSize(10).fillColor('#111827').text(inv.recipient_name || inv.tenant_name, col2, ry, { width: colW });
-    ry += 14;
+    doc.font('B').fontSize(10).fillColor('#111827');
+    ry = lineAt(inv.recipient_name || inv.tenant_name || '', col2, ry, colW) + 2;
     doc.font('R').fontSize(9).fillColor('#374151');
-    if (inv.recipient_address) { doc.text(inv.recipient_address, col2, ry, { width: colW }); ry += 12; }
-    if (inv.recipient_eik)     { doc.text(`ЕИК: ${inv.recipient_eik}`, col2, ry, { width: colW }); ry += 12; }
-    if (inv.recipient_mol)     { doc.text(`МОЛ: ${inv.recipient_mol}`, col2, ry, { width: colW }); ry += 12; }
+    for (const t of [
+      inv.recipient_address,
+      inv.recipient_eik && `ЕИК: ${inv.recipient_eik}`,
+      inv.recipient_mol && `МОЛ: ${inv.recipient_mol}`,
+    ]) if (t) ry = lineAt(t, col2, ry, colW) + 1;
 
     y = Math.max(iy, ry) + 20;
 
     // ── Table
-    const cols = { desc: 50, qty: 330, unit: 370, base: 430, total: 490 };
+    const { cols, cw } = PDF_LAYOUT;
     doc.rect(50, y, PW, 20).fill('#1e40af');
     doc.font('B').fontSize(8).fillColor('#ffffff');
-    doc.text('Описание на стоката/услугата', cols.desc + 4, y + 6, { width: 270 });
-    doc.text('Кол.', cols.qty, y + 6, { width: 35, align: 'center' });
-    doc.text('Ед. цена', cols.unit, y + 6, { width: 55, align: 'right' });
-    doc.text('Данъчна основа', cols.base, y + 6, { width: 55, align: 'right' });
-    doc.text('Сума с ДДС', cols.total, y + 6, { width: 58, align: 'right' });
+    doc.text('Описание на стоката/услугата', cols.desc + 4, y + 6, { width: cw.desc });
+    doc.text('Кол.', cols.qty, y + 6, { width: cw.qty, align: 'center' });
+    doc.text('Ед. цена', cols.unit, y + 6, { width: cw.unit, align: 'right' });
+    doc.text('Данъчна основа', cols.base, y + 6, { width: cw.base, align: 'right' });
+    doc.text('Сума с ДДС', cols.total, y + 6, { width: cw.total, align: 'right' });
     y += 20;
 
     const sign = isCreditNote ? -1 : 1;
-    const rowH = 22;
-    doc.rect(50, y, PW, rowH).fill('#f9fafb');
-    doc.font('R').fontSize(9).fillColor('#111827');
     const desc = inv.line_description || `Наем за ${monthLabel(inv.month)}${inv.property_address ? ' — ' + inv.property_address : ''}`;
-    doc.text(desc, cols.desc + 4, y + 7, { width: 270 });
-    doc.text('1', cols.qty, y + 7, { width: 35, align: 'center' });
-    doc.text(`${fmtMoney(sign * inv.amount)} EUR`, cols.unit, y + 7, { width: 55, align: 'right' });
-    doc.text(`${fmtMoney(sign * inv.amount)} EUR`, cols.base, y + 7, { width: 55, align: 'right' });
-    doc.text(`${fmtMoney(sign * inv.total)} EUR`,  cols.total, y + 7, { width: 58, align: 'right' });
+    // Редът расте с описанието. При фиксирани 22 точки дълго описание — напр.
+    // депозит с номер на договора и пълния адрес на имота — се пренасяше на
+    // втори ред, а долният ръб на реда го режеше наполовина.
+    // Текстът се чертае на y+7, затова височината е горно поле 7 + текста + 5.
+    doc.font('R').fontSize(9);
+    const rowH = Math.max(22, doc.heightOfString(desc, { width: cw.desc }) + 12);
+    doc.rect(50, y, PW, rowH).fill('#f9fafb');
+    doc.fillColor('#111827');
+    doc.text(desc, cols.desc + 4, y + 7, { width: cw.desc });
+    doc.text('1', cols.qty, y + 7, { width: cw.qty, align: 'center' });
+    doc.text(`${fmtMoney(sign * inv.amount)} EUR`, cols.unit, y + 7, { width: cw.unit, align: 'right' });
+    doc.text(`${fmtMoney(sign * inv.amount)} EUR`, cols.base, y + 7, { width: cw.base, align: 'right' });
+    doc.text(`${fmtMoney(sign * inv.total)} EUR`,  cols.total, y + 7, { width: cw.total, align: 'right' });
     y += rowH;
     doc.moveTo(50, y).lineTo(50 + PW, y).stroke('#e5e7eb');
     y += 12;
 
     // ── Totals
-    const tX = 370, tW = 178;
+    const { tX, tW, tLabelW } = PDF_LAYOUT;
     const addRow = (label, value, bold = false) => {
       if (bold) { doc.font('B').fontSize(10); } else { doc.font('R').fontSize(9); }
-      doc.fillColor('#374151').text(label, tX, y, { width: 100 });
-      doc.text(value, tX + 100, y, { width: tW - 100, align: 'right' });
+      doc.fillColor('#374151').text(label, tX, y, { width: tLabelW });
+      doc.text(value, tX + tLabelW, y, { width: tW - tLabelW, align: 'right' });
       y += bold ? 14 : 13;
     };
     addRow('Данъчна основа:', `${fmtMoney(sign * inv.amount)} EUR`);
@@ -1021,3 +1066,7 @@ module.exports = function(db) {
 module.exports.createSimpleInvoice = createSimpleInvoice;
 module.exports.generateRentInvoice = generateRentInvoice;
 module.exports.autoInvoiceOnActivateOn = autoInvoiceOnActivateOn;
+// Изнесена, за да може оформлението да се провери с истински рендер, а не
+// само по числа — дълъг адрес/име трябва да се види, че не застъпва.
+module.exports.generatePDF = generatePDF;
+module.exports.PDF_LAYOUT  = PDF_LAYOUT;
