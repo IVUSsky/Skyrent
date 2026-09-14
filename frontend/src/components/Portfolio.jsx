@@ -1,4 +1,5 @@
 import { apiFetch, authUrl } from '../api'
+import { shrinkAll, describeRejected } from '../lib/shrinkImage'
 import React, { useState, useEffect, useRef } from 'react'
 import Inventory from './Inventory'
 import UtilityHistoryChart from './UtilityHistoryChart'
@@ -213,35 +214,6 @@ export default function Portfolio({ API, role }) {
   // снимка. Сървърът връща ясно съобщение (server.js error handler) — показваме
   // го. Плюс пред-проверка на клиента със същите правила като
   // backend/lib/uploadFilter.js, за да не се хаби качване.
-  const OK_EXT = /\.(jpe?g|png|webp)$/i
-  const MAX_BYTES = 10 * 1024 * 1024
-
-  // Телефонните снимки редовно минават 10 MB (Galaxy S24 Ultra в 50/200 MP) и
-  // сървърът ги отказваше още на входа — на лаптоп същото качване минаваше,
-  // защото файловете там са малки. Смаляваме в браузъра до същите параметри,
-  // които сървърът и без това налага (imageOptimize.js: 1600px, качество 80),
-  // така че нищо не се губи, а качването е бързо и по мобилни данни.
-  // Ако браузърът не може да декодира (HEIC на десктоп) → пращаме оригинала и
-  // оставяме сървъра да отговори с ясното си съобщение.
-  const MAX_DIM = 1600
-  const shrink = async (file) => {
-    if (!/^image\/jpe?g$/i.test(file.type)) return file
-    if (typeof createImageBitmap !== 'function') return file
-    try {
-      // imageOrientation: EXIF-ът на телефона иначе завърта снимката настрани
-      const bmp = await createImageBitmap(file, { imageOrientation: 'from-image' })
-      const scale = Math.min(1, MAX_DIM / Math.max(bmp.width, bmp.height))
-      if (scale === 1 && file.size <= MAX_BYTES) { bmp.close?.(); return file }
-      const cv = document.createElement('canvas')
-      cv.width = Math.round(bmp.width * scale)
-      cv.height = Math.round(bmp.height * scale)
-      cv.getContext('2d').drawImage(bmp, 0, 0, cv.width, cv.height)
-      bmp.close?.()
-      const blob = await new Promise(res => cv.toBlob(res, 'image/jpeg', 0.82))
-      if (!blob || blob.size >= file.size) return file
-      return new File([blob], file.name.replace(/\.[^.]+$/, '') + '.jpg', { type: 'image/jpeg' })
-    } catch { return file }
-  }
 
   const uploadPhotos = async (files) => {
     const raw = Array.from(files || [])
@@ -251,24 +223,8 @@ export default function Portfolio({ API, role }) {
 
     // Смаляване ПРЕДИ проверката за размер — иначе голяма телефонна снимка
     // отпада, въпреки че след смаляването щеше да мине спокойно.
-    const list = await Promise.all(raw.map(shrink))
-
-    const wrongType = list.filter(f => !OK_EXT.test(f.name))
-    const tooBig    = list.filter(f => OK_EXT.test(f.name) && f.size > MAX_BYTES)
-    const ok        = list.filter(f => OK_EXT.test(f.name) && f.size <= MAX_BYTES)
-
-    const problems = []
-    if (wrongType.length) {
-      const heic = wrongType.some(f => /\.(heic|heif)$/i.test(f.name))
-      problems.push(
-        `${wrongType.map(f => f.name).join(', ')} — приемат се само JPG, PNG и WEBP.` +
-        (heic ? ' HEIC/HEIF е „високоефективният" формат на телефона. Изключи го от камерата — на Samsung: Настройки на камерата → Разширени опции за снимане → HEIF снимки; на iPhone: Настройки → Камера → Формати → „Най-съвместим".' : '')
-      )
-    }
-    if (tooBig.length) {
-      problems.push(`${tooBig.map(f => `${f.name} (${(f.size / 1048576).toFixed(1)} MB)`).join(', ')} — над 10 MB.`)
-    }
-    if (problems.length) setPhotoErr(problems.join(' '))
+    const { ok, message } = describeRejected(await shrinkAll(raw))
+    if (message) setPhotoErr(message)
     if (!ok.length) { setUploading(false); return }
 
     const fd = new FormData()
