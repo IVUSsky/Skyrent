@@ -28,3 +28,9 @@ backend/scripts/*
 !backend/scripts/test_portfolio_metrics.js
 *_token.txt
 backend/scripts/*_backup_*.json
+
+# Генерирани медийни файлове — рендери на промо видеото, гласови проби,
+# екрани за статии. Правят се наново от изходните материали и раздуват
+# репото завинаги (git не забравя двоични файлове).
+marketing/
+article-shots/
