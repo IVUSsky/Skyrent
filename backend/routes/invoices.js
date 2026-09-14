@@ -97,6 +97,45 @@ function bgIntToWords(n) {
   }
   return res.replace(/\s+/g, ' ').trim();
 }
+// Данните на получателя по ред на достоверност:
+//   1. `properties.invoice_recipient` — изричната настройка, ако някой я е
+//      попълнил (напр. фактура на фирма, различна от наемателя);
+//   2. действащият договор — единственото място с трите имена, ЕГН-то и адреса,
+//      попълнени от личната карта при подписването;
+//   3. полето `properties.наемател` — кратко работно име („Емо", „Никола"),
+//      само за да не остане празно.
+//
+// Втората стъпка липсваше и затова фактурите излизаха без ЕГН и без адрес на
+// получателя — и двете са задължителни реквизити по чл.114 ЗДДС. При 36 от 38
+// имота настройката е празна, тоест засягаше почти всички.
+function buildRecipient(explicit, contract, prop) {
+  const e = explicit || {};
+  const c = contract || {};
+  const p = prop || {};
+  return {
+    name:    e.name    || c.tenant_name    || p['наемател'] || '',
+    address: e.address || c.tenant_address || '',
+    eik:     e.eik     || c.tenant_egn     || '',
+    mol:     e.mol     || c.tenant_mol     || '',
+  };
+}
+
+// Етикетът на идентификатора на страната по фактурата.
+//
+// Досега винаги се печаташе „ЕИК:", включително за физически лица — счетоводно
+// това е грешен реквизит. ЕГН е точно 10 цифри, ЕИК/Булстат е 9 или 13, а
+// наличието на МОЛ еднозначно значи дружество. Чуждестранните документи
+// (напр. белгийски номер „87.05.23-081.24") не са нито едното и се надписват
+// неутрално, вместо да им се лепва български реквизит.
+function idLabel(value, mol) {
+  const raw = String(value || '').trim();
+  if (!raw) return 'ЕГН/ЕИК';
+  if (mol) return 'ЕИК';
+  if (/^\d{10}$/.test(raw)) return 'ЕГН';
+  if (/^\d{9}$/.test(raw) || /^\d{13}$/.test(raw)) return 'ЕИК';
+  return 'ЕГН/ЕИК';
+}
+
 // напр. 25.98 → "двадесет и пет евро и 98 евроцента"
 function amountToWordsBG(amount) {
   const x = Math.round(Math.abs(Number(amount || 0)) * 100);
@@ -230,7 +269,7 @@ function generatePDF(inv, issuer) {
     doc.font('R').fontSize(9).fillColor('#374151');
     for (const t of [
       issuer.address,
-      issuer.eik        && `ЕИК: ${issuer.eik}`,
+      issuer.eik        && `${idLabel(issuer.eik, issuer.mol)}: ${issuer.eik}`,
       issuer.mol        && `МОЛ: ${issuer.mol}`,
       issuer.vat_number && `ДДС №: ${issuer.vat_number}`,
       issuer.iban       && `IBAN: ${issuer.iban}`,
@@ -244,7 +283,7 @@ function generatePDF(inv, issuer) {
     doc.font('R').fontSize(9).fillColor('#374151');
     for (const t of [
       inv.recipient_address,
-      inv.recipient_eik && `ЕИК: ${inv.recipient_eik}`,
+      inv.recipient_eik && `${idLabel(inv.recipient_eik, inv.recipient_mol)}: ${inv.recipient_eik}`,
       inv.recipient_mol && `МОЛ: ${inv.recipient_mol}`,
     ]) if (t) ry = lineAt(t, col2, ry, colW) + 1;
 
@@ -452,6 +491,21 @@ async function generateRentInvoice(db, { property_id, month, payment_type, notes
   let recipient = {};
   try { recipient = JSON.parse(prop.invoice_recipient || '{}'); } catch {}
 
+  // Данните на получателя по ред: изричната настройка на имота → действащият
+  // договор → голото поле „наемател".
+  //
+  // Договорът е единственото място с трите имена, ЕГН-то и адреса — те идват
+  // от личната карта при подписването. Полето „наемател" на имота е кратко
+  // работно име („Емо", „Никола"), а `invoice_recipient` е празен при 36 от 38
+  // имота, затова фактурите излизаха без ЕГН и без адрес на получателя —
+  // и двете са задължителни реквизити по чл.114 ЗДДС.
+  const tenantC = db.prepare(`
+    SELECT tenant_name, tenant_egn, tenant_address, tenant_mol
+    FROM contracts WHERE property_id=? AND status='active'
+    ORDER BY id DESC LIMIT 1
+  `).get(property_id);
+  const rcp = buildRecipient(recipient, tenantC, prop);
+
   const issuer = getIssuer(db);
   const invoice_number = nextInvoiceNumber(db, { rent: true });
   const vat_rate  = prop.vat_exempt ? 0 : (issuer.vat_rate ? Number(issuer.vat_rate) : 0);
@@ -491,10 +545,10 @@ async function generateRentInvoice(db, { property_id, month, payment_type, notes
     invoice_number, type: 'invoice',
     property_id, property_address: prop['адрес'], month,
     tenant_name:       prop['наемател'] || '',
-    recipient_name:    recipient.name    || prop['наемател'] || '',
-    recipient_address: recipient.address || '',
-    recipient_eik:     recipient.eik     || '',
-    recipient_mol:     recipient.mol     || '',
+    recipient_name:    rcp.name,
+    recipient_address: rcp.address,
+    recipient_eik:     rcp.eik,
+    recipient_mol:     rcp.mol,
     amount, vat_rate, vat_amount, total,
     payment_type: payment_type || 'банков превод',
     tax_event_date: tax_event_date || issued_at,
@@ -1025,6 +1079,13 @@ module.exports = function(db) {
       );
       // Regenerate PDF
       const updated = db.prepare('SELECT * FROM rent_invoices WHERE id=?').get(inv.id);
+      // Адресът на имота НЕ се пази в rent_invoices — влиза в описанието само
+      // при първото генериране. Без този ред всяка редакция мълчаливо смъкваше
+      // реда до голото „Наем за <месец>" и фактурата преставаше да казва кой
+      // имот се наема.
+      const upProp = updated.property_id
+        ? db.prepare('SELECT адрес FROM properties WHERE id=?').get(updated.property_id) : null;
+      updated.property_address = upProp?.['адрес'] || '';
       const issuer  = getIssuer(db);
       const { filename } = await generatePDF(updated, issuer);
       db.prepare('UPDATE rent_invoices SET pdf_path=? WHERE id=?').run(filename, inv.id);
@@ -1070,3 +1131,5 @@ module.exports.autoInvoiceOnActivateOn = autoInvoiceOnActivateOn;
 // само по числа — дълъг адрес/име трябва да се види, че не застъпва.
 module.exports.generatePDF = generatePDF;
 module.exports.PDF_LAYOUT  = PDF_LAYOUT;
+module.exports.idLabel     = idLabel;
+module.exports.buildRecipient = buildRecipient;
