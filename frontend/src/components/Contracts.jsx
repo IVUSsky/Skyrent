@@ -1,5 +1,5 @@
 import { apiFetch } from '../api'
-import { shrinkImage, describeRejected } from '../lib/shrinkImage'
+import { shrinkImage, shrinkAll, describeRejected } from '../lib/shrinkImage'
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 
 const STATUS_LABELS = {
@@ -708,6 +708,51 @@ export default function Contracts({ API }) {
   const [annexSendAfter, setAnnexSendAfter] = useState(false)
   const [annexUploadBusy, setAnnexUploadBusy] = useState(false)
 
+  // Подписан екземпляр — модал за качване/замяна/премахване (без prompt/confirm)
+  const [signedModal, setSignedModal] = useState(null)
+  const [signedDate, setSignedDate] = useState(new Date().toISOString().slice(0, 10))
+  const [signedBusy, setSignedBusy] = useState(false)
+  const [signedConfirmRemove, setSignedConfirmRemove] = useState(false)
+
+  const openSigned = (c) => {
+    setSignedModal(c)
+    setSignedDate(c.signed_at || new Date().toISOString().slice(0, 10))
+    setSignedConfirmRemove(false)
+  }
+
+  const openFile = (url) => apiFetch(url).then(r => r.blob()).then(b => window.open(URL.createObjectURL(b), '_blank'))
+
+  const uploadSigned = async (fileList) => {
+    const files = await shrinkAll(fileList)
+    if (!files.length) return
+    setSignedBusy(true)
+    const fd = new FormData()
+    for (const f of files) fd.append('files', f)
+    fd.append('signed_at', signedDate)
+    try {
+      const r = await apiFetch(`${API}/api/contracts/${signedModal.id}/signed`, { method: 'POST', body: fd })
+      const d = await r.json()
+      if (!r.ok) { showToast('Грешка: ' + (d.error || ''), 'error'); return }
+      showToast('✍️ Подписаният екземпляр е запазен')
+      const upd = { ...signedModal, signed_pdf_path: d.signed_pdf_path, signed_at: d.signed_at }
+      setSignedModal(upd)
+      setContracts(cs => cs.map(x => x.id === upd.id ? upd : x))
+    } catch (e) { showToast('Грешка: ' + e.message, 'error') }
+    finally { setSignedBusy(false) }
+  }
+
+  const removeSigned = async () => {
+    setSignedBusy(true)
+    try {
+      const r = await apiFetch(`${API}/api/contracts/${signedModal.id}/signed`, { method: 'DELETE' })
+      if (!r.ok) { const d = await r.json(); showToast('Грешка: ' + (d.error || ''), 'error'); return }
+      const upd = { ...signedModal, signed_pdf_path: null, signed_at: null }
+      setSignedModal(upd); setSignedConfirmRemove(false)
+      setContracts(cs => cs.map(x => x.id === upd.id ? upd : x))
+      showToast('Подписаният екземпляр е премахнат')
+    } finally { setSignedBusy(false) }
+  }
+
   const sendAnnex = async (a) => {
     let email = annexModal.tenant_email
     if (!email) { email = window.prompt('Договорът няма имейл — въведи имейл на наемателя:') ; if (!email) return }
@@ -870,7 +915,7 @@ export default function Contracts({ API }) {
           </div>
 
           {/* Summary */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
             {Object.entries(STATUS_LABELS).map(([st, { label, color }]) => {
               const count = contracts.filter(c => c.status === st).length
               return (
@@ -880,6 +925,17 @@ export default function Contracts({ API }) {
                 </div>
               )
             })}
+            {/* Активни договори без качен подписан екземпляр — какво още липсва в архива */}
+            {(() => {
+              const missing = contracts.filter(c => c.status === 'active' && !c.signed_pdf_path).length
+              return (
+                <div className={`rounded-xl border p-3 text-center ${missing ? 'bg-amber-50 border-amber-200' : 'bg-white border-gray-200'}`}
+                  title="Активни договори, за които няма качен подписан екземпляр">
+                  <span className={`inline-block text-xs font-semibold px-2 py-0.5 rounded-full ${missing ? 'bg-amber-100 text-amber-800' : 'bg-green-100 text-green-700'}`}>✍️ Без подписан</span>
+                  <div className={`text-2xl font-bold mt-1 ${missing ? 'text-amber-700' : 'text-gray-800'}`}>{missing}</div>
+                </div>
+              )
+            })()}
           </div>
 
           {loading ? <div className="text-center py-12 text-gray-400">Зарежда...</div> :
@@ -893,7 +949,7 @@ export default function Contracts({ API }) {
               <table className="min-w-full divide-y divide-gray-200 text-sm">
                 <thead className="bg-gray-50">
                   <tr>
-                    {['№','Наемател','Имот','Наем/мес','Период','Статус','Изпратен','Действия'].map(h => (
+                    {['№','Наемател','Имот','Наем/мес','Период','Статус','Изпратен','Подписан','Действия'].map(h => (
                       <th key={h} className="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
@@ -920,6 +976,14 @@ export default function Contracts({ API }) {
                         </td>
                         <td className="px-3 py-2 text-xs">
                           {c.sent_at ? <span className="text-green-600">✅ {fmtDate(c.sent_at)}</span> : <span className="text-gray-300">—</span>}
+                        </td>
+                        <td className="px-3 py-2 text-xs whitespace-nowrap">
+                          {c.signed_pdf_path ? (
+                            <button onClick={() => openFile(`${API}/api/contracts/${c.id}/signed/pdf`)}
+                              className="text-green-700 hover:underline" title="Отвори подписания екземпляр">✍️ {fmtDate(c.signed_at)}</button>
+                          ) : c.status === 'active' ? (
+                            <button onClick={() => openSigned(c)} className="text-amber-600 hover:underline" title="Качи подписания екземпляр">⚠️ няма</button>
+                          ) : <span className="text-gray-300">—</span>}
                         </td>
                         <td className="px-3 py-2 whitespace-nowrap">
                           <div className="flex gap-1 flex-wrap">
@@ -961,6 +1025,9 @@ export default function Contracts({ API }) {
                                 🔑
                               </button>
                             )}
+                            <button onClick={() => openSigned(c)}
+                              className={`px-2 py-1 text-xs rounded border ${c.signed_pdf_path ? 'bg-green-50 border-green-200 text-green-700 hover:bg-green-100' : 'bg-amber-50 border-amber-200 text-amber-700 hover:bg-amber-100'}`}
+                              title={c.signed_pdf_path ? 'Подписан екземпляр' : 'Качи подписан екземпляр'}>✍️</button>
                             <button onClick={() => openAnnex(c)}
                               className="px-2 py-1 text-xs bg-purple-50 border border-purple-200 text-purple-700 hover:bg-purple-100 rounded" title="Анекс">📎</button>
                             <button onClick={() => deleteContract(c)}
@@ -1451,6 +1518,68 @@ export default function Contracts({ API }) {
             </div>
             <div className="flex-shrink-0 px-6 py-3 border-t border-gray-200 flex justify-end">
               <button onClick={() => setAnnexModal(null)} className="px-4 py-2 text-sm text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg">Затвори</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Signed copy modal — подписаният хартиен екземпляр стои до договора */}
+      {signedModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md flex flex-col" style={{ maxHeight: '90vh' }}>
+            <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between flex-shrink-0">
+              <div>
+                <h3 className="font-bold text-gray-900">✍️ Подписан екземпляр</h3>
+                <p className="text-xs text-gray-500 mt-0.5">Договор № {signedModal.contract_number || 'Д' + signedModal.id} — {signedModal.tenant_name}</p>
+              </div>
+              <button onClick={() => setSignedModal(null)} className="text-gray-400 hover:text-gray-600 text-2xl leading-none">×</button>
+            </div>
+            <div className="px-6 py-4 overflow-y-auto flex-1 space-y-4">
+              {signedModal.signed_pdf_path ? (
+                <div className="bg-green-50 border border-green-200 rounded-xl p-4 space-y-2">
+                  <div className="text-sm font-semibold text-green-800">✅ Качен — подписан на {fmtDate(signedModal.signed_at)}</div>
+                  <div className="flex gap-2 flex-wrap">
+                    <button onClick={() => openFile(`${API}/api/contracts/${signedModal.id}/signed/pdf`)}
+                      className="px-3 py-1.5 text-xs font-medium bg-white border border-green-300 text-green-700 hover:bg-green-100 rounded-lg">📄 Отвори</button>
+                    {/* Архивен договор: сканът Е договорът — няма какво да се премахва, само замяна */}
+                    {signedModal.signed_pdf_path !== signedModal.pdf_path && (signedConfirmRemove ? (
+                      <span className="inline-flex items-center gap-1">
+                        <button onClick={removeSigned} disabled={signedBusy} className="px-3 py-1.5 text-xs font-medium bg-red-600 text-white rounded-lg disabled:opacity-50">Премахни</button>
+                        <button onClick={() => setSignedConfirmRemove(false)} className="px-3 py-1.5 text-xs bg-gray-100 text-gray-700 rounded-lg border">Не</button>
+                      </span>
+                    ) : (
+                      <button onClick={() => setSignedConfirmRemove(true)} disabled={signedBusy}
+                        className="px-3 py-1.5 text-xs font-medium bg-white border border-red-200 text-red-600 hover:bg-red-50 rounded-lg disabled:opacity-50">🗑 Премахни</button>
+                    ))}
+                  </div>
+                  <div className="text-xs text-green-700/80">
+                    {signedModal.signed_pdf_path === signedModal.pdf_path
+                      ? 'Това е качен архивен договор — сканът е подписаният екземпляр. Качването на нов файл по-долу го заменя.'
+                      : 'Качването на нов файл по-долу заменя този.'}
+                  </div>
+                </div>
+              ) : (
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-800">
+                  ⚠️ Няма качен подписан екземпляр. Генерираният PDF (📄) е неподписаният текст.
+                </div>
+              )}
+
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Дата на подписване</label>
+                  <input type="date" value={signedDate} onChange={e => setSignedDate(e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+                </div>
+                <label className={`block text-center text-sm font-semibold px-4 py-3 rounded-lg cursor-pointer ${signedBusy ? 'bg-gray-100 text-gray-400' : 'bg-green-600 hover:bg-green-700 text-white'}`}>
+                  {signedBusy ? 'Качва…' : (signedModal.signed_pdf_path ? '🔁 Замени с нов файл' : '📤 Качи подписания — PDF, Word или снимки')}
+                  <input type="file" multiple accept=".pdf,.docx,image/*" className="hidden" disabled={signedBusy}
+                    onChange={e => { uploadSigned(e.target.files); e.target.value = '' }} />
+                </label>
+                <div className="text-xs text-gray-400">Няколко снимки от телефона се събират в един PDF. Наемателят вижда подписания екземпляр в портала си.</div>
+              </div>
+            </div>
+            <div className="flex-shrink-0 px-6 py-3 border-t border-gray-200 flex justify-end">
+              <button onClick={() => setSignedModal(null)} className="px-4 py-2 text-sm text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg">Затвори</button>
             </div>
           </div>
         </div>
