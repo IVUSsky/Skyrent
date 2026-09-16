@@ -393,8 +393,23 @@ function runTenantMigrations(db) {
    'inventory TEXT',
    'protocol_pdf_path TEXT',
    'id_front_path TEXT',
-   'id_back_path TEXT'
+   'id_back_path TEXT',
+   'signed_pdf_path TEXT',
+   'signed_at DATE'
   ].forEach(col => { try { db.exec(`ALTER TABLE contracts ADD COLUMN ${col}`); } catch(_) {} });
+  // Архивираните договори са качени вече подписани — сканът им Е подписаният
+  // екземпляр. Еднократно ги отбелязваме като такива (флаг в settings, иначе
+  // всеки рестарт би върнал ръчно премахнат екземпляр).
+  try {
+    const done = db.prepare("SELECT value FROM settings WHERE key='signed_copy_backfill'").get();
+    if (!done) {
+      db.exec(`UPDATE contracts SET signed_pdf_path = pdf_path,
+                 signed_at = COALESCE(signed_at, start_date, date(created_at))
+               WHERE signed_pdf_path IS NULL AND pdf_path IS NOT NULL
+                 AND notes LIKE '📎 Архивиран съществуващ договор%'`);
+      db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('signed_copy_backfill', '1')").run();
+    }
+  } catch(_) {}
   console.log('contracts tables ready');
   seedContractTemplate(db);
   seedBgContractTemplate(db);

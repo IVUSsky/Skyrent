@@ -117,11 +117,18 @@ module.exports = function(db) {
   router.get('/contracts/:id/pdf', (req, res) => {
     const contract = db.prepare("SELECT * FROM contracts WHERE id=? AND tenant_user_id=?").get(req.params.id, req.user.id);
     if (!contract) return res.status(404).json({ error: 'Not found' });
-    if (!contract.pdf_path) return res.status(404).json({ error: 'PDF не е генериран' });
-    const fp = path.join(CONTRACTS_DIR, contract.pdf_path);
+    // Подписаният екземпляр (ако е качен) има предимство пред генерирания текст.
+    // Word скан не се подава като PDF — тогава остава генерираният.
+    const signed = contract.signed_pdf_path && !/\.docx$/i.test(contract.signed_pdf_path)
+      && fs.existsSync(path.join(CONTRACTS_DIR, contract.signed_pdf_path));
+    const file = signed ? contract.signed_pdf_path : contract.pdf_path;
+    if (!file) return res.status(404).json({ error: 'PDF не е генериран' });
+    const fp = path.join(CONTRACTS_DIR, file);
     if (!fs.existsSync(fp)) return res.status(404).json({ error: 'PDF файл липсва' });
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `inline; filename="contract_${contract.contract_number}.pdf"`);
+    // Header-ът търпи само ASCII — кирилица в номера дава 500 („Invalid character")
+    const safeNo = String(contract.contract_number || contract.id).replace(/[^\w.-]/g, '_');
+    res.setHeader('Content-Disposition', `inline; filename="contract_${safeNo}${signed ? '_signed' : ''}.pdf"`);
     res.sendFile(fp);
   });
 

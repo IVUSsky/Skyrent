@@ -1862,6 +1862,83 @@ module.exports = function(db) {
     res.json({ ok: true });
   });
 
+  // ── Подписан екземпляр ──────────────────────────────────────
+  // Генерираният PDF (pdf_path) е неподписаният текст. След подписване на
+  // хартия сканът/снимките се качват тук и стоят до договора завинаги.
+  // При архивираните договори сканът вече е подписаният → signed_pdf_path
+  // сочи към същия файл като pdf_path и той НЕ се трие при замяна/премахване.
+  const unlinkSigned = (contract) => {
+    if (!contract.signed_pdf_path || contract.signed_pdf_path === contract.pdf_path) return;
+    const fp = path.join(PDF_DIR, contract.signed_pdf_path);
+    if (fs.existsSync(fp)) { try { fs.unlinkSync(fp); } catch (_) {} }
+  };
+
+  router.post('/:id/signed', upload.array('files', 10), orgContext, async (req, res) => {
+    try {
+      const files = req.files || [];
+      const contract = db.prepare('SELECT * FROM contracts WHERE id=?').get(req.params.id);
+      if (!contract) {
+        for (const f of files) { try { fs.unlinkSync(f.path); } catch (_) {} } // multer вече ги е записал
+        return res.status(404).json({ error: 'Not found' });
+      }
+      if (!files.length) return res.status(400).json({ error: 'Качи PDF, Word или снимки на подписания договор' });
+
+      const isPdf  = (x) => /\.pdf$/i.test(x.originalname) || x.mimetype === 'application/pdf';
+      const isDocx = (x) => /\.docx$/i.test(x.originalname) || /wordprocessingml/i.test(x.mimetype);
+      const isImg  = (x) => /\.(jpe?g|png)$/i.test(x.originalname) || /image\/(jpe?g|png)/i.test(x.mimetype);
+      const pdfs = files.filter(isPdf), docxs = files.filter(isDocx), imgs = files.filter(isImg);
+
+      let storedPath;
+      if (pdfs.length) storedPath = pdfs[0].path;
+      else if (docxs.length) storedPath = docxs[0].path;
+      else if (imgs.length) {
+        // снимки → един многостраничен PDF
+        storedPath = path.join(PDF_DIR, `contract_signed_${contract.id}_${Date.now()}.pdf`);
+        await new Promise((resolve, reject) => {
+          const doc = new PDFDocument({ autoFirstPage: false });
+          const stream = fs.createWriteStream(storedPath);
+          doc.pipe(stream);
+          for (const im of imgs) { const img = doc.openImage(im.path); doc.addPage({ size: [img.width, img.height], margin: 0 }); doc.image(img, 0, 0); }
+          doc.end();
+          stream.on('finish', resolve); stream.on('error', reject);
+        });
+      } else {
+        for (const f of files) { try { fs.unlinkSync(f.path); } catch (_) {} }
+        return res.status(400).json({ error: 'Неподдържан формат' });
+      }
+      for (const f of files) { if (f.path !== storedPath) { try { fs.unlinkSync(f.path); } catch (_) {} } }
+
+      unlinkSigned(contract); // старият подписан екземпляр се заменя
+      const signed_at = /^\d{4}-\d{2}-\d{2}$/.test(req.body.signed_at || '') ? req.body.signed_at : new Date().toISOString().slice(0, 10);
+      db.prepare('UPDATE contracts SET signed_pdf_path=?, signed_at=? WHERE id=?')
+        .run(path.basename(storedPath), signed_at, contract.id);
+      res.status(201).json({ ok: true, signed_pdf_path: path.basename(storedPath), signed_at });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  router.get('/:id/signed/pdf', (req, res) => {
+    const contract = db.prepare('SELECT * FROM contracts WHERE id=?').get(req.params.id);
+    if (!contract) return res.status(404).json({ error: 'Not found' });
+    if (!contract.signed_pdf_path) return res.status(404).json({ error: 'Няма качен подписан екземпляр' });
+    const filepath = path.join(PDF_DIR, contract.signed_pdf_path);
+    if (!fs.existsSync(filepath)) return res.status(404).json({ error: 'Файлът липсва' });
+    if (/\.docx$/i.test(contract.signed_pdf_path)) {
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+      res.setHeader('Content-Disposition', `attachment; filename="dogovor_${contract.id}_podpisan.docx"`);
+    } else {
+      res.setHeader('Content-Type', 'application/pdf');
+    }
+    fs.createReadStream(filepath).pipe(res);
+  });
+
+  router.delete('/:id/signed', (req, res) => {
+    const contract = db.prepare('SELECT * FROM contracts WHERE id=?').get(req.params.id);
+    if (!contract) return res.status(404).json({ error: 'Not found' });
+    unlinkSigned(contract);
+    db.prepare('UPDATE contracts SET signed_pdf_path=NULL, signed_at=NULL WHERE id=?').run(contract.id);
+    res.json({ ok: true });
+  });
+
   // Delete contract
   router.delete('/:id', (req, res) => {
     const contract = db.prepare('SELECT * FROM contracts WHERE id=?').get(req.params.id);
@@ -1870,6 +1947,7 @@ module.exports = function(db) {
       const fp = path.join(PDF_DIR, contract.pdf_path);
       if (fs.existsSync(fp)) fs.unlinkSync(fp);
     }
+    unlinkSigned(contract);
     db.prepare('DELETE FROM contracts WHERE id=?').run(req.params.id);
     res.json({ ok: true });
   });

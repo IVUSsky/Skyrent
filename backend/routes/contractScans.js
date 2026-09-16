@@ -212,8 +212,9 @@ module.exports = function (db) {
           tenant_phone, tenant_email, tenant_doc, tenant_doc_date,
           property_address, property_area, monthly_rent, currency, deposit, payment_day,
           start_date, end_date, notes, pdf_path, activated_at,
-          landlord_type, landlord_name, landlord_egn, landlord_address)
-        VALUES (?, 'active', ?,?,?,?,?,?,?, ?,?,?,?,?,?, ?,?, ?, ?, datetime('now'), ?,?,?,?)
+          landlord_type, landlord_name, landlord_egn, landlord_address,
+          signed_pdf_path, signed_at)
+        VALUES (?, 'active', ?,?,?,?,?,?,?, ?,?,?,?,?,?, ?,?, ?, ?, datetime('now'), ?,?,?,?, ?,?)
       `).run(
         propertyId, b.tenant_name || '', b.tenant_egn || null, b.tenant_address || null,
         b.tenant_phone || null, b.tenant_email || null, b.tenant_lk || null, b.tenant_lk_date || null,
@@ -223,7 +224,9 @@ module.exports = function (db) {
         '📎 Архивиран съществуващ договор (качен скан)' + (b.contract_date ? ` от ${b.contract_date}` : ''),
         path.basename(b.scan_file),
         isCompany ? 'дружество' : 'физическо',
-        issuer.name || null, issuer.eik || null, issuer.address || null
+        issuer.name || null, issuer.eik || null, issuer.address || null,
+        // качен скан = вече подписан екземпляр
+        path.basename(b.scan_file), b.contract_date || b.start_date || new Date().toISOString().slice(0, 10)
       );
 
       // По избор: обнови имота (наемател + контакти + абонатни номера; наемът НЕ се
