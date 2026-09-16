@@ -124,7 +124,13 @@ export default function TenantApp({ userName, onLogout, mustChangePassword }) {
     return <div className="min-h-screen flex items-center justify-center text-slate-500">Зареждане...</div>
   }
 
-  const activeContract = me?.contracts?.find(c => c.status === 'active') || me?.contracts?.[0]
+  // Наемният договор е водещ за началния екран; интернет договорът (Sky като
+  // доставчик) е допълнение и се показва в таб „Договор" със собствен етикет.
+  const isRent = c => (c.kind || 'наем') !== 'интернет'
+  const activeContract = me?.contracts?.find(c => c.status === 'active' && isRent(c))
+    || me?.contracts?.find(c => c.status === 'active')
+    || me?.contracts?.find(isRent)
+    || me?.contracts?.[0]
   const property = me?.properties?.find(p => p.id === activeContract?.property_id) || me?.properties?.[0]
 
   return (
@@ -434,8 +440,8 @@ function Home({ me, property, contract, onAsk }) {
         <div className="grid grid-cols-2 gap-3 mt-4 text-sm">
           {property.тип && <Info label="Тип" value={property.тип} />}
           {property.площ && <Info label="Площ" value={`${property.площ} м²`} />}
-          {contract?.monthly_rent && <Info label="Наем" value={`${Number(contract.monthly_rent).toLocaleString('bg-BG')} ${contract.currency || 'EUR'}`} />}
-          {contract?.end_date && <Info label="Договорът изтича" value={fmtDate(contract.end_date)} />}
+          {contract?.monthly_rent && <Info label={(contract.kind || 'наем') === 'интернет' ? 'Интернет' : 'Наем'} value={`${Number(contract.monthly_rent).toLocaleString('bg-BG')} ${contract.currency || 'EUR'}/мес.`} />}
+          {contract?.end_date && <Info label={(contract.kind || 'наем') === 'интернет' ? 'Интернет договорът изтича' : 'Договорът изтича'} value={fmtDate(contract.end_date)} />}
         </div>
       </Card>
 
@@ -498,13 +504,15 @@ function Contract({ contracts }) {
         <Card key={c.id}>
           <div className="flex items-start justify-between">
             <div>
-              <div className="text-xs uppercase text-slate-400">№ {c.contract_number}</div>
+              <div className="text-xs uppercase text-slate-400">
+                {(c.kind || 'наем') === 'интернет' ? '🌐 Договор за интернет' : '🏠 Договор за наем'} · № {c.contract_number || 'Д' + c.id}
+              </div>
               <div className="font-semibold text-slate-800">{c.property_address}</div>
               <div className="text-xs text-slate-500 mt-1">
                 {fmtDate(c.start_date)} → {c.end_date ? fmtDate(c.end_date) : 'безсрочен'}
               </div>
               <div className="mt-2 text-sm">
-                <strong>{Number(c.monthly_rent).toLocaleString('bg-BG')} {c.currency || 'EUR'}</strong>/мес.
+                <strong>{Number(c.monthly_rent).toLocaleString('bg-BG')} {c.currency || 'EUR'}</strong>/мес.{(c.kind || 'наем') === 'интернет' ? ' интернет' : ''}
               </div>
             </div>
             <StatusBadge status={c.status} />

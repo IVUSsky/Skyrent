@@ -142,7 +142,7 @@ async function runAutopayCharges(db, options = {}) {
       const contract = db.prepare(`
         SELECT c.*, p.* FROM contracts c
         LEFT JOIN properties p ON p.id = c.property_id
-        WHERE c.tenant_user_id=? AND c.status='active' AND p.invoice_enabled=1
+        WHERE c.tenant_user_id=? AND c.status='active' AND COALESCE(c.kind,'наем')='наем' AND p.invoice_enabled=1
         ORDER BY c.created_at DESC LIMIT 1
       `).get(user.id);
       if (!contract || !contract.property_id) {

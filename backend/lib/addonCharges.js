@@ -8,7 +8,7 @@ function getAddonChargesForProperty(db, propertyId, invoiceMonth) {
   const contract = db.prepare(`
     SELECT tenant_user_id FROM contracts
     WHERE property_id=? AND status='active' AND tenant_user_id IS NOT NULL
-    ORDER BY created_at DESC LIMIT 1
+    ORDER BY (COALESCE(kind,'наем')='наем') DESC, created_at DESC LIMIT 1
   `).get(propertyId);
 
   if (!contract) return { items: [], total: 0 };
