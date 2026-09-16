@@ -60,6 +60,12 @@ function fmtDate(d) {
   return `${String(dt.getDate()).padStart(2,'0')}.${String(dt.getMonth()+1).padStart(2,'0')}.${dt.getFullYear()} г.`;
 }
 
+// Вид договор. 'наем' е класическият; 'интернет' е Sky като доставчик на
+// интернет за наемател в чужд имот — стои отделно от наемните (собствен списък,
+// не пише наем в имота, не пуска наемна фактура, не блокира наемния договор).
+const CONTRACT_KINDS = ['наем', 'интернет'];
+const contractKind = (v) => CONTRACT_KINDS.includes(v) ? v : 'наем';
+
 function nextContractNumber(db) {
   const year = new Date().getFullYear();
   const key  = `contract_counter_${year}`;
@@ -1082,8 +1088,8 @@ module.exports = function(db) {
       const logo_path = req.file ? req.file.filename : null;
       if (is_default) db.prepare("UPDATE contract_templates SET is_default=0").run();
       const r = db.prepare(
-        'INSERT INTO contract_templates (name, content, logo_path, is_default) VALUES (?,?,?,?)'
-      ).run(name, content, logo_path, is_default ? 1 : 0);
+        'INSERT INTO contract_templates (name, content, logo_path, is_default, kind) VALUES (?,?,?,?,?)'
+      ).run(name, content, logo_path, is_default ? 1 : 0, contractKind(req.body.kind));
       res.status(201).json({ id: r.lastInsertRowid });
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
@@ -1095,8 +1101,9 @@ module.exports = function(db) {
       if (!curr) return res.status(404).json({ error: 'Not found' });
       const logo_path = req.file ? req.file.filename : curr.logo_path;
       if (is_default) db.prepare("UPDATE contract_templates SET is_default=0").run();
-      db.prepare('UPDATE contract_templates SET name=?, content=?, logo_path=?, is_default=? WHERE id=?')
-        .run(name || curr.name, content || curr.content, logo_path, is_default ? 1 : 0, req.params.id);
+      db.prepare('UPDATE contract_templates SET name=?, content=?, logo_path=?, is_default=?, kind=? WHERE id=?')
+        .run(name || curr.name, content || curr.content, logo_path, is_default ? 1 : 0,
+             req.body.kind !== undefined ? contractKind(req.body.kind) : (curr.kind || 'наем'), req.params.id);
       res.json({ ok: true });
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
@@ -1215,10 +1222,11 @@ module.exports = function(db) {
   // ── Contracts ──────────────────────────────────────────────────────────
 
   router.get('/', (req, res) => {
-    const { status, property_id, q } = req.query;
+    const { status, property_id, q, kind } = req.query;
     let sql = 'SELECT * FROM contracts WHERE 1=1';
     const params = [];
     if (status)      { sql += ' AND status=?';                         params.push(status); }
+    if (kind)        { sql += " AND COALESCE(kind,'наем')=?";          params.push(contractKind(kind)); }
     if (property_id) { sql += ' AND property_id=?';                    params.push(property_id); }
     if (q)           { sql += ' AND (tenant_name LIKE ? OR contract_number LIKE ? OR property_address LIKE ?)';
                        params.push(`%${q}%`, `%${q}%`, `%${q}%`); }
@@ -1248,6 +1256,7 @@ module.exports = function(db) {
       const contract = {
         template_id, property_id: property_id || null, contract_number,
         status: 'draft',
+        kind: contractKind(fields.kind || template.kind),
         landlord_type:    fields.landlord_type    || 'физическо',
         landlord_name:    fields.landlord_name    || issuer.name    || '',
         landlord_address: fields.landlord_address || issuer.address || '',
@@ -1323,8 +1332,8 @@ module.exports = function(db) {
           monthly_rent, currency, deposit, payment_day,
           start_date, end_date, delivery_date, conditions, notes,
           абонат_ток, абонат_вода, абонат_тец, абонат_вход,
-          pdf_path, protocol_pdf_path, id_front_path, id_back_path)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+          pdf_path, protocol_pdf_path, id_front_path, id_back_path, kind)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       `).run(
         contract.template_id, contract.property_id, contract.contract_number, contract.status,
         contract.landlord_type, contract.landlord_name, contract.landlord_address, contract.landlord_egn,
@@ -1335,7 +1344,7 @@ module.exports = function(db) {
         contract.monthly_rent, contract.currency, contract.deposit, contract.payment_day,
         contract.start_date, contract.end_date, contract.delivery_date, contract.conditions, contract.notes,
         contract.абонат_ток, contract.абонат_вода, contract.абонат_тец, contract.абонат_вход,
-        filename, protocolFilename, contract.id_front_path, contract.id_back_path
+        filename, protocolFilename, contract.id_front_path, contract.id_back_path, contract.kind
       );
 
       // Авто-запис на наемателя в указателя при всяко създаване на договор
@@ -1395,15 +1404,17 @@ module.exports = function(db) {
       const contract = db.prepare('SELECT * FROM contracts WHERE id=?').get(req.params.id);
       if (!contract) return res.status(404).json({ error: 'Not found' });
 
-      // Един имот — един действащ договор. Активирането е моментът, в който
-      // щетата става реална: два активни договора върху един имот означават
-      // двойно фактуриране, объркан наемател в имота и грешна заетост.
+      // Един имот — един действащ договор ОТ ДАДЕН ВИД. Активирането е моментът,
+      // в който щетата става реална: два активни наемни договора върху един имот
+      // означават двойно фактуриране, объркан наемател в имота и грешна заетост.
+      // Интернет договорът съжителства с наемния (същият наемател купува и нет).
       // Черновите нарочно НЕ се спират — подготовка на следващия договор, докато
       // текущият още тече, е нормална работа. Подновяване минава през анекс.
+      const kind = contractKind(contract.kind);
       if (contract.property_id && contract.status !== 'active') {
         const other = db.prepare(
-          "SELECT id, contract_number, tenant_name, end_date FROM contracts WHERE property_id=? AND status='active' AND id<>?"
-        ).get(contract.property_id, contract.id);
+          "SELECT id, contract_number, tenant_name, end_date FROM contracts WHERE property_id=? AND status='active' AND id<>? AND COALESCE(kind,'наем')=?"
+        ).get(contract.property_id, contract.id, kind);
         if (other) {
           return res.status(409).json({
             error: `Имотът вече има действащ договор ${other.contract_number || '#' + other.id}`
@@ -1418,7 +1429,19 @@ module.exports = function(db) {
       db.prepare("UPDATE contracts SET status='active', activated_at=datetime('now') WHERE id=?").run(contract.id);
 
       // Update property
-      if (contract.property_id) {
+      if (contract.property_id && kind === 'интернет') {
+        // Интернет договор: таксата НЕ е наем — не пипа наема/статуса/историята
+        // на имота (иначе влиза в „месечен наем" в Таблото и в чл.50). Само при
+        // имот без действащ наемен договор (чужд имот — само интернет) записва
+        // кой е наемателят, за да се вижда в Имоти.
+        const rentActive = db.prepare(
+          "SELECT 1 FROM contracts WHERE property_id=? AND status='active' AND COALESCE(kind,'наем')='наем' AND id<>?"
+        ).get(contract.property_id, contract.id);
+        if (!rentActive) {
+          db.prepare(`UPDATE properties SET наемател=?, телефон=?, email=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`)
+            .run(contract.tenant_name, contract.tenant_phone || null, contract.tenant_email || null, contract.property_id);
+        }
+      } else if (contract.property_id) {
         db.prepare(`UPDATE properties SET наемател=?, наем=?, телефон=?, email=?, статус='✅', updated_at=CURRENT_TIMESTAMP WHERE id=?`)
           .run(contract.tenant_name, contract.monthly_rent, contract.tenant_phone || null, contract.tenant_email || null, contract.property_id);
 
@@ -1459,7 +1482,8 @@ module.exports = function(db) {
       let invoice = null;
       try {
         const explicit = typeof req.body?.issue_invoice === 'boolean' ? req.body.issue_invoice : null;
-        const shouldInvoice = explicit !== null ? explicit : autoInvoiceOnActivateOn(db);
+        // Интернетът се фактурира от Stripe покупката (payments.js), не като наем
+        const shouldInvoice = kind === 'интернет' ? false : (explicit !== null ? explicit : autoInvoiceOnActivateOn(db));
         if (contract.property_id && shouldInvoice) {
           if (explicit === true) {
             db.prepare('UPDATE properties SET invoice_enabled=1 WHERE id=?').run(contract.property_id);
@@ -1551,7 +1575,8 @@ module.exports = function(db) {
     if (!contract) return res.status(404).json({ error: 'Not found' });
     db.prepare("UPDATE contracts SET status='terminated', terminated_at=datetime('now'), end_date=? WHERE id=?")
       .run(end_date || new Date().toISOString().slice(0,10), contract.id);
-    if (contract.property_id) {
+    // Интернет договорът не е записвал история на наемателите → не я затваря
+    if (contract.property_id && contractKind(contract.kind) !== 'интернет') {
       db.prepare("UPDATE tenant_history SET end_date=? WHERE property_id=? AND (end_date IS NULL OR end_date='')")
         .run(end_date || new Date().toISOString().slice(0,10), contract.property_id);
     }

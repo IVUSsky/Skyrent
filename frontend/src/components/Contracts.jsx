@@ -9,6 +9,14 @@ const STATUS_LABELS = {
   archived:   { label: 'Архивиран',  color: 'bg-blue-100 text-blue-700' },
 }
 
+// Вид договор: наемен (класически) или интернет — Sky като доставчик на интернет.
+// Държат се в отделни списъци и интернетът не пипа наема на имота.
+const KIND_LABELS = {
+  'наем':     { label: '🏠 Наемни',   one: 'Договор за наем' },
+  'интернет': { label: '🌐 Интернет', one: 'Договор за интернет' },
+}
+const kindOf = c => (c?.kind || 'наем') === 'интернет' ? 'интернет' : 'наем'
+
 function fmtDate(d) {
   if (!d) return '—'
   return new Date(d).toLocaleDateString('bg-BG')
@@ -343,17 +351,18 @@ export default function Contracts({ API }) {
 
   // Filters
   const [filterStatus, setFilterStatus] = useState('')
+  const [kindTab, setKindTab] = useState('наем') // 🏠 наемни | 🌐 интернет
   const [search, setSearch] = useState('')
 
   // Template editor
   const [editingTemplate, setEditingTemplate] = useState(null)
-  const [templateForm, setTemplateForm] = useState({ name: '', content: DEFAULT_TEMPLATE })
+  const [templateForm, setTemplateForm] = useState({ name: '', content: DEFAULT_TEMPLATE, kind: 'наем' })
   const [logoFile, setLogoFile] = useState(null)
   const logoInputRef = useRef()
 
   // New contract form
   const [newForm, setNewForm] = useState({
-    template_id: '', property_id: '',
+    template_id: '', property_id: '', kind: 'наем',
     landlord_type: 'физическо',
     landlord_name: '', landlord_address: '', landlord_egn: '', landlord_phone: '',
     landlord_lk: '', landlord_lk_date: '',
@@ -527,9 +536,10 @@ export default function Contracts({ API }) {
     apiFetch(`${API}/api/contracts?status=active`)
       .then(r => r.json())
       .then(list => {
+        // по имот И по вид: наемен и интернет договор съжителстват върху един имот
         const map = {}
         for (const c of (Array.isArray(list) ? list : [])) {
-          if (c.property_id) map[c.property_id] = c
+          if (c.property_id) (map[c.property_id] ||= {})[kindOf(c)] = c
         }
         setActiveByProp(map)
       })
@@ -567,13 +577,14 @@ export default function Contracts({ API }) {
     const fd = new FormData()
     fd.append('name', templateForm.name)
     fd.append('content', templateForm.content)
+    fd.append('kind', templateForm.kind || 'наем')
     if (logoFile) fd.append('logo', logoFile)
 
     const url    = editingTemplate ? `${API}/api/contracts/templates/${editingTemplate.id}` : `${API}/api/contracts/templates`
     const method = editingTemplate ? 'PUT' : 'POST'
     const r = await apiFetch(url, { method, body: fd })
     const d = await r.json()
-    if (d.id || d.ok) { showToast('Шаблонът е запазен'); load(); setEditingTemplate(null); setTemplateForm({ name: '', content: DEFAULT_TEMPLATE }); setLogoFile(null) }
+    if (d.id || d.ok) { showToast('Шаблонът е запазен'); load(); setEditingTemplate(null); setTemplateForm({ name: '', content: DEFAULT_TEMPLATE, kind: 'наем' }); setLogoFile(null) }
     else showToast('Грешка: ' + d.error, 'error')
   }
 
@@ -802,7 +813,8 @@ export default function Contracts({ API }) {
           {/* Жива бройка: активни + колко изтичат до 60 дни */}
           <div className="iv-mast-eyebrow">
             {(() => {
-              const active = contracts.filter(c => c.status === 'active')
+              // само наемните — интернет договорите имат свой брояч в сегмента
+              const active = contracts.filter(c => c.status === 'active' && kindOf(c) === 'наем')
               const soon = active.filter(c => {
                 if (!c.end_date) return false
                 const d = Math.ceil((new Date(c.end_date) - Date.now()) / 86400000)
@@ -897,8 +909,24 @@ export default function Contracts({ API }) {
       )}
 
       {/* ── LIST TAB ─────────────────────────────────────────────── */}
-      {tab === 'list' && (
+      {tab === 'list' && (() => { const shown = contracts.filter(c => kindOf(c) === kindTab); return (
         <div>
+          {/* Вид: наемните и интернет договорите са отделни списъци със свои броячи */}
+          {(() => {
+            const counts = { 'наем': 0, 'интернет': 0 }
+            for (const c of contracts) counts[kindOf(c)]++
+            return (
+              <div className="inline-flex rounded-lg border border-gray-300 overflow-hidden text-sm mb-4">
+                {Object.entries(KIND_LABELS).map(([k, { label }], i) => (
+                  <button key={k} onClick={() => setKindTab(k)}
+                    className={`px-4 py-1.5 ${i > 0 ? 'border-l border-gray-300' : ''} ${kindTab === k ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-50'}`}>
+                    {label} <span className={`ml-1 text-xs ${kindTab === k ? 'text-blue-100' : 'text-gray-400'}`}>{counts[k]}</span>
+                  </button>
+                ))}
+              </div>
+            )
+          })()}
+
           {/* Filters */}
           <div className="flex flex-wrap gap-3 mb-4 items-center">
             <input type="text" value={search} onChange={e => setSearch(e.target.value)}
@@ -917,7 +945,7 @@ export default function Contracts({ API }) {
           {/* Summary */}
           <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
             {Object.entries(STATUS_LABELS).map(([st, { label, color }]) => {
-              const count = contracts.filter(c => c.status === st).length
+              const count = shown.filter(c => c.status === st).length
               return (
                 <div key={st} className="bg-white rounded-xl border border-gray-200 p-3 text-center">
                   <span className={`inline-block text-xs font-semibold px-2 py-0.5 rounded-full ${color}`}>{label}</span>
@@ -927,7 +955,7 @@ export default function Contracts({ API }) {
             })}
             {/* Активни договори без качен подписан екземпляр — какво още липсва в архива */}
             {(() => {
-              const missing = contracts.filter(c => c.status === 'active' && !c.signed_pdf_path).length
+              const missing = shown.filter(c => c.status === 'active' && !c.signed_pdf_path).length
               return (
                 <div className={`rounded-xl border p-3 text-center ${missing ? 'bg-amber-50 border-amber-200' : 'bg-white border-gray-200'}`}
                   title="Активни договори, за които няма качен подписан екземпляр">
@@ -939,23 +967,23 @@ export default function Contracts({ API }) {
           </div>
 
           {loading ? <div className="text-center py-12 text-gray-400">Зарежда...</div> :
-           contracts.length === 0 ? (
+           shown.length === 0 ? (
             <div className="bg-gray-50 rounded-xl border border-gray-200 p-10 text-center text-gray-400">
-              <div className="text-4xl mb-2">📋</div>
-              <div>Няма договори. Натиснете "+ Нов договор".</div>
+              <div className="text-4xl mb-2">{kindTab === 'интернет' ? '🌐' : '📋'}</div>
+              <div>{kindTab === 'интернет' ? 'Няма интернет договори. Шаблон „🌐 Договор за интернет" → „+ Нов договор".' : 'Няма договори. Натиснете "+ Нов договор".'}</div>
             </div>
           ) : (
             <div className="bg-white rounded-xl shadow overflow-hidden">
               <table className="min-w-full divide-y divide-gray-200 text-sm">
                 <thead className="bg-gray-50">
                   <tr>
-                    {['№','Наемател','Имот','Наем/мес','Период','Статус','Изпратен','Подписан','Действия'].map(h => (
+                    {['№','Наемател','Имот', kindTab === 'интернет' ? 'Такса/мес' : 'Наем/мес','Период','Статус','Изпратен','Подписан','Действия'].map(h => (
                       <th key={h} className="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {contracts.map((c, i) => {
+                  {shown.map((c, i) => {
                     const st = STATUS_LABELS[c.status] || STATUS_LABELS.draft
                     return (
                       <tr key={c.id} className={i % 2 === 0 ? 'bg-white hover:bg-blue-50/20' : 'bg-gray-50 hover:bg-blue-50/20'}>
@@ -1042,7 +1070,7 @@ export default function Contracts({ API }) {
             </div>
           )}
         </div>
-      )}
+      ) })()}
 
       {/* ── NEW CONTRACT TAB ─────────────────────────────────────── */}
       {tab === 'new' && (
@@ -1060,7 +1088,7 @@ export default function Contracts({ API }) {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-medium text-gray-600 mb-1">Шаблон *</label>
-                    <select value={newForm.template_id} onChange={e => setNewForm(f=>({...f,template_id:e.target.value}))}
+                    <select value={newForm.template_id} onChange={e => { const t = templates.find(x => String(x.id) === e.target.value); setNewForm(f=>({...f,template_id:e.target.value, kind: t ? kindOf(t) : f.kind})) }}
                       className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
                       <option value="">— Изберете шаблон —</option>
                       {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
@@ -1074,8 +1102,9 @@ export default function Contracts({ API }) {
                       // заключен и с номера на съществуващия договор: ако просто
                       // изчезне, изглежда като че имотът липсва от системата.
                       // Подновяване минава през анекс, не през нов договор.
-                      const free  = properties.filter(p => !activeByProp[p.id])
-                      const taken = properties.filter(p => activeByProp[p.id])
+                      const takenBy = p => activeByProp[p.id]?.[newForm.kind || 'наем']
+                      const free  = properties.filter(p => !takenBy(p))
+                      const taken = properties.filter(p => takenBy(p))
                       return (
                         <select value={newForm.property_id} onChange={e => onPropertyChange(e.target.value)}
                           className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
@@ -1085,8 +1114,8 @@ export default function Contracts({ API }) {
                             <optgroup label="── С действащ договор — не могат да се избират ──">
                               {taken.map(p => (
                                 <option key={p.id} value={p.id} disabled>
-                                  #{p.id} {p['адрес']} · договор {activeByProp[p.id].contract_number || activeByProp[p.id].id}
-                                  {activeByProp[p.id].tenant_name ? ` · ${activeByProp[p.id].tenant_name}` : ''}
+                                  #{p.id} {p['адрес']} · договор {takenBy(p).contract_number || takenBy(p).id}
+                                  {takenBy(p).tenant_name ? ` · ${takenBy(p).tenant_name}` : ''}
                                 </option>
                               ))}
                             </optgroup>
@@ -1094,13 +1123,31 @@ export default function Contracts({ API }) {
                         </select>
                       )
                     })()}
-                    {properties.length > 0 && properties.every(p => activeByProp[p.id]) && (
+                    {properties.length > 0 && properties.every(p => activeByProp[p.id]?.[newForm.kind || 'наем']) && (
                       <div className="text-xs text-amber-700 mt-1">
                         Всички имоти имат действащ договор. За подновяване направи анекс към съществуващия.
                       </div>
                     )}
                   </div>
                 </div>
+              </div>
+
+              {/* Вид договор — идва от шаблона; интернетът не пипа наема на имота */}
+              <div className={`rounded-xl border p-4 ${newForm.kind === 'интернет' ? 'bg-blue-50 border-blue-200' : 'bg-white border-gray-100 shadow'}`}>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-xs font-medium text-gray-600 mr-1">Вид договор</span>
+                  {Object.entries(KIND_LABELS).map(([k, { label }]) => (
+                    <button key={k} type="button" onClick={() => setNewForm(f => ({ ...f, kind: k }))}
+                      className={`px-3 py-1 text-xs font-medium rounded-lg border ${(newForm.kind || 'наем') === k ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-200'}`}>
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                {newForm.kind === 'интернет' && (
+                  <div className="text-xs text-blue-800 mt-2">
+                    🌐 Sky е доставчик на интернет. Таксата по-долу е за интернет, не наем — при активиране не влиза в наема на имота, не пуска наемна фактура и може да съжителства с действащ наемен договор върху същия имот.
+                  </div>
+                )}
               </div>
 
               {/* Landlord */}
@@ -1319,11 +1366,12 @@ export default function Contracts({ API }) {
                   <div className="flex items-start justify-between">
                     <div>
                       <div className="font-bold text-gray-800">{t.name}</div>
+                      <span className={`text-xs px-2 py-0.5 rounded-full mr-1 ${kindOf(t) === 'интернет' ? 'bg-sky-100 text-sky-700' : 'bg-gray-100 text-gray-600'}`}>{KIND_LABELS[kindOf(t)].one}</span>
                       {t.is_default && <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">По подразбиране</span>}
                       {t.logo_path && <div className="text-xs text-green-600 mt-1">✅ Лого качено</div>}
                     </div>
                     <div className="flex gap-2">
-                      <button onClick={() => { setEditingTemplate(t); setTemplateForm({ name: t.name, content: t.content }); setLogoFile(null) }}
+                      <button onClick={() => { setEditingTemplate(t); setTemplateForm({ name: t.name, content: t.content, kind: kindOf(t) }); setLogoFile(null) }}
                         className="text-xs px-2 py-1 bg-blue-50 border border-blue-200 text-blue-700 rounded hover:bg-blue-100">✏️ Редактирай</button>
                       <button onClick={() => deleteTemplate(t)}
                         className="text-xs px-2 py-1 bg-red-50 border border-red-200 text-red-600 rounded hover:bg-red-100">🗑️</button>
@@ -1345,6 +1393,15 @@ export default function Contracts({ API }) {
                 <input type="text" value={templateForm.name} onChange={e => setTemplateForm(f=>({...f,name:e.target.value}))}
                   placeholder="Стандартен договор за наем"
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                <div className="flex gap-1 mt-2 items-center">
+                  {Object.entries(KIND_LABELS).map(([k, { label }]) => (
+                    <button key={k} type="button" onClick={() => setTemplateForm(f => ({ ...f, kind: k }))}
+                      className={`px-3 py-1 text-xs font-medium rounded-lg border ${(templateForm.kind || 'наем') === k ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-200'}`}>
+                      {label}
+                    </button>
+                  ))}
+                  <span className="text-xs text-gray-400 ml-1">Договорите от шаблона получават този вид</span>
+                </div>
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">Лого (PNG/JPG)</label>
@@ -1386,7 +1443,7 @@ export default function Contracts({ API }) {
                   className="text-xs px-2 py-1 bg-green-50 border border-green-200 text-green-700 rounded hover:bg-green-100">
                   📋 Договор на английски (EN)
                 </button>
-                <button onClick={() => setTemplateForm(f=>({...f, content: INTERNET_TEMPLATE, name: f.name || 'Договор за интернет'}))}
+                <button onClick={() => setTemplateForm(f=>({...f, content: INTERNET_TEMPLATE, name: f.name || 'Договор за интернет', kind: 'интернет'}))}
                   className="text-xs px-2 py-1 bg-blue-50 border border-blue-200 text-blue-700 rounded hover:bg-blue-100">
                   🌐 Договор за интернет
                 </button>
@@ -1401,7 +1458,7 @@ export default function Contracts({ API }) {
             />
             <div className="flex justify-between mt-3">
               {editingTemplate && (
-                <button onClick={() => { setEditingTemplate(null); setTemplateForm({ name: '', content: DEFAULT_TEMPLATE }) }}
+                <button onClick={() => { setEditingTemplate(null); setTemplateForm({ name: '', content: DEFAULT_TEMPLATE, kind: 'наем' }) }}
                   className="px-4 py-2 text-sm text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg">
                   Отказ
                 </button>

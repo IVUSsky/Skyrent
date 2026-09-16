@@ -395,7 +395,8 @@ function runTenantMigrations(db) {
    'id_front_path TEXT',
    'id_back_path TEXT',
    'signed_pdf_path TEXT',
-   'signed_at DATE'
+   'signed_at DATE',
+   "kind TEXT DEFAULT 'наем'"
   ].forEach(col => { try { db.exec(`ALTER TABLE contracts ADD COLUMN ${col}`); } catch(_) {} });
   // Архивираните договори са качени вече подписани — сканът им Е подписаният
   // екземпляр. Еднократно ги отбелязваме като такива (флаг в settings, иначе
@@ -408,6 +409,20 @@ function runTenantMigrations(db) {
                WHERE signed_pdf_path IS NULL AND pdf_path IS NOT NULL
                  AND notes LIKE '📎 Архивиран съществуващ договор%'`);
       db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('signed_copy_backfill', '1')").run();
+    }
+  } catch(_) {}
+  // Вид договор: 'наем' (по подразбиране) | 'интернет' (Sky като доставчик на
+  // интернет — не пипа наема на имота, не пуска наемна фактура, отделен списък).
+  try { db.exec("ALTER TABLE contract_templates ADD COLUMN kind TEXT DEFAULT 'наем'"); } catch(_) {}
+  try {
+    const done = db.prepare("SELECT value FROM settings WHERE key='contract_kind_backfill'").get();
+    if (!done) {
+      db.exec("UPDATE contract_templates SET kind='интернет' WHERE LOWER(name) LIKE '%интернет%'");
+      db.exec(`UPDATE contracts SET kind='интернет'
+               WHERE COALESCE(kind,'наем')='наем' AND (
+                 template_id IN (SELECT id FROM contract_templates WHERE kind='интернет')
+                 OR property_id IN (SELECT id FROM properties WHERE адрес LIKE '%само интернет%'))`);
+      db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('contract_kind_backfill', '1')").run();
     }
   } catch(_) {}
   console.log('contracts tables ready');

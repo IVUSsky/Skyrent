@@ -501,7 +501,7 @@ async function generateRentInvoice(db, { property_id, month, payment_type, notes
   // и двете са задължителни реквизити по чл.114 ЗДДС.
   const tenantC = db.prepare(`
     SELECT tenant_name, tenant_egn, tenant_address, tenant_mol
-    FROM contracts WHERE property_id=? AND status='active'
+    FROM contracts WHERE property_id=? AND status='active' AND COALESCE(kind,'наем')='наем'
     ORDER BY id DESC LIMIT 1
   `).get(property_id);
   const rcp = buildRecipient(recipient, tenantC, prop);
@@ -517,7 +517,7 @@ async function generateRentInvoice(db, { property_id, month, payment_type, notes
   let rent = fullRent;
   let prorataNote = null;
   const startedC = db.prepare(
-    "SELECT start_date FROM contracts WHERE property_id=? AND status='active' AND start_date LIKE ? ORDER BY id DESC LIMIT 1"
+    "SELECT start_date FROM contracts WHERE property_id=? AND status='active' AND COALESCE(kind,'наем')='наем' AND start_date LIKE ? ORDER BY id DESC LIMIT 1"
   ).get(property_id, month + '%');
   const startDay = startedC ? Number(startedC.start_date.slice(8, 10)) : 1;
   if (startedC && startDay > 1) {
@@ -580,7 +580,7 @@ async function generateRentInvoice(db, { property_id, month, payment_type, notes
   const tenantUser = db.prepare(`
     SELECT tenant_user_id FROM contracts
     WHERE property_id=? AND status='active' AND tenant_user_id IS NOT NULL
-    ORDER BY created_at DESC LIMIT 1
+    ORDER BY (COALESCE(kind,'наем')='наем') DESC, created_at DESC LIMIT 1
   `).get(property_id);
   if (tenantUser?.tenant_user_id) {
     notifyTenant(db, tenantUser.tenant_user_id, {
@@ -618,7 +618,7 @@ async function generateDepositInvoice(db, { property_id, amount, with_vat = fals
   if (!prop) return { ok: false, reason: 'no_property' };
 
   const contract = db.prepare(`
-    SELECT * FROM contracts WHERE property_id=? AND status='active'
+    SELECT * FROM contracts WHERE property_id=? AND status='active' AND COALESCE(kind,'наем')='наем'
     ORDER BY id DESC LIMIT 1
   `).get(property_id);
 
@@ -754,7 +754,7 @@ module.exports = function(db) {
                c.tenant_name, c.start_date, p.адрес AS address
         FROM contracts c
         JOIN properties p ON p.id = c.property_id
-        WHERE c.status='active' AND c.deposit > 0
+        WHERE c.status='active' AND COALESCE(c.kind,'наем')='наем' AND c.deposit > 0
           AND NOT EXISTS (
             SELECT 1 FROM rent_invoices i
             WHERE i.property_id = c.property_id AND i.type='invoice' AND i.product='депозит'
