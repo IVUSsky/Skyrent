@@ -155,6 +155,35 @@ module.exports = function(db) {
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
 
+  // Трие акаунт без платена история. Акаунтът се създава сам щом наемателят
+  // отвори таб „Интернет" в портала, затова се трупат празни записи.
+  // Платени покупки се пазят (фактури) — за такъв акаунт остава само ⏸.
+  // Рутерът нарочно не се пипа: непровизиран акаунт няма какво да се маха,
+  // а в flat режим disableUser би спрял нета на целия имот.
+  router.delete('/accounts/:id', (req, res) => {
+    try {
+      const acc = db.prepare('SELECT * FROM internet_accounts WHERE id=?').get(req.params.id);
+      if (!acc) return res.status(404).json({ error: 'Не е намерен' });
+      const validUntil = acc.valid_until
+        ? new Date(acc.valid_until + (acc.valid_until.endsWith('Z') ? '' : 'Z')).getTime() : 0;
+      if (acc.status === 'active' && validUntil > Date.now()) {
+        return res.status(409).json({ error: 'Акаунтът работи в момента — първо го спри (⏸)' });
+      }
+      const paid = db.prepare(`
+        SELECT COUNT(*) AS cnt FROM internet_purchases
+        WHERE account_id=? AND (status='paid' OR paid_at IS NOT NULL OR applied_at IS NOT NULL OR invoice_id IS NOT NULL)
+      `).get(acc.id).cnt;
+      if (paid > 0 || Number(acc.total_paid) > 0) {
+        return res.status(409).json({ error: 'Акаунтът има платени покупки — историята се пази, ползвай ⏸' });
+      }
+      db.transaction(() => {
+        db.prepare('DELETE FROM internet_purchases WHERE account_id=?').run(acc.id);
+        db.prepare('DELETE FROM internet_accounts WHERE id=?').run(acc.id);
+      })();
+      res.json({ ok: true, deleted: true });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
   // ── Router sync (manual trigger) ────────────────────────────
   router.post('/sync-all', async (req, res) => {
     try {
