@@ -3,7 +3,7 @@
 // runControlMigrations(db) → control.db: organizations, users, login_audit.
 const fs = require('fs');
 const path = require('path');
-const { seed, patchMarketVal, seedContractTemplate, seedBgContractTemplate, seedProtocolTemplate } = require('./seed');
+const { seed, patchMarketVal, seedContractTemplate, seedBgContractTemplate, seedProtocolTemplate, seedInternetContractTemplates } = require('./seed');
 
 function runTenantMigrations(db) {
 
@@ -428,6 +428,7 @@ function runTenantMigrations(db) {
   console.log('contracts tables ready');
   seedContractTemplate(db);
   seedBgContractTemplate(db);
+  seedInternetContractTemplates(db);
   seedProtocolTemplate(db);
 
   // Rent invoices
