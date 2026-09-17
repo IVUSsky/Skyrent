@@ -189,17 +189,29 @@ function AccountsTab({ API, showToast }) {
   )
 }
 
-const PLAN_EMPTY = { name: '', description: '', duration_days: 30, price: '', speed_down_mbps: '', speed_up_mbps: '', active: 1, sort_order: 0 }
+const PLAN_EMPTY = { name: '', description: '', duration_days: 30, price: '', speed_down_mbps: '', speed_up_mbps: '', active: 1, sort_order: 0, property_ids: [] }
+// property_ids идва от API като CSV ("2,58") или null → масив от числа
+const planPropIds = (v) => Array.isArray(v) ? v.map(Number) : String(v || '').split(',').map(x => Number(x.trim())).filter(Boolean)
 
 function PlansTab({ API, showToast }) {
   const [plans, setPlans] = useState([])
   const [editing, setEditing] = useState(null)
   const [form, setForm] = useState(PLAN_EMPTY)
+  // Имотите с рутер — само те могат да предлагат интернет, затова само те се избират
+  const [routerProps, setRouterProps] = useState([])
 
-  const load = () => apiFetch(`${API}/api/internet/plans`).then(r => r.json()).then(setPlans)
+  const load = () => {
+    apiFetch(`${API}/api/internet/plans`).then(r => r.json()).then(setPlans)
+    apiFetch(`${API}/api/internet/routers`).then(r => r.json()).then(rs => {
+      const seen = new Map()
+      for (const r of (Array.isArray(rs) ? rs : [])) if (r.property_id && !seen.has(r.property_id)) seen.set(r.property_id, { id: r.property_id, address: r.property_address || ('#' + r.property_id) })
+      setRouterProps([...seen.values()])
+    }).catch(() => setRouterProps([]))
+  }
   useEffect(load, [API])
+  const propLabel = (id) => routerProps.find(p => p.id === id)?.address || ('#' + id)
 
-  const startEdit = (p) => { setEditing(p.id); setForm({ ...p, speed_down_mbps: p.speed_down_mbps || '', speed_up_mbps: p.speed_up_mbps || '' }) }
+  const startEdit = (p) => { setEditing(p.id); setForm({ ...p, description: p.description || '', speed_down_mbps: p.speed_down_mbps || '', speed_up_mbps: p.speed_up_mbps || '', property_ids: planPropIds(p.property_ids) }) }
   const startNew = () => { setEditing('new'); setForm(PLAN_EMPTY) }
 
   const save = async () => {
@@ -257,6 +269,23 @@ function PlansTab({ API, showToast }) {
               <input type="number" value={form.speed_up_mbps} onChange={e => setForm({ ...form, speed_up_mbps: e.target.value })} className="w-full border rounded px-3 py-1.5" />
             </div>
             <div className="md:col-span-4">
+              <label className="text-xs text-gray-500 font-medium">Имоти, за които важи планът</label>
+              <div className="text-xs text-gray-400 mb-1">Без отметка = всички имоти с рутер. С отметки — наемателят вижда плана само ако е в отбелязан имот.</div>
+              <div className="flex flex-wrap gap-2">
+                {routerProps.map(p => {
+                  const on = (form.property_ids || []).includes(p.id)
+                  return (
+                    <label key={p.id} className={`text-xs px-2 py-1 rounded-lg border cursor-pointer ${on ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}`}>
+                      <input type="checkbox" className="hidden" checked={on}
+                        onChange={e => setForm({ ...form, property_ids: e.target.checked ? [...(form.property_ids || []), p.id] : (form.property_ids || []).filter(x => x !== p.id) })} />
+                      {p.address}
+                    </label>
+                  )
+                })}
+                {routerProps.length === 0 && <span className="text-xs text-gray-400">Няма имоти с рутер.</span>}
+              </div>
+            </div>
+            <div className="md:col-span-4">
               <label className="text-sm flex items-center gap-2">
                 <input type="checkbox" checked={!!form.active} onChange={e => setForm({ ...form, active: e.target.checked ? 1 : 0 })} className="w-4 h-4" />
                 Активен (видим в каталога)
@@ -273,7 +302,7 @@ function PlansTab({ API, showToast }) {
       <div className="bg-white rounded-xl shadow border border-gray-100 overflow-hidden">
         <table className="min-w-full divide-y divide-gray-100 text-sm">
           <thead className="bg-gray-50">
-            <tr>{['План', 'Дни', 'Цена', 'Скорост', 'Статус', 'Действия'].map(h => <th key={h} className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase">{h}</th>)}</tr>
+            <tr>{['План', 'Дни', 'Цена', 'Скорост', 'Имоти', 'Статус', 'Действия'].map(h => <th key={h} className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase">{h}</th>)}</tr>
           </thead>
           <tbody className="divide-y divide-gray-50">
             {plans.map(p => (
@@ -285,6 +314,11 @@ function PlansTab({ API, showToast }) {
                 <td className="px-3 py-2 whitespace-nowrap">{p.duration_days} дни</td>
                 <td className="px-3 py-2 font-medium text-blue-700 whitespace-nowrap">{fmt(p.price)} €</td>
                 <td className="px-3 py-2 text-xs whitespace-nowrap">{p.speed_down_mbps ? `${p.speed_down_mbps}/${p.speed_up_mbps || '?'} Mbps` : '—'}</td>
+                <td className="px-3 py-2 text-xs max-w-[220px]">
+                  {planPropIds(p.property_ids).length
+                    ? planPropIds(p.property_ids).map(id => <span key={id} className="inline-block bg-blue-50 text-blue-700 border border-blue-200 rounded px-1.5 py-0.5 mr-1 mb-0.5">{propLabel(id)}</span>)
+                    : <span className="text-amber-700">всички с рутер</span>}
+                </td>
                 <td className="px-3 py-2">{p.active ? <span className="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700 border border-green-300">Активен</span> : <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-500 border">Спрян</span>}</td>
                 <td className="px-3 py-2">
                   <button onClick={() => startEdit(p)} className="text-xs px-2 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded border border-blue-200 mr-1">✏️</button>
@@ -292,7 +326,7 @@ function PlansTab({ API, showToast }) {
                 </td>
               </tr>
             ))}
-            {plans.length === 0 && <tr><td colSpan={6} className="text-center text-gray-400 py-8">Няма дефинирани планове.</td></tr>}
+            {plans.length === 0 && <tr><td colSpan={7} className="text-center text-gray-400 py-8">Няма дефинирани планове.</td></tr>}
           </tbody>
         </table>
       </div>

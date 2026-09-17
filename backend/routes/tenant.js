@@ -7,7 +7,7 @@ const multer  = require('multer');
 const { askAgent } = require('../lib/tenantAgent');
 const { notifyAdmin } = require('../lib/notify');
 const { getPropertyScope } = require('../lib/propertyScope');
-const { getOrCreateAccount } = require('../lib/internetService');
+const { getOrCreateAccount, planAllowedForProperty } = require('../lib/internetService');
 const supportMod = require('./support');
 
 function getStripe() {
@@ -495,11 +495,12 @@ module.exports = function(db) {
     // иначе наемателят би платил за услуга, която няма как да получи
     const routerRow = propId ? db.prepare('SELECT mode FROM routers WHERE property_id=?').get(propId) : null;
     const hasRouter = !!routerRow;
+    // Само плановете за този имот (или общите) — иначе наемателят вижда и чуждите
     const plans = !hasRouter ? [] : db.prepare(`
-      SELECT id, name, description, duration_days, price, speed_down_mbps, speed_up_mbps, currency
+      SELECT id, name, description, duration_days, price, speed_down_mbps, speed_up_mbps, currency, property_ids
       FROM internet_plans WHERE active = 1
       ORDER BY sort_order ASC, id ASC
-    `).all();
+    `).all().filter(p => planAllowedForProperty(p, propId)).map(({ property_ids, ...p }) => p);
     const purchases = db.prepare(`
       SELECT id, plan_name, amount, currency, status, paid_at, valid_from, valid_until, created_at
       FROM internet_purchases
@@ -534,8 +535,7 @@ module.exports = function(db) {
 
   router.post('/internet/buy', async (req, res) => {
     try {
-      const s = getStripe();
-      if (!s) return res.status(500).json({ error: 'Stripe не е конфигуриран' });
+      // Първо валидираме заявката (план/имот), чак после искаме Stripe
       const plan = db.prepare('SELECT * FROM internet_plans WHERE id=? AND active=1').get(req.body.plan_id);
       if (!plan) return res.status(404).json({ error: 'Планът не е намерен или е неактивен' });
 
@@ -543,6 +543,11 @@ module.exports = function(db) {
       if (!propId || !db.prepare('SELECT id FROM routers WHERE property_id=?').get(propId)) {
         return res.status(400).json({ error: 'Интернет услугата не е налична за този имот' });
       }
+      if (!planAllowedForProperty(plan, propId)) {
+        return res.status(400).json({ error: 'Този план не е наличен за вашия имот' });
+      }
+      const s = getStripe();
+      if (!s) return res.status(500).json({ error: 'Stripe не е конфигуриран' });
       const account = getOrCreateAccount(db, req.user.id, propId);
       const user = db.prepare('SELECT email FROM users WHERE id=?').get(req.user.id);
       const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';

@@ -14,6 +14,17 @@ function genPassword() {
   return out;
 }
 
+// Планът е за всички имоти с рутер (property_ids празно) или само за изброените.
+function parsePlanPropertyIds(v) {
+  if (Array.isArray(v)) return v.map(Number).filter(n => Number.isInteger(n) && n > 0);
+  return String(v || '').split(',').map(s => Number(s.trim())).filter(n => Number.isInteger(n) && n > 0);
+}
+function planAllowedForProperty(plan, propertyId) {
+  const ids = parsePlanPropertyIds(plan && plan.property_ids);
+  if (!ids.length) return true;
+  return ids.includes(Number(propertyId));
+}
+
 // Намира съществуващия акаунт или създава нов. Връща пълния запис.
 function getOrCreateAccount(db, userId, propertyId) {
   let acc = db.prepare('SELECT * FROM internet_accounts WHERE user_id=?').get(userId);
@@ -81,4 +92,4 @@ function applyPurchase(db, purchaseId) {
   return db.prepare('SELECT * FROM internet_purchases WHERE id=?').get(purchaseId);
 }
 
-module.exports = { genUsername, genPassword, getOrCreateAccount, extendAccount, applyPurchase };
+module.exports = { genUsername, genPassword, getOrCreateAccount, extendAccount, applyPurchase, parsePlanPropertyIds, planAllowedForProperty };

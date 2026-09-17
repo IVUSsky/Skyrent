@@ -1,7 +1,7 @@
 const express = require('express');
 const { getRouterProvider } = require('../lib/routerProvider');
 const { reconcileInternetAccounts } = require('../lib/internetCron');
-const { extendAccount } = require('../lib/internetService');
+const { extendAccount, parsePlanPropertyIds } = require('../lib/internetService');
 
 module.exports = function(db) {
   const router = express.Router();
@@ -20,16 +20,18 @@ module.exports = function(db) {
       if (!b.name || !b.duration_days || b.price == null) {
         return res.status(400).json({ error: 'name, duration_days и price са задължителни' });
       }
+      const propIds = parsePlanPropertyIds(b.property_ids);
       const r = db.prepare(`
-        INSERT INTO internet_plans (name, description, duration_days, price, speed_down_mbps, speed_up_mbps, currency, active, sort_order)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO internet_plans (name, description, duration_days, price, speed_down_mbps, speed_up_mbps, currency, active, sort_order, property_ids)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         b.name, b.description || '', Number(b.duration_days), Number(b.price),
         b.speed_down_mbps ? Number(b.speed_down_mbps) : null,
         b.speed_up_mbps   ? Number(b.speed_up_mbps)   : null,
         b.currency || 'EUR',
         b.active !== undefined ? (b.active ? 1 : 0) : 1,
-        Number(b.sort_order) || 0
+        Number(b.sort_order) || 0,
+        propIds.length ? propIds.join(',') : null
       );
       res.json({ ok: true, id: r.lastInsertRowid });
     } catch (err) { res.status(500).json({ error: err.message }); }
@@ -43,7 +45,7 @@ module.exports = function(db) {
       db.prepare(`
         UPDATE internet_plans SET
           name=?, description=?, duration_days=?, price=?,
-          speed_down_mbps=?, speed_up_mbps=?, currency=?, active=?, sort_order=?
+          speed_down_mbps=?, speed_up_mbps=?, currency=?, active=?, sort_order=?, property_ids=?
         WHERE id=?
       `).run(
         b.name !== undefined ? b.name : cur.name,
@@ -55,6 +57,7 @@ module.exports = function(db) {
         b.currency || cur.currency,
         b.active !== undefined ? (b.active ? 1 : 0) : cur.active,
         b.sort_order !== undefined ? Number(b.sort_order) : cur.sort_order,
+        b.property_ids !== undefined ? (parsePlanPropertyIds(b.property_ids).join(',') || null) : cur.property_ids,
         req.params.id
       );
       res.json({ ok: true });

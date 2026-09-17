@@ -713,6 +713,10 @@ function runTenantMigrations(db) {
   )`);
   // Връзка към авто-генерираната фактура при плащане
   try { db.exec("ALTER TABLE internet_purchases ADD COLUMN invoice_id INTEGER REFERENCES rent_invoices(id)"); } catch(_) {}
+  // План само за определени имоти (CSV от property id; NULL/празно = всички с рутер).
+  // Иначе всеки наемател вижда всички планове и избира най-евтиния — Конджа (ап.46)
+  // купи „Net 500" за 15 € вместо плана за Фонтани за 25,98 €.
+  try { db.exec("ALTER TABLE internet_plans ADD COLUMN property_ids TEXT"); } catch(_) {}
   try { db.exec("CREATE INDEX IF NOT EXISTS idx_inet_accounts_status ON internet_accounts(status, valid_until)"); } catch(_) {}
   // Seed plans only if empty
   const planCount = db.prepare('SELECT COUNT(*) as cnt FROM internet_plans').get();
