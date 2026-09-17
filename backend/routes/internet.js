@@ -227,7 +227,7 @@ module.exports = function(db) {
     }
   });
 
-  router.put('/routers/:id', (req, res) => {
+  router.put('/routers/:id', async (req, res) => {
     try {
       const cur = db.prepare('SELECT * FROM routers WHERE id=?').get(req.params.id);
       if (!cur) return res.status(404).json({ error: 'Не е намерен' });
@@ -250,7 +250,20 @@ module.exports = function(db) {
         b.enforce_cutoff !== undefined ? (b.enforce_cutoff ? 1 : 0) : cur.enforce_cutoff,
         req.params.id
       );
-      res.json({ ok: true });
+      // Включване на „Спирай автоматично" при вече изтекъл акаунт: кронът реагира
+      // само на прехода active→expired, затова прилагаме спирането веднага.
+      let applied = null;
+      if (b.enforce_cutoff && !cur.enforce_cutoff) {
+        const acc = db.prepare(`SELECT * FROM internet_accounts WHERE property_id=? ORDER BY valid_until DESC LIMIT 1`).get(cur.property_id);
+        const paid = acc && acc.valid_until && new Date(acc.valid_until + (acc.valid_until.endsWith('Z') ? '' : 'Z')) > new Date();
+        if (acc && !paid) {
+          try {
+            applied = await getRouterProvider().disableUser(db, { username: acc.username, mac_address: acc.mac_address, property_id: acc.property_id });
+            db.prepare("UPDATE internet_accounts SET status='expired', router_synced_at=datetime('now') WHERE id=?").run(acc.id);
+          } catch (e) { applied = { ok: false, error: e.message }; }
+        }
+      }
+      res.json({ ok: true, cutoff_applied: applied });
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
 

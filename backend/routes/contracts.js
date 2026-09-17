@@ -1418,6 +1418,13 @@ module.exports = function(db) {
         if (typeof v === 'string') v = v.trim();
         sets.push(`${k}=?`); vals.push(v === '' ? null : v);
       }
+      // Смяна на бланката (напр. наемна → интернет): видът следва шаблона
+      if (b.template_id !== undefined && b.template_id !== null && b.template_id !== '') {
+        const tpl = db.prepare('SELECT id, kind FROM contract_templates WHERE id=?').get(Number(b.template_id));
+        if (!tpl) return res.status(404).json({ error: 'Шаблонът не е намерен' });
+        sets.push('template_id=?'); vals.push(tpl.id);
+        sets.push('kind=?'); vals.push(contractKind(tpl.kind));
+      }
       if (!sets.length) return res.status(400).json({ error: 'Няма полета за промяна' });
       db.prepare(`UPDATE contracts SET ${sets.join(', ')} WHERE id=?`).run(...vals, contract.id);
       const fresh = db.prepare('SELECT * FROM contracts WHERE id=?').get(contract.id);
