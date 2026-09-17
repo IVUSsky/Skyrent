@@ -611,14 +611,29 @@ export default function Contracts({ API }) {
       .catch(e => { setCreating(false); showToast(e.message, 'error') })
   }
 
+  // Активиране — модал вместо верига от confirm(): наемна фактура + депозитна
+  // фактура (с ДДС по подразбиране — решението на Иво от 14.09) с отметки.
+  const [actModal, setActModal] = useState(null)
+  const [actOpts, setActOpts] = useState({ issue_invoice: true, issue_deposit: true, deposit_with_vat: true })
+  const [activating, setActivating] = useState(false)
+
   const activateContract = (c) => {
-    if (!window.confirm(`Активиране ще обнови портфолиото и ще създаде онлайн профил за наемателя. Продължи?`)) return
-    const issueInvoice = window.confirm(
-      'Да се фактурира ли този имот?\n\n' +
-      'OK — включва фактурирането за имота и издава първата фактура (изпраща се и към счетоводството)\n' +
-      'Отказ — без фактура'
-    )
-    apiFetch(`${API}/api/contracts/${c.id}/activate`, { method: 'POST', body: JSON.stringify({ issue_invoice: issueInvoice }) })
+    const isNet = kindOf(c) === 'интернет'
+    setActOpts({ issue_invoice: !isNet, issue_deposit: !isNet && Number(c.deposit) > 0, deposit_with_vat: true })
+    setActModal(c)
+  }
+
+  const doActivate = () => {
+    const c = actModal
+    setActivating(true)
+    apiFetch(`${API}/api/contracts/${c.id}/activate`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        issue_invoice: actOpts.issue_invoice,
+        issue_deposit_invoice: actOpts.issue_deposit,
+        deposit_with_vat: actOpts.deposit_with_vat,
+      }),
+    })
       .then(r => r.json())
       .then(d => {
         if (!d.ok) return showToast('Грешка: ' + d.error, 'error')
@@ -626,9 +641,15 @@ export default function Contracts({ API }) {
         if (d.tenant_account?.created) msg += d.tenant_account.email_sent ? ' • покана изпратена на наемателя' : ' • профил създаден (email не е изпратен)'
         if (d.invoice?.invoice_number) msg += ` • фактура № ${d.invoice.invoice_number} издадена`
         else if (d.invoice?.skipped === 'duplicate') msg += ' • фактура за месеца вече съществува'
+        if (d.deposit_invoice?.invoice_number && !d.deposit_invoice.skipped) msg += ` • депозит № ${d.deposit_invoice.invoice_number} издадена`
+        else if (d.deposit_invoice?.skipped === 'duplicate') msg += ` • депозитът вече е фактуриран (№ ${d.deposit_invoice.invoice_number})`
+        else if (d.deposit_invoice?.skipped) msg += ' • депозитната фактура не е издадена (' + d.deposit_invoice.skipped + ')'
         showToast(msg)
+        setActModal(null)
         load()
       })
+      .catch(e => showToast('Грешка: ' + e.message, 'error'))
+      .finally(() => setActivating(false))
   }
 
   const inviteTenant = (c) => {
@@ -1637,6 +1658,62 @@ export default function Contracts({ API }) {
             </div>
             <div className="flex-shrink-0 px-6 py-3 border-t border-gray-200 flex justify-end">
               <button onClick={() => setSignedModal(null)} className="px-4 py-2 text-sm text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg">Затвори</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Activate modal — какво да се издаде заедно с активирането */}
+      {actModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md">
+            <div className="px-6 py-4 border-b border-gray-200">
+              <h3 className="font-bold text-gray-900">✅ Активиране на договор</h3>
+              <p className="text-xs text-gray-500 mt-0.5">№ {actModal.contract_number || 'Д' + actModal.id} — {actModal.tenant_name}{actModal.property_address ? ` · ${actModal.property_address}` : ''}</p>
+            </div>
+            <div className="px-6 py-4 space-y-3 text-sm">
+              <p className="text-gray-600">Активирането обновява портфолиото и създава онлайн профил за наемателя.</p>
+              {kindOf(actModal) === 'интернет' ? (
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-800">🌐 Интернет договор — не пипа наема на имота; таксата се фактурира от плащането в портала.</div>
+              ) : (
+                <>
+                  <label className="flex items-start gap-2 cursor-pointer">
+                    <input type="checkbox" className="mt-0.5" checked={actOpts.issue_invoice} onChange={e => setActOpts(o => ({ ...o, issue_invoice: e.target.checked }))} />
+                    <span>
+                      <span className="font-medium text-gray-800">🧾 Издай първата наемна фактура</span>
+                      <span className="block text-xs text-gray-500">Включва фактурирането за имота; при започване по средата на месеца сумата е про-рата. Изпраща се и към счетоводството.</span>
+                    </span>
+                  </label>
+                  {Number(actModal.deposit) > 0 ? (
+                    <div className={`rounded-lg border p-3 ${actOpts.issue_deposit ? 'bg-amber-50 border-amber-200' : 'border-gray-200'}`}>
+                      <label className="flex items-start gap-2 cursor-pointer">
+                        <input type="checkbox" className="mt-0.5" checked={actOpts.issue_deposit} onChange={e => setActOpts(o => ({ ...o, issue_deposit: e.target.checked }))} />
+                        <span>
+                          <span className="font-medium text-gray-800">🔐 Издай фактура за депозита — {Number(actModal.deposit).toLocaleString('bg-BG')} {actModal.currency || 'EUR'}</span>
+                          <span className="block text-xs text-gray-500">Отделна фактура, свързана с този договор. Иначе остава в „Депозит без фактура" във Фактури.</span>
+                        </span>
+                      </label>
+                      {actOpts.issue_deposit && (
+                        <label className="flex items-start gap-2 cursor-pointer mt-2 ml-6">
+                          <input type="checkbox" className="mt-0.5" checked={actOpts.deposit_with_vat} onChange={e => setActOpts(o => ({ ...o, deposit_with_vat: e.target.checked }))} />
+                          <span>
+                            <span className="text-gray-800">с 20% ДДС</span>
+                            <span className="block text-xs text-gray-500">Депозитът е връщаема гаранция (чл.26 ал.5 ЗДДС) — с ДДС при връщането трябва кредитно известие.</span>
+                          </span>
+                        </label>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="text-xs text-gray-400">Договорът е без депозит.</div>
+                  )}
+                </>
+              )}
+            </div>
+            <div className="px-6 py-3 border-t border-gray-200 flex justify-end gap-2">
+              <button onClick={() => setActModal(null)} disabled={activating} className="px-4 py-2 text-sm text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg">Отказ</button>
+              <button onClick={doActivate} disabled={activating} className="px-4 py-2 text-sm font-semibold text-white bg-green-600 hover:bg-green-700 rounded-lg disabled:opacity-50">
+                {activating ? 'Активира…' : '✅ Активирай'}
+              </button>
             </div>
           </div>
         </div>

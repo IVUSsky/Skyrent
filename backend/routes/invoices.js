@@ -425,6 +425,7 @@ async function createSimpleInvoice(db, {
   tenant_name = '', recipient_name = '', recipient_address = '',
   recipient_eik = '', recipient_mol = '', notes = null,
   product = 'наем', line_description = null, vat_rate: vatOverride,
+  contract_id = null,
 }) {
   const issuer = getIssuer(db);
   const invoice_number = nextInvoiceNumber(db, { rent: product === 'наем' });
@@ -453,13 +454,13 @@ async function createSimpleInvoice(db, {
       (invoice_number, type, product, property_id, month, tenant_name, recipient_name,
        recipient_address, recipient_eik, recipient_mol, amount, vat_rate, vat_amount,
        total, payment_type, tax_event_date, due_date, issued_at, pdf_path, notes,
-       addons_total, addons_json)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+       addons_total, addons_json, contract_id)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
   `).run(
     invoice_number, 'invoice', product, property_id, month, inv.tenant_name,
     inv.recipient_name, inv.recipient_address, inv.recipient_eik, inv.recipient_mol,
     net, vat_rate, vat_amount, grossN,
-    payment_type, issued_at, null, issued_at, filename, notes, 0, null
+    payment_type, issued_at, null, issued_at, filename, notes, 0, null, contract_id
   );
   // Авто-изпращане към счетоводител (Kontrolisi), ако е включено — best-effort
   if (kontrolisiAutoOn(db)) {
@@ -613,22 +614,27 @@ async function generateRentInvoice(db, { property_id, month, payment_type, notes
 // Флагът е булев нарочно: ако беше „vat_rate или undefined", липсващото поле в
 // JSON тялото щеше да падне върху подразбирането и изборът „с ДДС" тихо да се
 // превърне в „без ДДС".
-async function generateDepositInvoice(db, { property_id, amount, with_vat = false, month, notes, payment_type }) {
+// Пазачът за дубликат е ПО ДОГОВОР (rent_invoices.contract_id): депозитът се плаща
+// веднъж за договора, а при нов наемател на същия имот пак се дължи и фактурира.
+// Без разпознат договор (стар имот без запис) — по имот, само сред несвързаните.
+async function generateDepositInvoice(db, { property_id, contract_id, amount, with_vat = false, month, notes, payment_type }) {
   const prop = db.prepare('SELECT * FROM properties WHERE id = ?').get(property_id);
   if (!prop) return { ok: false, reason: 'no_property' };
 
-  const contract = db.prepare(`
-    SELECT * FROM contracts WHERE property_id=? AND status='active' AND COALESCE(kind,'наем')='наем'
-    ORDER BY id DESC LIMIT 1
-  `).get(property_id);
+  const contract = contract_id
+    ? db.prepare('SELECT * FROM contracts WHERE id=? AND property_id=?').get(contract_id, property_id)
+    : db.prepare(`
+        SELECT * FROM contracts WHERE property_id=? AND status='active' AND COALESCE(kind,'наем')='наем'
+        ORDER BY id DESC LIMIT 1
+      `).get(property_id);
+  if (contract_id && !contract) return { ok: false, reason: 'no_contract' };
 
   const gross = Math.round(Number(amount != null ? amount : (contract?.deposit || 0)) * 100) / 100;
   if (!(gross > 0)) return { ok: false, reason: 'no_amount' };
 
-  const existing = db.prepare(`
-    SELECT id, invoice_number FROM rent_invoices
-    WHERE property_id=? AND type='invoice' AND product='депозит'
-  `).get(property_id);
+  const existing = contract
+    ? db.prepare(`SELECT id, invoice_number FROM rent_invoices WHERE contract_id=? AND type='invoice' AND product='депозит'`).get(contract.id)
+    : db.prepare(`SELECT id, invoice_number FROM rent_invoices WHERE property_id=? AND contract_id IS NULL AND type='invoice' AND product='депозит'`).get(property_id);
   if (existing) return { ok: false, reason: 'duplicate', id: existing.id, invoice_number: existing.invoice_number };
 
   let recipient = {};
@@ -653,6 +659,7 @@ async function generateDepositInvoice(db, { property_id, amount, with_vat = fals
     recipient_eik:     recipient.eik     || contract?.tenant_egn || '',
     recipient_mol:     recipient.mol     || contract?.tenant_mol || '',
     notes: notes || 'Депозитът подлежи на връщане при прекратяване на договора съгласно Чл.8.',
+    contract_id: contract?.id || null,
   });
 
   if (contract?.tenant_user_id) {
@@ -757,7 +764,7 @@ module.exports = function(db) {
         WHERE c.status='active' AND COALESCE(c.kind,'наем')='наем' AND c.deposit > 0
           AND NOT EXISTS (
             SELECT 1 FROM rent_invoices i
-            WHERE i.property_id = c.property_id AND i.type='invoice' AND i.product='депозит'
+            WHERE i.contract_id = c.id AND i.type='invoice' AND i.product='депозит'
           )
         ORDER BY c.start_date DESC
       `).all();
@@ -770,13 +777,14 @@ module.exports = function(db) {
   // начислява ставката на издателя.
   router.post('/deposit', async (req, res) => {
     try {
-      const { property_id, amount, with_vat, month, notes, payment_type } = req.body;
+      const { property_id, contract_id, amount, with_vat, month, notes, payment_type } = req.body;
       if (!property_id) return res.status(400).json({ error: 'property_id е задължителен' });
       if (!issuerComplete(getIssuer(db))) return res.status(400).json({ error: 'Попълнете фирмените данни (Настройки → Данни на издателя) преди да издавате фактури.', code: 'ISSUER_INCOMPLETE' });
-      const r = await generateDepositInvoice(db, { property_id, amount, with_vat: !!with_vat, month, notes, payment_type });
+      const r = await generateDepositInvoice(db, { property_id, contract_id: contract_id || null, amount, with_vat: !!with_vat, month, notes, payment_type });
       if (!r.ok) {
         const map = {
           no_property: ['Имотът не е намерен', 404],
+          no_contract: ['Договорът не е намерен за този имот', 404],
           no_amount:   ['Няма депозит по договора — задайте сума', 400],
           duplicate:   [`Вече има фактура за депозит: ${r.invoice_number}`, 400],
         };
@@ -1126,6 +1134,7 @@ module.exports = function(db) {
 // Експорт за преизползване от други модули (напр. интернет webhook)
 module.exports.createSimpleInvoice = createSimpleInvoice;
 module.exports.generateRentInvoice = generateRentInvoice;
+module.exports.generateDepositInvoice = generateDepositInvoice;
 module.exports.autoInvoiceOnActivateOn = autoInvoiceOnActivateOn;
 // Изнесена, за да може оформлението да се провери с истински рендер, а не
 // само по числа — дълъг адрес/име трябва да се види, че не застъпва.

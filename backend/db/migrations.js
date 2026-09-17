@@ -470,6 +470,23 @@ function runTenantMigrations(db) {
   try { db.exec("ALTER TABLE rent_invoices ADD COLUMN payment_method TEXT"); console.log('Migration: added rent_invoices.payment_method'); } catch(_) {}
   try { db.exec("ALTER TABLE rent_invoices ADD COLUMN addons_total REAL DEFAULT 0"); console.log('Migration: added rent_invoices.addons_total'); } catch(_) {}
   try { db.exec("ALTER TABLE rent_invoices ADD COLUMN addons_json TEXT"); console.log('Migration: added rent_invoices.addons_json'); } catch(_) {}
+  // Депозитната фактура се връзва към ДОГОВОРА, не към имота: при смяна на
+  // наемател депозитът на новия договор трябва пак да излиза за фактуриране.
+  // Заварените депозитни фактури се съотнасят еднократно към договора на имота,
+  // започнал последен преди датата на издаване (contracts е създадена по-горе).
+  try { db.exec("ALTER TABLE rent_invoices ADD COLUMN contract_id INTEGER"); console.log('Migration: added rent_invoices.contract_id'); } catch(_) {}
+  try {
+    const done = db.prepare("SELECT value FROM settings WHERE key='deposit_contract_backfill'").get();
+    if (!done) {
+      db.exec(`UPDATE rent_invoices SET contract_id = (
+                 SELECT c.id FROM contracts c
+                 WHERE c.property_id = rent_invoices.property_id
+                   AND (c.start_date IS NULL OR c.start_date <= COALESCE(rent_invoices.issued_at, date('now')))
+                 ORDER BY (c.status='active') DESC, c.start_date DESC, c.id DESC LIMIT 1)
+               WHERE product='депозит' AND contract_id IS NULL`);
+      db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('deposit_contract_backfill', '1')").run();
+    }
+  } catch(_) {}
   console.log('rent_invoices table ready');
 
   // Addon services catalog + tenant subscriptions
