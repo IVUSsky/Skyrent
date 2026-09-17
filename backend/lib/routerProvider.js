@@ -39,11 +39,22 @@ function getRouterForAccount(db, account) {
   return db.prepare('SELECT * FROM routers WHERE property_id=?').get(account.property_id);
 }
 
+// Flat режим: рутерът дърпа routers.desired_access на всеки 2 мин (poll) и го
+// прилага върху cutoff правилото. Всяко пускане/спиране трябва да мине И оттук —
+// иначе директният push (крон при изтичане, webhook при плащане) се отменя от
+// следващия poll: спрян при изтичане → 2 мин по-късно пак пуснат, и обратно.
+// Записва се ПРЕДИ push-а: ако рутерът е недостъпен, poll-ът пак ще го приложи.
+function persistDesiredAccess(db, r, allow) {
+  try { db.prepare('UPDATE routers SET desired_access=? WHERE id=?').run(allow ? 1 : 0, r.id); }
+  catch (e) { console.warn('[routerProvider] desired_access не се записа:', e.message); }
+}
+
 class MockProvider {
   constructor() { this.name = 'mock'; }
 
   async ensureUser(db, acc) {
     const r = getRouterForAccount(db, acc);
+    if (r && r.mode === 'flat') persistDesiredAccess(db, r, true);
     if (!r) {
       console.log(`[router:mock] no router configured for property ${acc.property_id} — skip`);
       return { ok: true, provider: 'mock', state: 'no_router', message: 'Няма конфигуриран рутер за този имот' };
@@ -55,6 +66,7 @@ class MockProvider {
   async disableUser(db, acc) {
     const r = getRouterForAccount(db, acc);
     if (!r) return { ok: true, provider: 'mock', state: 'no_router' };
+    if (r.mode === 'flat') persistDesiredAccess(db, r, false);
     console.log(`[router:mock] disableUser host=${r.host} username=${acc.username} mac=${acc.mac_address || '-'}`);
     return { ok: true, provider: 'mock', state: 'disabled', router_id: r.id };
   }
@@ -68,6 +80,7 @@ class MockProvider {
   async setPropertyAccess(db, routerId, allow) {
     const r = db.prepare('SELECT * FROM routers WHERE id=?').get(routerId);
     if (!r) throw new Error('Рутерът не е намерен');
+    persistDesiredAccess(db, r, allow);
     console.log(`[router:mock] setPropertyAccess host=${r.host} allow=${allow}`);
     return { ok: true, provider: 'mock', access: allow ? 'enabled' : 'disabled' };
   }
@@ -146,7 +159,7 @@ class MikrotikProvider {
   async ensureUser(db, acc) {
     const r = getRouterForAccount(db, acc);
     if (!r) throw new Error(`Няма конфигуриран рутер за имот ${acc.property_id}`);
-    if (r.mode === 'flat') return this._setFlatAccess(r, true);
+    if (r.mode === 'flat') { persistDesiredAccess(db, r, true); return this._setFlatAccess(r, true); }
     const conn = await this._connect(r);
     try {
       const comment = this._markComment(acc);
@@ -193,7 +206,7 @@ class MikrotikProvider {
   async disableUser(db, acc) {
     const r = getRouterForAccount(db, acc);
     if (!r) return { ok: true, message: 'Няма рутер' };
-    if (r.mode === 'flat') return this._setFlatAccess(r, false);
+    if (r.mode === 'flat') { persistDesiredAccess(db, r, false); return this._setFlatAccess(r, false); }
     const conn = await this._connect(r);
     try {
       // Премахни ip-binding ако има MAC
@@ -244,6 +257,7 @@ class MikrotikProvider {
   async setPropertyAccess(db, routerId, allow) {
     const r = db.prepare('SELECT * FROM routers WHERE id=?').get(routerId);
     if (!r) throw new Error('Рутерът не е намерен');
+    persistDesiredAccess(db, r, allow);
     return this._setFlatAccess(r, allow);
   }
 }
