@@ -1300,9 +1300,11 @@ module.exports = function(db) {
       const { filepath, filename } = await generateContractPDF(contract, template, issuer, photos);
       contract.pdf_path = filename;
 
-      // Auto-generate standalone Приемо-предавателен протокол PDF
+      // Auto-generate standalone Приемо-предавателен протокол PDF (само за наемни —
+      // интернет договорът няма предаване на имот)
       let protocolFilename = null;
-      const protocolTmpl = db.prepare("SELECT * FROM contract_templates WHERE name='Приемо-предавателен протокол'").get();
+      const protocolTmpl = contract.kind === 'интернет' ? null
+        : db.prepare("SELECT * FROM contract_templates WHERE name='Приемо-предавателен протокол'").get();
       if (protocolTmpl) {
         try {
           // Load inventory + files for the property so we can append items
@@ -1436,8 +1438,9 @@ module.exports = function(db) {
         const photos = fresh.property_id
           ? db.prepare('SELECT * FROM property_photos WHERE property_id=? ORDER BY created_at').all(fresh.property_id) : [];
         const { filename } = await generateContractPDF(fresh, template, issuer, photos);
-        let protocolFilename = fresh.protocol_pdf_path;
-        const protocolTmpl = db.prepare("SELECT * FROM contract_templates WHERE name='Приемо-предавателен протокол'").get();
+        let protocolFilename = contractKind(fresh.kind) === 'интернет' ? null : fresh.protocol_pdf_path;
+        const protocolTmpl = contractKind(fresh.kind) === 'интернет' ? null
+          : db.prepare("SELECT * FROM contract_templates WHERE name='Приемо-предавателен протокол'").get();
         if (protocolTmpl) {
           try {
             const invItems = fresh.property_id
