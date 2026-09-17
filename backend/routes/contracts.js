@@ -5,7 +5,7 @@ const path = require('path');
 const fs = require('fs');
 const multer = require('multer');
 const { ensureTenantUser, sendWelcomeEmail } = require('../lib/tenantOnboarding');
-const { generateRentInvoice, autoInvoiceOnActivateOn } = require('./invoices');
+const { generateRentInvoice, generateDepositInvoice, autoInvoiceOnActivateOn } = require('./invoices');
 const { parseRecipients } = require('../lib/email');
 const { optimizeMany, isDisplayable } = require('../lib/imageOptimize');
 const { imagesOnly, safeExt } = require('../lib/uploadFilter');
@@ -1497,6 +1497,28 @@ module.exports = function(db) {
         console.error('Auto-invoice on activate failed:', e.message);
       }
 
+      // Фактура за гаранционния депозит — заедно с първата наемна, по избор от
+      // диалога (issue_deposit_invoice). Иначе депозитът се губеше: наемната
+      // излизаше сама, а депозитната чакаше ръчен клик в лентата „Депозит без
+      // фактура". with_vat по подразбиране true (решението на Иво от 14.09).
+      let deposit_invoice = null;
+      try {
+        const wantDeposit = req.body?.issue_deposit_invoice === true;
+        if (wantDeposit && kind !== 'интернет' && contract.property_id && Number(contract.deposit) > 0) {
+          const withVat = req.body?.deposit_with_vat !== false;
+          const month = (contract.start_date || new Date().toISOString()).slice(0, 7);
+          const r = await generateDepositInvoice(db, {
+            property_id: contract.property_id, contract_id: contract.id,
+            amount: Number(contract.deposit), with_vat: withVat, month,
+          });
+          deposit_invoice = r.ok ? { id: r.id, invoice_number: r.invoice_number, total: r.total }
+                                 : { skipped: r.reason, invoice_number: r.invoice_number };
+        }
+      } catch (e) {
+        console.error('Deposit invoice on activate failed:', e.message);
+        deposit_invoice = { skipped: 'error', error: e.message };
+      }
+
       // Договорът отива и при счетоводителя, за да го види навреме, а не в края
       // на месеца. Best-effort: провален имейл не бива да отменя активирането —
       // договорът вече е в сила, а изпращането се повтаря от бутона.
@@ -1519,6 +1541,7 @@ module.exports = function(db) {
           ? { id: tenantInfo.user.id, username: tenantInfo.user.username, email: tenantInfo.user.email, created: tenantInfo.isNew, email_sent: emailResult.sent }
           : null,
         invoice,
+        deposit_invoice,
         kontrolisi,
       });
     } catch (err) { res.status(500).json({ error: err.message }); }

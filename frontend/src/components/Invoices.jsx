@@ -166,6 +166,7 @@ export default function Invoices({ API, role }) {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         property_id: c.property_id,
+        contract_id: c.contract_id,
         amount: Number(depositForm.amount),
         with_vat: depositForm.withVat,
       }),
