@@ -3,7 +3,7 @@ import { apiFetch, authUrl } from '../api'
 import UtilityHistoryChart from './UtilityHistoryChart'
 import NotificationBell from './NotificationBell'
 import { TicketDetail } from './Support'
-import { useTenantI18n } from '../tenantI18n'
+import { useTenantI18n, getTenantLocale } from '../tenantI18n'
 
 const API = import.meta.env.VITE_API_URL || ''
 
@@ -88,19 +88,19 @@ export default function TenantApp({ userName, onLogout, mustChangePassword }) {
     const params = new URLSearchParams(window.location.search)
     if (params.get('stripe_success') === '1') {
       setTab('invoices')
-      setToast({ type: 'success', text: '✅ Плащането е получено! Фактурата е маркирана като платена.' })
+      setToast({ type: 'success', text: tr('toast.paid') })
       window.history.replaceState({}, '', window.location.pathname)
     } else if (params.get('stripe_cancel') === '1') {
       setTab('invoices')
-      setToast({ type: 'error', text: 'Плащането беше прекратено. Можеш да опиташ отново.' })
+      setToast({ type: 'error', text: tr('toast.payCancel') })
       window.history.replaceState({}, '', window.location.pathname)
     } else if (params.get('autopay_success') === '1') {
       setTab('profile')
-      setToast({ type: 'success', text: '✅ Автоплащането е активирано! От следващия месец наемът ще се тегли автоматично.' })
+      setToast({ type: 'success', text: tr('toast.autopayOn') })
       window.history.replaceState({}, '', window.location.pathname)
     } else if (params.get('autopay_cancel') === '1') {
       setTab('profile')
-      setToast({ type: 'error', text: 'Активирането беше прекратено.' })
+      setToast({ type: 'error', text: tr('toast.autopayCancel') })
       window.history.replaceState({}, '', window.location.pathname)
     }
   }, [])
@@ -121,7 +121,7 @@ export default function TenantApp({ userName, onLogout, mustChangePassword }) {
   }
 
   if (loading) {
-    return <div className="min-h-screen flex items-center justify-center text-slate-500">Зареждане...</div>
+    return <div className="min-h-screen flex items-center justify-center text-slate-500">{tr('common.loading')}</div>
   }
 
   // Наемният договор е водещ за началния екран; интернет договорът (Sky като
@@ -153,13 +153,13 @@ export default function TenantApp({ userName, onLogout, mustChangePassword }) {
             <div className="flex items-center gap-2 flex-1 min-w-0">
               <span className="text-xl">📱</span>
               <div className="min-w-0">
-                <div className="font-semibold">Инсталирай приложението</div>
+                <div className="font-semibold">{tr('pwa.install')}</div>
                 {isIos ? (
                   <div className="text-xs opacity-90">
-                    В Safari натисни <strong>Share</strong> → <strong>Add to Home Screen</strong>
+                    {tr('pwa.iosHint')} <strong>Share</strong> → <strong>Add to Home Screen</strong>
                   </div>
                 ) : (
-                  <div className="text-xs opacity-90">Бърз достъп от началния екран на телефона</div>
+                  <div className="text-xs opacity-90">{tr('pwa.quick')}</div>
                 )}
               </div>
             </div>
@@ -167,7 +167,7 @@ export default function TenantApp({ userName, onLogout, mustChangePassword }) {
               {installPrompt && !isIos && (
                 <button onClick={triggerInstall}
                   className="bg-white text-blue-700 text-xs font-semibold px-3 py-1.5 rounded-lg">
-                  Инсталирай
+                  {tr('pwa.installBtn')}
                 </button>
               )}
               <button onClick={dismissInstall}
@@ -269,6 +269,7 @@ export default function TenantApp({ userName, onLogout, mustChangePassword }) {
 }
 
 function Chat({ prefill = '', onPrefillConsumed }) {
+  const { t: tr } = useTenantI18n()
   const [messages, setMessages] = useState([])
   const [input, setInput]       = useState('')
   const [sending, setSending]   = useState(false)
@@ -314,10 +315,10 @@ function Chat({ prefill = '', onPrefillConsumed }) {
         body: JSON.stringify({ message: text }),
       })
       const data = await r.json()
-      if (!r.ok) throw new Error(data.error || 'Грешка')
+      if (!r.ok) throw new Error(data.error || tr('common.error'))
       setMessages(prev => [...prev, { role: 'assistant', content: data.reply, created_at: new Date().toISOString(), _local: true }])
     } catch (e) {
-      setToast({ type: 'error', text: 'Грешка: ' + e.message })
+      setToast({ type: 'error', text: tr('chat.error') + e.message })
     } finally {
       setSending(false)
     }
@@ -340,8 +341,8 @@ function Chat({ prefill = '', onPrefillConsumed }) {
         {messages.length === 0 && !sending && (
           <div className="text-center text-slate-400 text-sm py-8">
             <div className="text-3xl mb-2">💬</div>
-            <div>Питай ме за апартамента, договора, плащанията…</div>
-            <div className="text-xs mt-2 text-slate-300">Например: „Каква е WiFi паролата?" или „Колко дължа?"</div>
+            <div>{tr('chat.empty')}</div>
+            <div className="text-xs mt-2 text-slate-300">{tr('chat.example')}</div>
           </div>
         )}
         {messages.map((m, i) => (
@@ -358,7 +359,7 @@ function Chat({ prefill = '', onPrefillConsumed }) {
         {sending && (
           <div className="flex justify-start">
             <div className="bg-slate-100 text-slate-500 px-3 py-2 rounded-2xl rounded-bl-sm text-sm">
-              <span className="inline-block animate-pulse">пише…</span>
+              <span className="inline-block animate-pulse">{tr('chat.typing')}</span>
             </div>
           </div>
         )}
@@ -373,7 +374,7 @@ function Chat({ prefill = '', onPrefillConsumed }) {
           value={input}
           onChange={e => setInput(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }}
-          placeholder="Напиши съобщение…"
+          placeholder={tr('chat.placeholder')}
           disabled={sending}
           className="flex-1 border border-slate-300 rounded-full px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100"
         />
@@ -387,17 +388,18 @@ function Chat({ prefill = '', onPrefillConsumed }) {
 }
 
 function Home({ me, property, contract, onAsk }) {
+  const { t: tr, locale } = useTenantI18n()
   if (!property) {
     return <Card>
-      <p className="text-slate-600 text-sm">Все още няма активен договор за имот, свързан с Вашия профил.</p>
-      <p className="text-slate-500 text-xs mt-2">Свържете се с екипа на Sky Capital за повече информация.</p>
+      <p className="text-slate-600 text-sm">{tr('home.noContract')}</p>
+      <p className="text-slate-500 text-xs mt-2">{tr('home.contactUs')}</p>
     </Card>
   }
   const suggestions = [
-    'Колко дължа?',
-    'Каква е WiFi паролата?',
-    'До кога е договорът?',
-    'Как да платя наема?',
+    tr('home.q1'),
+    tr('home.q2'),
+    tr('home.q3'),
+    tr('home.q4'),
   ]
   return (
     <div className="space-y-4">
@@ -410,8 +412,8 @@ function Home({ me, property, contract, onAsk }) {
         <div className="flex items-center gap-3 mb-2">
           <span className="text-2xl">💬</span>
           <div className="flex-1">
-            <div className="text-sm font-semibold text-slate-800">AI Помощник</div>
-            <div className="text-xs text-slate-600">Питай за апартамента, наема, плащане, уредите…</div>
+            <div className="text-sm font-semibold text-slate-800">{tr('home.aiTitle')}</div>
+            <div className="text-xs text-slate-600">{tr('home.aiSub')}</div>
           </div>
           <span className="text-slate-400">→</span>
         </div>
@@ -431,32 +433,32 @@ function Home({ me, property, contract, onAsk }) {
       <Card>
         <div className="flex items-start justify-between gap-2">
           <div>
-            <div className="text-xs uppercase tracking-wide text-slate-400">Имот</div>
+            <div className="text-xs uppercase tracking-wide text-slate-400">{tr('common.property')}</div>
             <h2 className="text-lg font-bold text-slate-800">{property.адрес}</h2>
             {property.район && <div className="text-sm text-slate-500">{property.район}</div>}
           </div>
           <span className="text-2xl">🏠</span>
         </div>
         <div className="grid grid-cols-2 gap-3 mt-4 text-sm">
-          {property.тип && <Info label="Тип" value={property.тип} />}
-          {property.площ && <Info label="Площ" value={`${property.площ} м²`} />}
-          {contract?.monthly_rent && <Info label={(contract.kind || 'наем') === 'интернет' ? 'Интернет' : 'Наем'} value={`${Number(contract.monthly_rent).toLocaleString('bg-BG')} ${contract.currency || 'EUR'}/мес.`} />}
-          {contract?.end_date && <Info label={(contract.kind || 'наем') === 'интернет' ? 'Интернет договорът изтича' : 'Договорът изтича'} value={fmtDate(contract.end_date)} />}
+          {property.тип && <Info label={tr('home.type')} value={property.тип} />}
+          {property.площ && <Info label={tr('home.area')} value={`${property.площ} м²`} />}
+          {contract?.monthly_rent && <Info label={(contract.kind || 'наем') === 'интернет' ? tr('home.internet') : tr('home.rent')} value={`${Number(contract.monthly_rent).toLocaleString(locale)} ${contract.currency || 'EUR'}${tr('common.month')}`} />}
+          {contract?.end_date && <Info label={(contract.kind || 'наем') === 'интернет' ? tr('home.netContractEnds') : tr('home.contractEnds')} value={fmtDate(contract.end_date)} />}
         </div>
       </Card>
 
       {(property.абонат_ток || property.абонат_вода || property.абонат_тец) && (
-        <Card title="Абонатни номера за сметки">
+        <Card title={tr('home.utilityIds')}>
           <div className="space-y-2 text-sm">
-            {property.абонат_ток  && <Row icon="⚡" label="Ток"  value={property.абонат_ток} />}
-            {property.абонат_вода && <Row icon="💧" label="Вода" value={property.абонат_вода} />}
-            {property.абонат_тец  && <Row icon="🔥" label="Топлофикация" value={property.абонат_тец} />}
-            {property.абонат_вход && <Row icon="🏢" label="Входна такса" value={property.абонат_вход} />}
+            {property.абонат_ток  && <Row icon="⚡" label={tr('home.electricity')} value={property.абонат_ток} />}
+            {property.абонат_вода && <Row icon="💧" label={tr('home.water')} value={property.абонат_вода} />}
+            {property.абонат_тец  && <Row icon="🔥" label={tr('home.heating')} value={property.абонат_тец} />}
+            {property.абонат_вход && <Row icon="🏢" label={tr('home.entranceFee')} value={property.абонат_вход} />}
           </div>
         </Card>
       )}
 
-      <Card title="Контакт със Sky Capital">
+      <Card title={tr('home.contact')}>
         <a href="mailto:info@skycapital.pro" className="block text-sm text-blue-600 hover:underline mb-1">📧 info@skycapital.pro</a>
         {property.телефон && <div className="text-sm text-slate-600">📞 {property.телефон}</div>}
       </Card>
@@ -465,6 +467,7 @@ function Home({ me, property, contract, onAsk }) {
 }
 
 function Photos({ property }) {
+  const { t: tr } = useTenantI18n()
   const [photos, setPhotos] = useState(null)
   useEffect(() => {
     if (!property?.id) return
@@ -473,9 +476,9 @@ function Photos({ property }) {
       .then(setPhotos)
       .catch(() => setPhotos([]))
   }, [property?.id])
-  if (!property) return <Card><p className="text-slate-500 text-sm">Няма имот.</p></Card>
-  if (photos === null) return <Card><p className="text-slate-500 text-sm">Зареждане на снимките...</p></Card>
-  if (photos.length === 0) return <Card><p className="text-slate-500 text-sm">Все още няма снимки на имота.</p></Card>
+  if (!property) return <Card><p className="text-slate-500 text-sm">{tr('photos.none')}</p></Card>
+  if (photos === null) return <Card><p className="text-slate-500 text-sm">{tr('photos.loading')}</p></Card>
+  if (photos.length === 0) return <Card><p className="text-slate-500 text-sm">{tr('photos.empty')}</p></Card>
   return (
     <div className="grid grid-cols-2 gap-3">
       {photos.map(p => {
@@ -497,7 +500,8 @@ function Photos({ property }) {
 }
 
 function Contract({ contracts }) {
-  if (!contracts.length) return <Card><p className="text-slate-500 text-sm">Няма свързани договори.</p></Card>
+  const { t: tr, locale } = useTenantI18n()
+  if (!contracts.length) return <Card><p className="text-slate-500 text-sm">{tr('contract.none')}</p></Card>
   return (
     <div className="space-y-3">
       {contracts.map(c => (
@@ -505,14 +509,14 @@ function Contract({ contracts }) {
           <div className="flex items-start justify-between">
             <div>
               <div className="text-xs uppercase text-slate-400">
-                {(c.kind || 'наем') === 'интернет' ? '🌐 Договор за интернет' : '🏠 Договор за наем'} · № {c.contract_number || 'Д' + c.id}
+                {(c.kind || 'наем') === 'интернет' ? tr('contract.internet') : tr('contract.rent')} · № {c.contract_number || 'Д' + c.id}
               </div>
               <div className="font-semibold text-slate-800">{c.property_address}</div>
               <div className="text-xs text-slate-500 mt-1">
-                {fmtDate(c.start_date)} → {c.end_date ? fmtDate(c.end_date) : 'безсрочен'}
+                {fmtDate(c.start_date)} → {c.end_date ? fmtDate(c.end_date) : tr('contract.openEnded')}
               </div>
               <div className="mt-2 text-sm">
-                <strong>{Number(c.monthly_rent).toLocaleString('bg-BG')} {c.currency || 'EUR'}</strong>/мес.{(c.kind || 'наем') === 'интернет' ? ' интернет' : ''}
+                <strong>{Number(c.monthly_rent).toLocaleString(locale)} {c.currency || 'EUR'}</strong>{tr('common.month')}{(c.kind || 'наем') === 'интернет' ? tr('contract.internetSuffix') : ''}
               </div>
             </div>
             <StatusBadge status={c.status} />
@@ -524,7 +528,7 @@ function Contract({ contracts }) {
               rel="noopener"
               className="mt-3 inline-block bg-blue-600 hover:bg-blue-700 text-white text-sm px-4 py-2 rounded-lg"
             >
-              📄 Изтегли PDF
+              {tr('contract.download')}
             </a>
           )}
         </Card>
@@ -534,6 +538,7 @@ function Contract({ contracts }) {
 }
 
 function Invoices() {
+  const { t: tr, locale } = useTenantI18n()
   const [list, setList] = useState(null)
   const [payingId, setPayingId] = useState(null)
   const [err, setErr] = useState(null)
@@ -549,20 +554,20 @@ function Invoices() {
       const r = await apiFetch(`${API}/api/tenant/invoices/${invoiceId}/pay`, { method: 'POST' })
       const data = await r.json()
       if (!r.ok || !data.url) {
-        setErr(data.error || 'Грешка при стартиране на плащането')
+        setErr(data.error || tr('inv.payError'))
         setPayingId(null)
         return
       }
       // Redirect to Stripe Checkout
       window.location.href = data.url
     } catch (e) {
-      setErr('Сървърна грешка')
+      setErr(tr('common.serverError'))
       setPayingId(null)
     }
   }
 
-  if (list === null) return <Card><p className="text-slate-500 text-sm">Зареждане...</p></Card>
-  if (list.length === 0) return <Card><p className="text-slate-500 text-sm">Все още няма издадени фактури.</p></Card>
+  if (list === null) return <Card><p className="text-slate-500 text-sm">{tr('common.loading')}</p></Card>
+  if (list.length === 0) return <Card><p className="text-slate-500 text-sm">{tr('inv.empty')}</p></Card>
 
   return (
     <div className="space-y-2">
@@ -579,11 +584,11 @@ function Invoices() {
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
                   <div className="font-semibold text-slate-800 truncate">№ {inv.invoice_number}</div>
-                  {isCN && <span className="text-xs text-red-600 font-semibold">КИ</span>}
+                  {isCN && <span className="text-xs text-red-600 font-semibold">{tr('inv.creditNote')}</span>}
                   {isPaid && (
                     <span className="text-xs px-2 py-0.5 rounded-full font-medium"
                           style={{ background: '#dcfce7', color: '#166534' }}>
-                      ✓ Платена
+                      {tr('inv.paid')}
                     </span>
                   )}
                 </div>
@@ -594,18 +599,18 @@ function Invoices() {
                 </div>
                 {(inv.addons_total || 0) > 0 && Array.isArray(inv.addons) && inv.addons.length > 0 && (
                   <div className="mt-1 text-[11px] text-slate-600 bg-slate-50 rounded px-2 py-1 border border-slate-200">
-                    <div className="font-semibold text-slate-700 mb-0.5">Включва (доп. услуги):</div>
+                    <div className="font-semibold text-slate-700 mb-0.5">{tr('inv.includes')}</div>
                     {inv.addons.map((a, i) => (
                       <div key={i} className="flex justify-between">
-                        <span>{a.name}{a.kind === 'deposit' ? ' (депозит)' : ''}</span>
-                        <span className="ml-2">{Number(a.amount).toLocaleString('bg-BG')} €</span>
+                        <span>{a.name}{a.kind === 'deposit' ? tr('inv.deposit') : ''}</span>
+                        <span className="ml-2">{Number(a.amount).toLocaleString(locale)} €</span>
                       </div>
                     ))}
                   </div>
                 )}
                 {inv.due_date && !isPaid && (
                   <div className="text-xs text-slate-500 mt-0.5">
-                    Падеж: {fmtDate(inv.due_date)}
+                    {tr('inv.due')}{fmtDate(inv.due_date)}
                   </div>
                 )}
               </div>
@@ -616,12 +621,12 @@ function Invoices() {
                     disabled={isPaying}
                     className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-semibold px-3 py-2 rounded-lg"
                   >
-                    {isPaying ? '...' : '💳 Плати'}
+                    {isPaying ? '...' : tr('inv.pay')}
                   </button>
                 )}
                 {!isPaid && !isCN && stripeOff && (
                   <span className="text-[10px] text-slate-500 italic text-center max-w-[100px]">
-                    Само по банков път
+                    {tr('inv.bankOnly')}
                   </span>
                 )}
                 {inv.pdf_path && (
@@ -644,6 +649,7 @@ function Invoices() {
 }
 
 function Addons() {
+  const { t: tr } = useTenantI18n()
   const [catalog, setCatalog] = useState(null)
   const [mine, setMine]       = useState(null)
   const [busy, setBusy]       = useState(null) // service_id while submitting
@@ -658,7 +664,7 @@ function Addons() {
         apiFetch(`${API}/api/tenant/addons/mine`).then(r => r.json()),
       ])
       setCatalog(c); setMine(m)
-    } catch (e) { setErr('Грешка при зареждане') }
+    } catch (e) { setErr(tr('common.loadError')) }
   }
   useEffect(() => { load() }, [])
 
@@ -671,24 +677,24 @@ function Addons() {
         body: JSON.stringify({ service_id: svc.id }),
       })
       const data = await r.json()
-      if (!r.ok) { setErr(data.error || 'Грешка'); return }
-      setMsg(`✓ Заявката за "${svc.name}" е изпратена. Управителят ще я прегледа.`)
+      if (!r.ok) { setErr(data.error || tr('common.error')); return }
+      setMsg(tr('addon.requested', { name: svc.name }))
       load()
-    } catch (e) { setErr('Сървърна грешка') }
+    } catch (e) { setErr(tr('common.serverError')) }
     finally { setBusy(null) }
   }
 
   const cancel = async (sub) => {
-    if (!confirm(`Да отменя ли заявката за ${sub.service_name}?`)) return
+    if (!confirm(tr('addon.cancelAsk', { name: sub.service_name }))) return
     try {
       const r = await apiFetch(`${API}/api/tenant/addons/mine/${sub.id}`, { method: 'DELETE' })
       const data = await r.json()
-      if (!r.ok) { setErr(data.error || 'Грешка'); return }
+      if (!r.ok) { setErr(data.error || tr('common.error')); return }
       load()
-    } catch (e) { setErr('Сървърна грешка') }
+    } catch (e) { setErr(tr('common.serverError')) }
   }
 
-  if (catalog === null || mine === null) return <Card><p className="text-slate-500 text-sm">Зареждане...</p></Card>
+  if (catalog === null || mine === null) return <Card><p className="text-slate-500 text-sm">{tr('common.loading')}</p></Card>
 
   // Map: which services have an active/pending sub
   const subByService = {}
@@ -699,10 +705,10 @@ function Addons() {
   const fmt = n => Number(n || 0).toLocaleString('bg-BG', { minimumFractionDigits: 0 })
 
   const STATUS_LABEL = {
-    pending:  { text: '⏳ Чакаща',   cls: 'bg-yellow-100 text-yellow-800' },
-    active:   { text: '✓ Активна',   cls: 'bg-green-100 text-green-800' },
-    stopped:  { text: '⏹ Спряна',    cls: 'bg-gray-200 text-gray-700' },
-    rejected: { text: '✗ Отказана',  cls: 'bg-red-100 text-red-700' },
+    pending:  { text: tr('addon.pending'),  cls: 'bg-yellow-100 text-yellow-800' },
+    active:   { text: tr('addon.active'),   cls: 'bg-green-100 text-green-800' },
+    stopped:  { text: tr('addon.stopped'),  cls: 'bg-gray-200 text-gray-700' },
+    rejected: { text: tr('addon.rejected'), cls: 'bg-red-100 text-red-700' },
   }
 
   return (
@@ -712,7 +718,7 @@ function Addons() {
 
       {/* My subscriptions */}
       {mine.length > 0 && (
-        <Card title="Моите услуги">
+        <Card title={tr('addon.mine')}>
           <div className="space-y-2">
             {mine.map(s => {
               const st = STATUS_LABEL[s.status] || { text: s.status, cls: 'bg-gray-100 text-gray-700' }
@@ -723,15 +729,15 @@ function Addons() {
                       <span className="mr-1">{s.service_icon}</span>{s.service_name}
                     </div>
                     <div className="text-xs text-slate-500">
-                      {fmt(s.service_monthly_price)} €/мес
+                      {fmt(s.service_monthly_price)} {tr('addon.perMonth')}
                       {s.service_deposit_amount > 0 && (
-                        <> · депозит {fmt(s.service_deposit_amount)} €{s.deposit_charged ? (s.deposit_refunded ? ' (върнат)' : ' (удържан)') : ' (предстои)'}</>
+                        <> · {tr('addon.depositWord')} {fmt(s.service_deposit_amount)} €{s.deposit_charged ? (s.deposit_refunded ? tr('addon.depRefunded') : tr('addon.depHeld')) : tr('addon.depPending')}</>
                       )}
                     </div>
                   </div>
                   <span className={`text-xs px-2 py-1 rounded-full font-medium whitespace-nowrap ${st.cls}`}>{st.text}</span>
                   {s.status === 'pending' && (
-                    <button onClick={() => cancel(s)} className="text-xs text-red-600 hover:text-red-800 px-2 py-1">Отмени</button>
+                    <button onClick={() => cancel(s)} className="text-xs text-red-600 hover:text-red-800 px-2 py-1">{tr('addon.cancel')}</button>
                   )}
                 </div>
               )
@@ -741,10 +747,10 @@ function Addons() {
       )}
 
       {/* Catalog */}
-      <Card title="Налични услуги">
+      <Card title={tr('addon.available')}>
         <p className="text-xs text-slate-500 mb-3">
-          Заявката отива до управителя. След одобрение услугата се добавя към следващата ви фактура.
-          {catalog.some(c => c.deposit_amount > 0) && ' Някои услуги изискват еднократен депозит, който се връща при прекратяване.'}
+          {tr('addon.info')}
+          {catalog.some(c => c.deposit_amount > 0) && tr('addon.depositInfo')}
         </p>
         <div className="space-y-2">
           {catalog.map(svc => {
@@ -764,21 +770,21 @@ function Addons() {
                     <div className="text-xs text-slate-500">{svc.description}</div>
                   )}
                   <div className="text-xs text-slate-600 mt-0.5">
-                    <strong>{fmt(svc.monthly_price)} €/мес</strong>
+                    <strong>{fmt(svc.monthly_price)} {tr('addon.perMonth')}</strong>
                     {svc.deposit_amount > 0 && (
-                      <span className="text-orange-700 ml-2">+ депозит {fmt(svc.deposit_amount)} €</span>
+                      <span className="text-orange-700 ml-2">{tr('addon.plusDeposit')} {fmt(svc.deposit_amount)} €</span>
                     )}
                   </div>
                 </div>
                 {sub ? (
-                  <span className="text-xs text-slate-500 italic">{sub.status === 'active' ? 'активна' : 'заявена'}</span>
+                  <span className="text-xs text-slate-500 italic">{sub.status === 'active' ? tr('addon.stActive') : tr('addon.stRequested')}</span>
                 ) : (
                   <button
                     onClick={() => request(svc)}
                     disabled={disabled}
                     className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-semibold px-3 py-2 rounded-lg whitespace-nowrap"
                   >
-                    {busy === svc.id ? '...' : 'Заяви'}
+                    {busy === svc.id ? '...' : tr('addon.request')}
                   </button>
                 )}
               </div>
@@ -791,6 +797,7 @@ function Addons() {
 }
 
 function TenantInternet() {
+  const { t: tr, locale } = useTenantI18n()
   const [data, setData] = useState(null)
   const [busy, setBusy]   = useState(null) // plan id while buying
   const [err, setErr]     = useState(null)
@@ -800,7 +807,7 @@ function TenantInternet() {
   const load = () => {
     apiFetch(`${API}/api/tenant/internet`).then(r => r.json()).then(d => {
       setData(d); setMacInput(d?.account?.mac_address || '')
-    }).catch(() => setErr('Грешка при зареждане'))
+    }).catch(() => setErr(tr('common.loadError')))
   }
   useEffect(load, [])
 
@@ -820,9 +827,9 @@ function TenantInternet() {
         body: JSON.stringify({ plan_id: plan.id }),
       })
       const d = await r.json()
-      if (!r.ok || !d.url) { setErr(d.error || 'Грешка'); setBusy(null); return }
+      if (!r.ok || !d.url) { setErr(d.error || tr('common.error')); setBusy(null); return }
       window.location.href = d.url
-    } catch (e) { setErr('Сървърна грешка'); setBusy(null) }
+    } catch (e) { setErr(tr('common.serverError')); setBusy(null) }
   }
 
   const saveMac = async () => {
@@ -833,20 +840,20 @@ function TenantInternet() {
         body: JSON.stringify({ mac_address: macInput }),
       })
       const d = await r.json()
-      if (!r.ok) { setErr(d.error || 'Грешка'); return }
+      if (!r.ok) { setErr(d.error || tr('common.error')); return }
       load()
-    } catch (e) { setErr('Сървърна грешка') }
+    } catch (e) { setErr(tr('common.serverError')) }
     finally { setSavingMac(false) }
   }
 
-  if (data === null) return <Card><p className="text-slate-500 text-sm">Зареждане...</p></Card>
+  if (data === null) return <Card><p className="text-slate-500 text-sm">{tr('common.loading')}</p></Card>
 
   if (data.has_router === false) {
     return (
-      <Card title="Достъп до Wi-Fi">
+      <Card title={tr('net.title')}>
         <p className="text-slate-500 text-sm">
-          🌐 Интернет услугата все още не е налична за този имот.
-          Ако имате интерес, свържете се с нас през „Поддръжка“.
+          {tr('net.noService2')}
+          {' '}{tr('net.noService3')}
         </p>
       </Card>
     )
@@ -859,9 +866,9 @@ function TenantInternet() {
 
   const fmt = n => Number(n || 0).toLocaleString('bg-BG', { minimumFractionDigits: 0 })
   const fmtTimeLeft = (h) => {
-    if (h < 1)  return `${Math.round(h * 60)} мин`
-    if (h < 48) return `${Math.round(h)} часа`
-    return `${Math.round(h / 24)} дни`
+    if (h < 1)  return `${Math.round(h * 60)} ${tr('net.min')}`
+    if (h < 48) return `${Math.round(h)} ${tr('net.hours')}`
+    return `${Math.round(h / 24)} ${tr('net.daysLeft')}`
   }
 
   return (
@@ -869,46 +876,46 @@ function TenantInternet() {
       {err && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg p-3">{err}</div>}
 
       {/* Status card */}
-      <Card title="Достъп до Wi-Fi">
+      <Card title={tr('net.title')}>
         {isActive ? (
           <div className="bg-green-50 border border-green-200 rounded-lg p-3 mb-3">
             <div className="flex items-baseline justify-between">
-              <div className="text-green-800 font-bold">✅ Активен</div>
-              <div className="text-xs text-green-600">остават {fmtTimeLeft(hoursLeft)}</div>
+              <div className="text-green-800 font-bold">{tr('net.active')}</div>
+              <div className="text-xs text-green-600">{tr('net.remaining')}{fmtTimeLeft(hoursLeft)}</div>
             </div>
-            <div className="text-xs text-green-700 mt-1">До: {validUntil.toLocaleString('bg-BG')}</div>
+            <div className="text-xs text-green-700 mt-1">{tr('net.until')}{validUntil.toLocaleString(locale)}</div>
           </div>
         ) : (
           <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-3">
-            <div className="text-red-800 font-bold">❌ Няма активен пакет</div>
-            <div className="text-xs text-red-700 mt-1">Изберете план по-долу за да активирате интернет.</div>
+            <div className="text-red-800 font-bold">{tr('net.noPackage')}</div>
+            <div className="text-xs text-red-700 mt-1">{tr('net.choose')}</div>
           </div>
         )}
 
         {data.router_mode !== 'flat' && (
           <>
             <div className="bg-slate-50 rounded p-3 mb-3 text-sm">
-              <div className="text-xs text-slate-500 mb-1">За свързване към Wi-Fi мрежата:</div>
+              <div className="text-xs text-slate-500 mb-1">{tr('net.wifiCreds')}</div>
               <div className="flex justify-between">
-                <span className="text-slate-600">Потребител:</span>
+                <span className="text-slate-600">{tr('net.username')}:</span>
                 <span className="font-mono font-semibold">{acc.username}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-slate-600">Парола:</span>
+                <span className="text-slate-600">{tr('net.password')}:</span>
                 <span className="font-mono font-semibold">{acc.password}</span>
               </div>
             </div>
 
             <div className="text-xs text-slate-600">
-              <div className="font-medium mb-1">MAC адрес на устройството ви (опционално)</div>
-              <div className="text-slate-500 mb-2">Ако зададете MAC, ще се свързвате автоматично без парола.</div>
+              <div className="font-medium mb-1">{tr('net.macTitle')}</div>
+              <div className="text-slate-500 mb-2">{tr('net.macHint2')}</div>
               <div className="flex gap-2">
                 <input value={macInput} onChange={e => setMacInput(e.target.value.toUpperCase())}
                   placeholder="AA:BB:CC:DD:EE:FF" maxLength={17}
                   className="flex-1 border border-gray-300 rounded px-2 py-1.5 text-sm font-mono" />
                 <button onClick={saveMac} disabled={savingMac || macInput === (acc.mac_address || '')}
                   className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs px-3 py-1.5 rounded">
-                  {savingMac ? '...' : 'Запази'}
+                  {savingMac ? '...' : tr('common.save')}
                 </button>
               </div>
             </div>
@@ -917,8 +924,8 @@ function TenantInternet() {
       </Card>
 
       {/* Plans */}
-      <Card title="Купи пакет">
-        <p className="text-xs text-slate-500 mb-3">Изберете пакет — заплащате с карта; интернетът се активира веднага.</p>
+      <Card title={tr('net.buyTitle')}>
+        <p className="text-xs text-slate-500 mb-3">{tr('net.buyInfo')}</p>
         <div className="space-y-2">
           {data.plans.map(p => (
             <div key={p.id} className="flex items-center justify-between gap-3 py-2 border-b last:border-0">
@@ -927,13 +934,13 @@ function TenantInternet() {
                 {p.description && <div className="text-xs text-slate-500">{p.description}</div>}
                 <div className="text-xs text-slate-600 mt-0.5">
                   <strong>{fmt(p.price)} €</strong>
-                  <span className="text-slate-400 ml-1">· {p.duration_days} дни</span>
+                  <span className="text-slate-400 ml-1">· {p.duration_days} {tr('common.days')}</span>
                   {p.speed_down_mbps && <span className="text-slate-400 ml-1">· {p.speed_down_mbps}/{p.speed_up_mbps || '?'} Mbps</span>}
                 </div>
               </div>
               <button onClick={() => buy(p)} disabled={busy === p.id}
                 className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-semibold px-3 py-2 rounded-lg whitespace-nowrap">
-                {busy === p.id ? '...' : '💳 Купи'}
+                {busy === p.id ? '...' : tr('net.buyBtn')}
               </button>
             </div>
           ))}
@@ -942,7 +949,7 @@ function TenantInternet() {
 
       {/* Last purchases */}
       {data.purchases.length > 0 && (
-        <Card title="История на покупките">
+        <Card title={tr('net.history')}>
           <div className="space-y-1 text-xs">
             {data.purchases.map(p => (
               <div key={p.id} className="flex justify-between py-1.5 border-b last:border-0">
@@ -953,7 +960,7 @@ function TenantInternet() {
                 <div className="text-right">
                   <div className="font-semibold">{fmt(p.amount)} €</div>
                   <div className={`text-[10px] ${p.status === 'paid' ? 'text-green-600' : 'text-yellow-600'}`}>
-                    {p.status === 'paid' ? '✓ Платен' : '⏳ Чакащ'}
+                    {p.status === 'paid' ? tr('net.paidSt') : tr('net.pendingSt')}
                   </div>
                 </div>
               </div>
@@ -966,6 +973,7 @@ function TenantInternet() {
 }
 
 function TenantTickets() {
+  const { t: tr } = useTenantI18n()
   const [list, setList] = useState(null)
   const [detail, setDetail] = useState(null) // ticket detail object
   const [showNew, setShowNew] = useState(false)
@@ -976,20 +984,20 @@ function TenantTickets() {
   const fileRef = useRef(null)
 
   const TICKET_CATS = [
-    ['plumbing',   '🚿 ВиК (теч, запушване)'],
-    ['electrical', '⚡ Електро (ток, осветление)'],
-    ['appliance',  '🔌 Уред (хладилник, перална)'],
-    ['heating',    '🔥 Отопление (бойлер, климатик)'],
-    ['internet',   '🌐 Интернет / TV'],
-    ['cleaning',   '🧹 Чистене / битови'],
-    ['other',      '📌 Друго'],
+    ['plumbing',   tr('tk.catPlumbing')],
+    ['electrical', tr('tk.catElectrical')],
+    ['appliance',  tr('tk.catAppliance')],
+    ['heating',    tr('tk.catHeating')],
+    ['internet',   tr('tk.catInternet')],
+    ['cleaning',   tr('tk.catCleaning')],
+    ['other',      tr('tk.catOther')],
   ]
 
   const STATUS_BADGE = {
-    open:        { text: '⏳ Отворен',    cls: 'bg-red-100 text-red-700' },
-    in_progress: { text: '🔧 В процес',  cls: 'bg-yellow-100 text-yellow-800' },
-    resolved:    { text: '✓ Разрешен',   cls: 'bg-green-100 text-green-800' },
-    closed:      { text: '🔒 Затворен',  cls: 'bg-gray-200 text-gray-700' },
+    open:        { text: tr('tk.stOpen'),     cls: 'bg-red-100 text-red-700' },
+    in_progress: { text: tr('tk.stProgress'), cls: 'bg-yellow-100 text-yellow-800' },
+    resolved:    { text: tr('tk.stResolved'), cls: 'bg-green-100 text-green-800' },
+    closed:      { text: tr('tk.stClosed'),   cls: 'bg-gray-200 text-gray-700' },
   }
 
   const load = () => {
@@ -1002,7 +1010,7 @@ function TenantTickets() {
   }
 
   const submit = async () => {
-    if (!form.title.trim()) { setErr('Заглавието е задължително'); return }
+    if (!form.title.trim()) { setErr(tr('tk.titleRequired')); return }
     setSubmitting(true); setErr(null)
     try {
       const fd = new FormData()
@@ -1013,20 +1021,20 @@ function TenantTickets() {
       files.forEach(f => fd.append('files', f))
       const r = await apiFetch(`${API}/api/tenant/tickets`, { method: 'POST', body: fd })
       const data = await r.json()
-      if (!r.ok) { setErr(data.error || 'Грешка'); return }
+      if (!r.ok) { setErr(data.error || tr('common.error')); return }
       setShowNew(false)
       setForm({ title: '', description: '', category: 'other', priority: 'normal' })
       setFiles([]); if (fileRef.current) fileRef.current.value = ''
       load()
       openDetail(data.id)
-    } catch (e) { setErr('Сървърна грешка') }
+    } catch (e) { setErr(tr('common.serverError')) }
     finally { setSubmitting(false) }
   }
 
   if (detail) {
     return (
       <div>
-        <button onClick={() => { setDetail(null); load() }} className="text-xs text-blue-600 mb-2">← Към списъка</button>
+        <button onClick={() => { setDetail(null); load() }} className="text-xs text-blue-600 mb-2">{tr('tk.back')}</button>
         <div className="bg-white rounded-xl shadow border border-gray-100 overflow-hidden">
           <TicketDetail
             API={API}
@@ -1040,49 +1048,49 @@ function TenantTickets() {
     )
   }
 
-  if (list === null) return <Card><p className="text-slate-500 text-sm">Зареждане...</p></Card>
+  if (list === null) return <Card><p className="text-slate-500 text-sm">{tr('common.loading')}</p></Card>
 
   return (
     <div className="space-y-3">
       {!showNew && (
         <button onClick={() => setShowNew(true)}
           className="w-full bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold py-3 rounded-xl shadow">
-          ➕ Нов сигнал за проблем
+          {tr('tk.new')}
         </button>
       )}
 
       {showNew && (
         <Card>
-          <h3 className="font-bold text-slate-800 mb-3">Нов сигнал</h3>
+          <h3 className="font-bold text-slate-800 mb-3">{tr('tk.newTitle')}</h3>
           {err && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded p-2 mb-3">{err}</div>}
           <div className="space-y-2 text-sm">
             <div>
-              <label className="text-xs text-slate-500 font-medium">Категория</label>
+              <label className="text-xs text-slate-500 font-medium">{tr('tk.category')}</label>
               <select value={form.category} onChange={e => setForm({ ...form, category: e.target.value })}
                 className="w-full border border-gray-300 rounded px-2 py-1.5">
                 {TICKET_CATS.map(([k, v]) => <option key={k} value={k}>{v}</option>)}
               </select>
             </div>
             <div>
-              <label className="text-xs text-slate-500 font-medium">Заглавие</label>
+              <label className="text-xs text-slate-500 font-medium">{tr('tk.title')}</label>
               <input value={form.title} onChange={e => setForm({ ...form, title: e.target.value })}
-                placeholder="Кратко описание (пр. 'Тече кранът в банята')"
+                placeholder={tr('tk.titlePh')}
                 className="w-full border border-gray-300 rounded px-2 py-1.5" />
             </div>
             <div>
-              <label className="text-xs text-slate-500 font-medium">Описание (по желание)</label>
+              <label className="text-xs text-slate-500 font-medium">{tr('tk.desc')}</label>
               <textarea value={form.description} onChange={e => setForm({ ...form, description: e.target.value })}
-                placeholder="Кога започна? Колко често? Какво забелязахте?" rows={3}
+                placeholder={tr('tk.descPh')} rows={3}
                 className="w-full border border-gray-300 rounded px-2 py-1.5" />
             </div>
             <div>
-              <label className="text-xs text-slate-500 font-medium">Приоритет</label>
+              <label className="text-xs text-slate-500 font-medium">{tr('tk.priority')}</label>
               <div className="flex gap-2 flex-wrap">
                 {[
-                  ['low', '🟢 Ниско'],
-                  ['normal', '🔵 Нормално'],
-                  ['high', '🟠 Високо'],
-                  ['urgent', '🔴 Спешно'],
+                  ['low', tr('tk.prLow')],
+                  ['normal', tr('tk.prNormal')],
+                  ['high', tr('tk.prHigh')],
+                  ['urgent', tr('tk.prUrgent')],
                 ].map(([k, v]) => (
                   <button key={k} onClick={() => setForm({ ...form, priority: k })}
                     className={`text-xs px-3 py-1.5 rounded-full border ${form.priority === k ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-gray-300'}`}>
@@ -1092,22 +1100,22 @@ function TenantTickets() {
               </div>
             </div>
             <div>
-              <label className="text-xs text-slate-500 font-medium">Снимки/файлове</label>
+              <label className="text-xs text-slate-500 font-medium">{tr('tk.files')}</label>
               <input ref={fileRef} type="file" multiple accept="image/*,application/pdf"
                 onChange={e => setFiles(Array.from(e.target.files || []))}
                 className="w-full text-xs" />
               {files.length > 0 && (
-                <div className="text-xs text-slate-500 mt-1">{files.length} файла избрани</div>
+                <div className="text-xs text-slate-500 mt-1">{files.length}{tr('tk.filesChosen')}</div>
               )}
             </div>
             <div className="flex gap-2 pt-2">
               <button onClick={submit} disabled={submitting}
                 className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-semibold px-4 py-2 rounded-lg flex-1">
-                {submitting ? 'Изпраща...' : '📤 Изпрати сигнал'}
+                {submitting ? tr('tk.sending') : tr('tk.send')}
               </button>
               <button onClick={() => { setShowNew(false); setErr(null); setFiles([]) }}
                 className="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm px-4 py-2 rounded-lg">
-                Отказ
+                {tr('common.cancel')}
               </button>
             </div>
           </div>
@@ -1115,7 +1123,7 @@ function TenantTickets() {
       )}
 
       {list.length === 0
-        ? <Card><p className="text-slate-500 text-sm">Все още няма подадени сигнали.</p></Card>
+        ? <Card><p className="text-slate-500 text-sm">{tr('tk.empty')}</p></Card>
         : list.map(t => {
             const st = STATUS_BADGE[t.status] || { text: t.status, cls: 'bg-gray-100' }
             return (
@@ -1135,7 +1143,7 @@ function TenantTickets() {
                   </div>
                   {t.last_message && (
                     <div className="text-xs text-slate-500 mt-1 italic truncate">
-                      {t.last_message_role === 'admin' ? '👤 Управителят: ' : '🗣️ Вие: '}{t.last_message}
+                      {t.last_message_role === 'admin' ? tr('tk.manager') : tr('tk.you')}{t.last_message}
                     </div>
                   )}
                 </Card>
@@ -1148,15 +1156,16 @@ function TenantTickets() {
 }
 
 function Consumption({ property }) {
+  const { t: tr } = useTenantI18n()
   if (!property) return (
     <div className="bg-white rounded-lg p-4 text-sm text-gray-500 text-center">
-      Все още няма обвързан имот.
+      {tr('cons.none')}
     </div>
   )
   return (
     <div className="space-y-3">
       <div className="bg-white rounded-lg p-3 border">
-        <div className="text-xs text-gray-500">Имот</div>
+        <div className="text-xs text-gray-500">{tr('common.property')}</div>
         <div className="font-semibold">{property.адрес}</div>
       </div>
       {/* showAmounts=true за да види наемателят колко плащаш собственикът */}
@@ -1166,21 +1175,22 @@ function Consumption({ property }) {
 }
 
 function Profile({ me, onChangePassword }) {
+  const { t: tr } = useTenantI18n()
   if (!me?.user) return null
   return (
     <div className="space-y-3">
-      <Card title="Моят профил">
+      <Card title={tr('prof.title')}>
         <div className="space-y-2 text-sm">
-          <Info label="Име" value={me.user.name || '—'} />
-          <Info label="Имейл" value={me.user.email || '—'} />
-          <Info label="Телефон" value={me.user.phone || '—'} />
-          <Info label="Потребител" value={me.user.username} />
+          <Info label={tr('common.name')} value={me.user.name || '—'} />
+          <Info label={tr('common.email')} value={me.user.email || '—'} />
+          <Info label={tr('common.phone')} value={me.user.phone || '—'} />
+          <Info label={tr('prof.username')} value={me.user.username} />
         </div>
         <button
           onClick={onChangePassword}
           className="mt-4 text-sm bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg"
         >
-          🔑 Смяна на парола
+          {tr('prof.changePwd')}
         </button>
       </Card>
 
@@ -1190,6 +1200,7 @@ function Profile({ me, onChangePassword }) {
 }
 
 function AutopayCard() {
+  const { t: tr } = useTenantI18n()
   const [status, setStatus] = useState(null)
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState(null)
@@ -1209,13 +1220,13 @@ function AutopayCard() {
       const r = await apiFetch(`${API}/api/tenant/setup-autopay`, { method: 'POST' })
       const d = await r.json()
       if (!r.ok || !d.url) {
-        setErr(d.error || 'Грешка при стартиране на настройката')
+        setErr(d.error || tr('ap.setupError'))
         setLoading(false)
         return
       }
       window.location.href = d.url
     } catch {
-      setErr('Сървърна грешка'); setLoading(false)
+      setErr(tr('common.serverError')); setLoading(false)
     }
   }
 
@@ -1226,63 +1237,63 @@ function AutopayCard() {
       const d = await r.json()
       setLoading(false); setShowConfirmDisable(false)
       if (d.ok) load()
-      else setErr(d.error || 'Грешка')
+      else setErr(d.error || tr('common.error'))
     } catch {
-      setLoading(false); setErr('Сървърна грешка')
+      setLoading(false); setErr(tr('common.serverError'))
     }
   }
 
-  if (!status) return <Card title="💳 Автоплащане"><p className="text-slate-500 text-sm">Зареждане...</p></Card>
+  if (!status) return <Card title={tr('ap.title')}><p className="text-slate-500 text-sm">{tr('common.loading')}</p></Card>
 
   return (
-    <Card title="💳 Автоплащане (SEPA Direct Debit)">
+    <Card title={tr('ap.titleFull')}>
       {status.enabled ? (
         <>
           <div className="flex items-center justify-between mb-3">
             <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: '#dcfce7', color: '#166534' }}>
-              ✓ Активно
+              {tr('ap.activeSt')}
             </span>
-            <span className="text-xs text-slate-500">от {fmtDate(status.activated_at)}</span>
+            <span className="text-xs text-slate-500">{tr('ap.since')}{fmtDate(status.activated_at)}</span>
           </div>
           <div className="text-sm text-slate-700 space-y-1 mb-3">
-            <div>IBAN завършващ на: <strong className="font-mono">•••• {status.iban_last4 || '????'}</strong></div>
-            <div>Месечно теглене на: <strong>{status.autopay_day || 5}-то число</strong></div>
+            <div>{tr('ap.ibanEnding')}<strong className="font-mono">•••• {status.iban_last4 || '????'}</strong></div>
+            <div>{tr('ap.monthlyOn')}<strong>{status.autopay_day || 5}{tr('ap.dayOfMonth')}</strong></div>
           </div>
           <p className="text-xs text-slate-500 mb-3">
-            Наемът ще се тегли автоматично от Вашата банкова сметка всеки месец. Можете да деактивирате по всяко време.
+            {tr('ap.infoActive')}
           </p>
           {showConfirmDisable ? (
             <div className="flex gap-2">
               <button onClick={disable} disabled={loading}
                 className="flex-1 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-sm px-3 py-2 rounded-lg">
-                {loading ? '...' : 'Да, деактивирай'}
+                {loading ? '...' : tr('ap.confirmOff')}
               </button>
               <button onClick={() => setShowConfirmDisable(false)}
                 className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm px-3 py-2 rounded-lg">
-                Отказ
+                {tr('common.cancel')}
               </button>
             </div>
           ) : (
             <button onClick={() => setShowConfirmDisable(true)}
               className="text-sm bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg">
-              🚫 Деактивирай автоплащане
+              {tr('ap.deactivate')}
             </button>
           )}
         </>
       ) : (
         <>
           <p className="text-sm text-slate-700 mb-3">
-            Спестете време — оставете наемът да се тегли автоматично от Вашата банкова сметка всеки месец.
+            {tr('ap.pitch')}
           </p>
           <ul className="text-xs text-slate-600 mb-4 space-y-1">
-            <li>✓ Няма повече забравяне на падежи</li>
-            <li>✓ Подписвате SEPA mandate веднъж</li>
-            <li>✓ Можете да деактивирате по всяко време</li>
-            <li>✓ Имате 8 седмици да оспорите всяко теглене</li>
+            <li>{tr('ap.b1')}</li>
+            <li>{tr('ap.b2')}</li>
+            <li>{tr('ap.b3')}</li>
+            <li>{tr('ap.b4')}</li>
           </ul>
           <button onClick={setup} disabled={loading}
             className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-semibold px-4 py-2 rounded-lg">
-            {loading ? 'Стартиране...' : '🏦 Активирай SEPA автоплащане'}
+            {loading ? tr('ap.starting') : tr('ap.activate')}
           </button>
         </>
       )}
@@ -1292,6 +1303,7 @@ function AutopayCard() {
 }
 
 function ChangePassword({ isFirstLogin, onDone, onLogout }) {
+  const { t: tr } = useTenantI18n()
   const [oldPwd, setOldPwd] = useState('')
   const [newPwd, setNewPwd] = useState('')
   const [confirm, setConfirm] = useState('')
@@ -1299,59 +1311,59 @@ function ChangePassword({ isFirstLogin, onDone, onLogout }) {
   const [loading, setLoading] = useState(false)
   const submit = (e) => {
     e.preventDefault()
-    if (newPwd.length < 6)        return setErr('Паролата трябва да е поне 6 символа')
-    if (newPwd !== confirm)       return setErr('Паролите не съвпадат')
+    if (newPwd.length < 6)        return setErr(tr('pwd.min'))
+    if (newPwd !== confirm)       return setErr(tr('pwd.mismatch'))
     setLoading(true); setErr(null)
     apiFetch(`${API}/api/tenant/change-password`, {
       method: 'POST',
       body: JSON.stringify({ current_password: oldPwd, new_password: newPwd }),
     })
       .then(r => r.json())
-      .then(d => { setLoading(false); if (d.ok) onDone(); else setErr(d.error || 'Грешка') })
-      .catch(() => { setLoading(false); setErr('Грешка при сървъра') })
+      .then(d => { setLoading(false); if (d.ok) onDone(); else setErr(d.error || tr('common.error')) })
+      .catch(() => { setLoading(false); setErr(tr('pwd.serverError')) })
   }
   return (
     <div className="min-h-screen flex items-center justify-center px-4" style={{ background: '#f0f2f8' }}>
       <div className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-sm">
         <h2 className="text-lg font-bold text-slate-800 mb-2">
-          {isFirstLogin ? 'Добре дошли!' : 'Смяна на парола'}
+          {isFirstLogin ? tr('pwd.welcome') : tr('pwd.title')}
         </h2>
         {isFirstLogin && (
           <p className="text-sm text-slate-500 mb-4">
-            Моля задайте Ваша лична парола, преди да продължите.
+            {tr('pwd.first')}
           </p>
         )}
         <form onSubmit={submit} className="space-y-3">
           {!isFirstLogin && (
             <div>
-              <label className="block text-xs text-slate-600 mb-1">Текуща парола</label>
+              <label className="block text-xs text-slate-600 mb-1">{tr('pwd.current')}</label>
               <input type="password" value={oldPwd} onChange={e => setOldPwd(e.target.value)}
                 className="w-full border rounded-lg px-3 py-2 text-sm" required />
             </div>
           )}
           <div>
-            <label className="block text-xs text-slate-600 mb-1">Нова парола</label>
+            <label className="block text-xs text-slate-600 mb-1">{tr('pwd.new')}</label>
             <input type="password" value={newPwd} onChange={e => setNewPwd(e.target.value)}
               className="w-full border rounded-lg px-3 py-2 text-sm" required minLength={6} />
           </div>
           <div>
-            <label className="block text-xs text-slate-600 mb-1">Повторете новата парола</label>
+            <label className="block text-xs text-slate-600 mb-1">{tr('pwd.repeat')}</label>
             <input type="password" value={confirm} onChange={e => setConfirm(e.target.value)}
               className="w-full border rounded-lg px-3 py-2 text-sm" required />
           </div>
           {err && <p className="text-sm text-red-600">{err}</p>}
           <button type="submit" disabled={loading}
             className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-medium py-2 rounded-lg">
-            {loading ? 'Запис...' : 'Запази'}
+            {loading ? tr('pwd.saving') : tr('common.save')}
           </button>
           {!isFirstLogin && (
             <button type="button" onClick={onDone} className="w-full text-sm text-slate-500 hover:text-slate-700">
-              Отказ
+              {tr('common.cancel')}
             </button>
           )}
           {isFirstLogin && (
             <button type="button" onClick={onLogout} className="w-full text-xs text-slate-500 hover:text-slate-700 mt-2">
-              Изход
+              {tr('common.logout')}
             </button>
           )}
         </form>
@@ -1389,11 +1401,12 @@ function Row({ icon, label, value }) {
 }
 
 function StatusBadge({ status }) {
+  const { t: tr } = useTenantI18n()
   const cfg = {
-    active:     { bg: '#dcfce7', fg: '#166534', label: 'Активен' },
-    draft:      { bg: '#fef3c7', fg: '#92400e', label: 'Чернова' },
-    sent:       { bg: '#dbeafe', fg: '#1e40af', label: 'Изпратен' },
-    terminated: { bg: '#fee2e2', fg: '#991b1b', label: 'Прекратен' },
+    active:     { bg: '#dcfce7', fg: '#166534', label: tr('status.active') },
+    draft:      { bg: '#fef3c7', fg: '#92400e', label: tr('status.draft') },
+    sent:       { bg: '#dbeafe', fg: '#1e40af', label: tr('status.sent') },
+    terminated: { bg: '#fee2e2', fg: '#991b1b', label: tr('status.terminated') },
   }[status] || { bg: '#f1f5f9', fg: '#475569', label: status }
   return (
     <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: cfg.bg, color: cfg.fg }}>
@@ -1404,6 +1417,6 @@ function StatusBadge({ status }) {
 
 function fmtDate(s) {
   if (!s) return '—'
-  try { return new Date(s).toLocaleDateString('bg-BG', { day: '2-digit', month: '2-digit', year: 'numeric' }) }
+  try { return new Date(s).toLocaleDateString(getTenantLocale(), { day: '2-digit', month: '2-digit', year: 'numeric' }) }
   catch { return s }
 }
