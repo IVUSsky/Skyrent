@@ -111,7 +111,20 @@ module.exports = function(db) {
       const days = Number(req.body.days);
       if (!days || days <= 0) return res.status(400).json({ error: 'days трябва да е положително число' });
       const newEnd = extendAccount(db, Number(req.params.id), days);
-      res.json({ ok: true, valid_until: newEnd });
+      // extendAccount вече маркира акаунта 'active' → кронът няма какво да
+      // „активира" и не вика ensureUser. В flat режим след изтичане
+      // desired_access е 0 и без този push нетът остава спрян въпреки
+      // удължаването. Същото прави и Stripe webhook-ът след плащане.
+      let router_sync = null;
+      try {
+        const acc = db.prepare('SELECT * FROM internet_accounts WHERE id=?').get(req.params.id);
+        router_sync = await getRouterProvider().ensureUser(db, {
+          username: acc.username, password: acc.password, mac_address: acc.mac_address,
+          valid_until: acc.valid_until, property_id: acc.property_id,
+        });
+        db.prepare("UPDATE internet_accounts SET router_synced_at=datetime('now') WHERE id=?").run(acc.id);
+      } catch (e) { router_sync = { ok: false, error: e.message }; }
+      res.json({ ok: true, valid_until: newEnd, router_sync });
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
 
