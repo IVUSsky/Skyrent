@@ -50,6 +50,7 @@ function AccountsTab({ API, showToast }) {
   const [syncing, setSyncing] = useState(false)
   const [busyId, setBusyId] = useState(null)
   const [confirmId, setConfirmId] = useState(null)
+  const [deleteId, setDeleteId] = useState(null)
   const [revealId, setRevealId] = useState(null)
 
   const load = () => {
@@ -88,6 +89,19 @@ function AccountsTab({ API, showToast }) {
     apiFetch(`${API}/api/internet/accounts/${acc.id}/disable`, { method: 'POST' })
       .then(r => r.json()).then(() => { showToast('Деактивиран'); load() })
       .catch(() => showToast('Грешка', 'error'))
+      .finally(() => setBusyId(null))
+  }
+
+  // Маха празен акаунт (никога не е плащал) от списъка. Бекендът отказва при
+  // платена история или работещ достъп — грешката се показва като toast.
+  const remove = (acc) => {
+    setBusyId(acc.id); setDeleteId(null)
+    apiFetch(`${API}/api/internet/accounts/${acc.id}`, { method: 'DELETE' })
+      .then(r => r.json()).then(d => {
+        if (d.error) { showToast(d.error, 'error'); return }
+        showToast('Акаунтът е изтрит'); load()
+      })
+      .catch(() => showToast('Грешка при изтриване', 'error'))
       .finally(() => setBusyId(null))
   }
 
@@ -174,6 +188,18 @@ function AccountsTab({ API, showToast }) {
                     ) : (
                       <button disabled={busyId === a.id} onClick={() => setConfirmId(a.id)}
                         title="Деактивирай" className="text-xs px-2 py-1 bg-red-50 hover:bg-red-100 text-red-700 rounded border border-red-200 disabled:opacity-50">⏸</button>
+                    )}
+                    {/* 🗑 само за празни акаунти: никога не са плащали и не работят в момента */}
+                    {!(a.status === 'active' && isValid(a)) && !(Number(a.total_paid) > 0) && (
+                      deleteId === a.id ? (
+                        <span className="inline-flex items-center gap-1 ml-1">
+                          <button onClick={() => remove(a)} className="text-xs px-2 py-1 bg-red-600 text-white rounded">Изтрий</button>
+                          <button onClick={() => setDeleteId(null)} className="text-xs px-2 py-1 bg-gray-100 text-gray-700 rounded border">Не</button>
+                        </span>
+                      ) : (
+                        <button disabled={busyId === a.id} onClick={() => { setConfirmId(null); setDeleteId(a.id) }}
+                          title="Изтрий акаунта (без платена история)" className="text-xs px-2 py-1 bg-gray-50 hover:bg-gray-100 text-gray-500 rounded border border-gray-200 ml-1 disabled:opacity-50">🗑</button>
+                      )
                     )}
                   </td>
                 </tr>
