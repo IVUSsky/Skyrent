@@ -1398,6 +1398,64 @@ module.exports = function(db) {
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
 
+  // Редакция на ключови полета (напр. забравена такса) + нов PDF от шаблона.
+  // Архивните договори (сканът Е pdf_path) не се регенерират — само данните.
+  const EDITABLE = ['tenant_name', 'tenant_email', 'tenant_phone', 'tenant_address', 'tenant_egn',
+    'monthly_rent', 'currency', 'deposit', 'payment_day', 'start_date', 'end_date', 'delivery_date',
+    'conditions', 'notes'];
+  router.put('/:id', async (req, res) => {
+    try {
+      const contract = db.prepare('SELECT * FROM contracts WHERE id=?').get(req.params.id);
+      if (!contract) return res.status(404).json({ error: 'Not found' });
+      const b = req.body || {};
+      const sets = [], vals = [];
+      for (const k of EDITABLE) {
+        if (b[k] === undefined) continue;
+        let v = b[k];
+        if (['monthly_rent', 'deposit'].includes(k)) v = v === '' || v === null ? 0 : Number(v);
+        if (k === 'payment_day') v = v === '' || v === null ? contract.payment_day : Number(v);
+        if (['monthly_rent', 'deposit', 'payment_day'].includes(k) && Number.isNaN(v)) return res.status(400).json({ error: `Невалидна стойност за ${k}` });
+        if (typeof v === 'string') v = v.trim();
+        sets.push(`${k}=?`); vals.push(v === '' ? null : v);
+      }
+      if (!sets.length) return res.status(400).json({ error: 'Няма полета за промяна' });
+      db.prepare(`UPDATE contracts SET ${sets.join(', ')} WHERE id=?`).run(...vals, contract.id);
+      const fresh = db.prepare('SELECT * FROM contracts WHERE id=?').get(contract.id);
+
+      // Активен наемен договор → наемът в имота следва договора (както при активиране)
+      if (fresh.status === 'active' && fresh.property_id && contractKind(fresh.kind) === 'наем' && b.monthly_rent !== undefined) {
+        db.prepare('UPDATE properties SET наем=?, updated_at=CURRENT_TIMESTAMP WHERE id=?').run(fresh.monthly_rent, fresh.property_id);
+      }
+
+      // Нов PDF (и протокол) — само за генерирани договори, не за качени сканове
+      let regenerated = false;
+      const isScan = !fresh.template_id || (fresh.signed_pdf_path && fresh.signed_pdf_path === fresh.pdf_path);
+      const template = fresh.template_id ? db.prepare('SELECT * FROM contract_templates WHERE id=?').get(fresh.template_id) : null;
+      if (!isScan && template && b.regenerate !== false) {
+        const issuer = getIssuer(db);
+        const photos = fresh.property_id
+          ? db.prepare('SELECT * FROM property_photos WHERE property_id=? ORDER BY created_at').all(fresh.property_id) : [];
+        const { filename } = await generateContractPDF(fresh, template, issuer, photos);
+        let protocolFilename = fresh.protocol_pdf_path;
+        const protocolTmpl = db.prepare("SELECT * FROM contract_templates WHERE name='Приемо-предавателен протокол'").get();
+        if (protocolTmpl) {
+          try {
+            const invItems = fresh.property_id
+              ? db.prepare(`SELECT * FROM property_inventory WHERE property_id=? ORDER BY category, sort_order, name`).all(fresh.property_id) : [];
+            for (const it of invItems) it.photos = db.prepare(`SELECT id, type, filename, original_name FROM inventory_files WHERE inventory_id=? AND type='photo'`).all(it.id);
+            const r = await generateContractPDF(fresh, protocolTmpl, issuer, photos, {
+              appendProtocol: false, includeSignatures: true, filenamePrefix: 'protocol', appendInventory: true, inventory: invItems,
+            });
+            protocolFilename = r.filename;
+          } catch (e) { console.warn('Protocol regenerate failed:', e.message); }
+        }
+        db.prepare('UPDATE contracts SET pdf_path=?, protocol_pdf_path=? WHERE id=?').run(filename, protocolFilename, fresh.id);
+        regenerated = true;
+      }
+      res.json({ ok: true, regenerated, contract: db.prepare('SELECT * FROM contracts WHERE id=?').get(fresh.id) });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
   // Activate contract → update property + provision tenant account
   router.post('/:id/activate', async (req, res) => {
     try {

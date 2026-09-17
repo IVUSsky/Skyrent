@@ -500,6 +500,44 @@ export default function Contracts({ API }) {
   const [sending, setSending] = useState(null)
   const [sendingKontrolisi, setSendingKontrolisi] = useState(null)
   const [termModal, setTermModal] = useState(null)
+  // ✏️ Редакция на договор (забравена такса, грешна дата, контакт…) — PUT + нов PDF
+  const [editModal, setEditModal] = useState(null)
+  const [editForm, setEditForm] = useState({})
+  const [editSaving, setEditSaving] = useState(false)
+  const [internetPlans, setInternetPlans] = useState([])
+  useEffect(() => {
+    apiFetch(`${API}/api/internet/plans`).then(r => r.json()).then(d => setInternetPlans(Array.isArray(d) ? d : [])).catch(() => setInternetPlans([]))
+  }, [API])
+  // Планът за имота: единственият активен план, ограничен до този имот (иначе null)
+  const planPriceFor = (propId) => {
+    const pid = Number(propId)
+    if (!pid) return null
+    const ids = v => String(v || '').split(',').map(x => Number(x.trim())).filter(Boolean)
+    const mine = internetPlans.filter(p => p.active && ids(p.property_ids).includes(pid))
+    return mine.length === 1 ? Number(mine[0].price) : null
+  }
+  const openEdit = (c) => {
+    setEditForm({
+      tenant_name: c.tenant_name || '', tenant_email: c.tenant_email || '', tenant_phone: c.tenant_phone || '',
+      monthly_rent: c.monthly_rent ?? '', currency: c.currency || 'EUR', deposit: c.deposit ?? '',
+      payment_day: c.payment_day ?? 5, start_date: c.start_date || '', end_date: c.end_date || '', notes: c.notes || '',
+    })
+    setEditModal(c)
+  }
+  const saveEdit = () => {
+    const c = editModal
+    if (kindOf(c) === 'интернет' && !(Number(editForm.monthly_rent) > 0)) { showToast('Въведи месечна такса за интернет', 'error'); return }
+    setEditSaving(true)
+    apiFetch(`${API}/api/contracts/${c.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(editForm) })
+      .then(r => r.json())
+      .then(d => {
+        if (!d.ok) return showToast('Грешка: ' + d.error, 'error')
+        showToast(d.regenerated ? 'Запазено — PDF-ът е генериран наново' : 'Запазено')
+        setEditModal(null); load()
+      })
+      .catch(e => showToast('Грешка: ' + e.message, 'error'))
+      .finally(() => setEditSaving(false))
+  }
   const [termDate, setTermDate] = useState(new Date().toISOString().slice(0,10))
   const [annexModal, setAnnexModal] = useState(null)
   const [annexForm, setAnnexForm] = useState({ annex_date: '', new_end_date: '', new_monthly_rent: '', new_currency: 'EUR', notes: '' })
@@ -562,7 +600,7 @@ export default function Contracts({ API }) {
         tenant_name:      prop['наемател'] || f.tenant_name,
         tenant_phone:     prop['телефон']  || f.tenant_phone,
         tenant_email:     prop['email']    || f.tenant_email,
-        monthly_rent:     prop['наем']     || f.monthly_rent,
+        monthly_rent:     (f.kind === 'интернет' ? (planPriceFor(prop.id) || f.monthly_rent) : (prop['наем'] || f.monthly_rent)),
         абонат_ток:       prop['абонат_ток']  || f.абонат_ток  || '',
         абонат_вода:      prop['абонат_вода'] || f.абонат_вода || '',
         абонат_тец:       prop['абонат_тец']  || f.абонат_тец  || '',
@@ -596,6 +634,8 @@ export default function Contracts({ API }) {
   const createContract = () => {
     if (!newForm.template_id) { showToast('Изберете шаблон', 'error'); return }
     if (!newForm.tenant_name) { showToast('Въведете наемател', 'error'); return }
+    // Интернет договор с 0 такса излиза в PDF-а като „0 €" — Конджа, 17.09
+    if (newForm.kind === 'интернет' && !(Number(newForm.monthly_rent) > 0)) { showToast('Въведи месечна такса за интернет (полето „Наем/такса")', 'error'); return }
     setCreating(true)
     const conditions = newForm.conditions + (newForm.video_surveillance_clause ? '\n\n' + VIDEO_SURVEILLANCE_CLAUSE : '')
     apiFetch(`${API}/api/contracts`, {
@@ -1077,6 +1117,8 @@ export default function Contracts({ API }) {
                             <button onClick={() => openSigned(c)}
                               className={`px-2 py-1 text-xs rounded border ${c.signed_pdf_path ? 'bg-green-50 border-green-200 text-green-700 hover:bg-green-100' : 'bg-amber-50 border-amber-200 text-amber-700 hover:bg-amber-100'}`}
                               title={c.signed_pdf_path ? 'Подписан екземпляр' : 'Качи подписан екземпляр'}>✍️</button>
+                            <button onClick={() => openEdit(c)}
+                              className="px-2 py-1 text-xs bg-gray-50 border border-gray-200 text-gray-700 hover:bg-gray-100 rounded" title="Редактирай (такса, дати, контакт) — генерира нов PDF">✏️</button>
                             <button onClick={() => openAnnex(c)}
                               className="px-2 py-1 text-xs bg-purple-50 border border-purple-200 text-purple-700 hover:bg-purple-100 rounded" title="Анекс">📎</button>
                             <button onClick={() => deleteContract(c)}
@@ -1714,6 +1756,80 @@ export default function Contracts({ API }) {
               <button onClick={doActivate} disabled={activating} className="px-4 py-2 text-sm font-semibold text-white bg-green-600 hover:bg-green-700 rounded-lg disabled:opacity-50">
                 {activating ? 'Активира…' : '✅ Активирай'}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit modal */}
+      {editModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg flex flex-col" style={{ maxHeight: '90vh' }}>
+            <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between flex-shrink-0">
+              <div>
+                <h3 className="font-bold text-gray-900">✏️ Редакция на договор</h3>
+                <p className="text-xs text-gray-500 mt-0.5">{KIND_LABELS[kindOf(editModal)].one} № {editModal.contract_number || 'Д' + editModal.id}{editModal.property_address ? ` · ${editModal.property_address}` : ''}</p>
+              </div>
+              <button onClick={() => setEditModal(null)} className="text-gray-400 hover:text-gray-600 text-2xl leading-none">×</button>
+            </div>
+            <div className="px-6 py-4 overflow-y-auto flex-1 grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+              <div className="md:col-span-2">
+                <label className="block text-xs font-medium text-gray-600 mb-1">Наемател</label>
+                <input value={editForm.tenant_name} onChange={e => setEditForm(f => ({ ...f, tenant_name: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-3 py-2" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Имейл</label>
+                <input value={editForm.tenant_email} onChange={e => setEditForm(f => ({ ...f, tenant_email: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-3 py-2" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Телефон</label>
+                <input value={editForm.tenant_phone} onChange={e => setEditForm(f => ({ ...f, tenant_phone: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-3 py-2" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">{kindOf(editModal) === 'интернет' ? 'Месечна такса' : 'Наем/мес'}</label>
+                <div className="flex gap-2">
+                  <input type="number" step="0.01" value={editForm.monthly_rent} onChange={e => setEditForm(f => ({ ...f, monthly_rent: e.target.value }))}
+                    className={`w-full border rounded-lg px-3 py-2 ${!(Number(editForm.monthly_rent) > 0) ? 'border-amber-400 bg-amber-50' : 'border-gray-300'}`} />
+                  <select value={editForm.currency} onChange={e => setEditForm(f => ({ ...f, currency: e.target.value }))} className="border border-gray-300 rounded-lg px-2">
+                    <option>EUR</option><option>BGN</option>
+                  </select>
+                </div>
+                {kindOf(editModal) === 'интернет' && planPriceFor(editModal.property_id) && Number(editForm.monthly_rent) !== planPriceFor(editModal.property_id) && (
+                  <button type="button" onClick={() => setEditForm(f => ({ ...f, monthly_rent: planPriceFor(editModal.property_id) }))} className="text-xs text-blue-600 hover:underline mt-1">
+                    Планът за имота е {planPriceFor(editModal.property_id)} € — вземи го
+                  </button>
+                )}
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Депозит</label>
+                <input type="number" step="0.01" value={editForm.deposit} onChange={e => setEditForm(f => ({ ...f, deposit: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-3 py-2" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Начало</label>
+                <input type="date" value={editForm.start_date} onChange={e => setEditForm(f => ({ ...f, start_date: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-3 py-2" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Край</label>
+                <input type="date" value={editForm.end_date} onChange={e => setEditForm(f => ({ ...f, end_date: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-3 py-2" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Ден на плащане</label>
+                <input type="number" min="1" max="31" value={editForm.payment_day} onChange={e => setEditForm(f => ({ ...f, payment_day: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-3 py-2" />
+              </div>
+              <div className="md:col-span-2">
+                <label className="block text-xs font-medium text-gray-600 mb-1">Бележки</label>
+                <textarea rows={2} value={editForm.notes} onChange={e => setEditForm(f => ({ ...f, notes: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-3 py-2" />
+              </div>
+              <div className="md:col-span-2 text-xs text-gray-500">
+                {editModal.signed_pdf_path === editModal.pdf_path
+                  ? 'Архивен договор (качен скан) — променят се само данните, сканът остава.'
+                  : 'Генерираният PDF (и протоколът) се правят наново с новите данни. Подписаният екземпляр, ако е качен, не се пипа.'}
+                {editModal.status === 'active' && kindOf(editModal) === 'наем' && ' Наемът в имота следва договора.'}
+              </div>
+            </div>
+            <div className="flex-shrink-0 px-6 py-3 border-t border-gray-200 flex justify-end gap-2">
+              <button onClick={() => setEditModal(null)} disabled={editSaving} className="px-4 py-2 text-sm text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg">Отказ</button>
+              <button onClick={saveEdit} disabled={editSaving} className="px-4 py-2 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg disabled:opacity-50">{editSaving ? 'Запис…' : 'Запази'}</button>
             </div>
           </div>
         </div>
