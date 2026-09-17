@@ -510,6 +510,12 @@ export default function Contracts({ API }) {
     apiFetch(`${API}/api/internet/plans`).then(r => r.json()).then(d => setInternetPlans(Array.isArray(d) ? d : [])).catch(() => setInternetPlans([]))
   }, [API])
   // Планът за имота: единственият активен план, ограничен до този имот (иначе null)
+  const plansFor = (propId) => {
+    const pid = Number(propId)
+    const ids = v => String(v || '').split(',').map(x => Number(x.trim())).filter(Boolean)
+    return internetPlans.filter(p => p.active && (!ids(p.property_ids).length || ids(p.property_ids).includes(pid)))
+  }
+  const isNetForm = newForm.kind === 'интернет'
   const planPriceFor = (propId) => {
     const pid = Number(propId)
     if (!pid) return null
@@ -637,7 +643,8 @@ export default function Contracts({ API }) {
     if (!newForm.template_id) { showToast('Изберете шаблон', 'error'); return }
     if (!newForm.tenant_name) { showToast('Въведете наемател', 'error'); return }
     // Интернет договор с 0 такса излиза в PDF-а като „0 €" — Конджа, 17.09
-    if (newForm.kind === 'интернет' && !(Number(newForm.monthly_rent) > 0)) { showToast('Въведи месечна такса за интернет (полето „Наем/такса")', 'error'); return }
+    if (newForm.kind === 'интернет' && !(Number(newForm.monthly_rent) > 0)) { showToast('Въведи месечна такса за интернет', 'error'); return }
+    if (newForm.kind === 'интернет' && !String(newForm.conditions || '').trim()) { showToast('Избери абонаментен план', 'error'); return }
     setCreating(true)
     const conditions = newForm.conditions + (newForm.video_surveillance_clause ? '\n\n' + VIDEO_SURVEILLANCE_CLAUSE : '')
     apiFetch(`${API}/api/contracts`, {
@@ -658,6 +665,11 @@ export default function Contracts({ API }) {
   const [actModal, setActModal] = useState(null)
   const [actOpts, setActOpts] = useState({ issue_invoice: true, issue_deposit: true, deposit_with_vat: true })
   const [activating, setActivating] = useState(false)
+
+  // Интернет договор: ДОСТАВЧИК е винаги фирмата (издателят), не физическо лице
+  useEffect(() => {
+    if (newForm.kind === 'интернет' && newForm.landlord_type !== 'дружество') setNewForm(f => ({ ...f, landlord_type: 'дружество', deposit: '', delivery_date: '', video_surveillance_clause: false }))
+  }, [newForm.kind])
 
   const activateContract = (c) => {
     const isNet = kindOf(c) === 'интернет'
@@ -1080,8 +1092,8 @@ export default function Contracts({ API }) {
                           <div className="flex gap-1 flex-wrap">
                             <button onClick={() => apiFetch(`${API}/api/contracts/${c.id}/pdf`).then(r => r.blob()).then(b => window.open(URL.createObjectURL(b), '_blank'))}
                               className="px-2 py-1 text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 rounded" title="Договор PDF">📄</button>
-                            <button onClick={() => apiFetch(`${API}/api/contracts/${c.id}/protocol/pdf`).then(r => r.blob()).then(b => window.open(URL.createObjectURL(b), '_blank'))}
-                              className="px-2 py-1 text-xs bg-amber-50 border border-amber-200 text-amber-700 hover:bg-amber-100 rounded" title="Приемо-предавателен протокол PDF">📋</button>
+                            {kindOf(c) !== 'интернет' && <button onClick={() => apiFetch(`${API}/api/contracts/${c.id}/protocol/pdf`).then(r => r.blob()).then(b => window.open(URL.createObjectURL(b), '_blank'))}
+                              className="px-2 py-1 text-xs bg-amber-50 border border-amber-200 text-amber-700 hover:bg-amber-100 rounded" title="Приемо-предавателен протокол PDF">📋</button>}
                             {c.id_front_path && (
                               <button onClick={() => apiFetch(`${API}/api/contracts/id-image/${c.id_front_path}`).then(r => r.blob()).then(b => window.open(URL.createObjectURL(b), '_blank'))}
                                 className="px-2 py-1 text-xs bg-blue-50 border border-blue-200 text-blue-700 hover:bg-blue-100 rounded" title="Лична карта — лице">🪪</button>
@@ -1338,8 +1350,8 @@ export default function Contracts({ API }) {
                 </div>
               </div>
 
-              {/* Property details */}
-              <div className="bg-white rounded-xl shadow border border-gray-100 p-5">
+              {/* Property details — при интернет адресът идва от имота, описание/площ не влизат в договора */}
+              {!isNetForm && <div className="bg-white rounded-xl shadow border border-gray-100 p-5">
                 <h3 className="font-bold text-gray-800 mb-3">Данни за имота</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   {[
@@ -1355,20 +1367,40 @@ export default function Contracts({ API }) {
                     </div>
                   ))}
                 </div>
-              </div>
+              </div>}
 
               {/* Financial & dates */}
               <div className="bg-white rounded-xl shadow border border-gray-100 p-5">
-                <h3 className="font-bold text-gray-800 mb-3">Финансови условия и срок</h3>
+                <h3 className="font-bold text-gray-800 mb-3">{isNetForm ? '🌐 Абонамент и срок' : 'Финансови условия и срок'}</h3>
+                {isNetForm && (
+                  <div className="mb-3">
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Абонаментен план (влиза в договора като {'{{УСЛОВИЯ}}'} и в Приложение 1)</label>
+                    {plansFor(newForm.property_id).length ? (
+                      <select value={newForm.conditions} onChange={e => { const p = plansFor(newForm.property_id).find(x => x.name === e.target.value); setNewForm(f => ({ ...f, conditions: e.target.value, monthly_rent: p ? p.price : f.monthly_rent })) }}
+                        className={`w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ${newForm.conditions ? 'border-gray-300' : 'border-amber-400 bg-amber-50'}`}>
+                        <option value="">— Изберете план —</option>
+                        {plansFor(newForm.property_id).map(p => <option key={p.id} value={p.name}>{p.name} — {Number(p.price).toLocaleString('bg-BG', { minimumFractionDigits: 2 })} € / {p.duration_days} дни{p.speed_down_mbps ? ` · ${p.speed_down_mbps} Mbps` : ''}</option>)}
+                      </select>
+                    ) : (
+                      <input type="text" value={newForm.conditions} onChange={e => setNewForm(f => ({ ...f, conditions: e.target.value }))} placeholder="напр. Net 300 + TV — 300 Mbps"
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    )}
+                    <div className="text-xs text-gray-400 mt-1">{newForm.property_id ? 'Плановете за избрания имот (Интернет → Планове). Изборът попълва таксата.' : 'Първо избери имот — плановете са по имот.'}</div>
+                  </div>
+                )}
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                  {[
+                  {(isNetForm ? [
+                    ['monthly_rent','Месечна такса (€, с ДДС)','25.98','number'],
+                    ['start_date','Начална дата','','date'],
+                    ['end_date','Крайна дата (обикновено = наемния договор)','','date'],
+                  ] : [
                     ['monthly_rent','Наем/месец (€)','667','number'],
                     ['deposit','Депозит (€)','1334','number'],
                     ['payment_day','Ден за плащане','5','number'],
                     ['start_date','Начална дата','','date'],
                     ['end_date','Крайна дата (или празно)','','date'],
                     ['delivery_date','Дата на предаване','','date'],
-                  ].map(([k,l,ph,type]) => (
+                  ]).map(([k,l,ph,type]) => (
                     <div key={k}>
                       <label className="block text-xs font-medium text-gray-600 mb-1">{l}</label>
                       <input type={type||'text'} value={newForm[k]} onChange={e=>setNewForm(f=>({...f,[k]:e.target.value}))}
@@ -1377,7 +1409,7 @@ export default function Contracts({ API }) {
                     </div>
                   ))}
                 </div>
-                <div className="mt-3">
+                {!isNetForm && <div className="mt-3">
                   <label className="block text-xs font-medium text-gray-600 mb-1">Допълнителни условия / Бележки</label>
                   <textarea value={newForm.conditions} onChange={e=>setNewForm(f=>({...f,conditions:e.target.value}))}
                     rows={2} placeholder="Допълнителни клаузи..."
@@ -1406,7 +1438,12 @@ export default function Contracts({ API }) {
                       ))}
                     </div>
                   </div>
-                </div>
+                </div>}
+                {isNetForm && (
+                  <div className="mt-3 text-xs text-gray-500">
+                    Без депозит, протокол и абонатни номера — това е договор за услуга, не за имота. Плащането е предплатено през портала; при неплащане нетът спира автоматично (Чл. 3).
+                  </div>
+                )}
               </div>
 
               <div className="flex justify-end">
