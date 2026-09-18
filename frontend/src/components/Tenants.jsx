@@ -537,6 +537,10 @@ function TenantTable({
                     ? <span className="inline-block bg-purple-50 text-purple-700 border border-purple-200 text-xs px-2 py-0.5 rounded-full">
                         {prop.manual_payment.payment_type === 'брой' ? '💵 В брой' : '🏦 Друга сметка'}
                       </span>
+                    : prop.invoice_payment && !(prop.tx_count > 0)
+                      ? <span className="inline-block bg-indigo-50 text-indigo-700 border border-indigo-200 text-xs px-2 py-0.5 rounded-full" title={`Платена фактура · ${prop.invoice_payment.paid_at || ''}`}>
+                          {prop.invoice_payment.payment_method === 'stripe' ? '💳 Карта (портал)' : prop.invoice_payment.payment_method === 'cash' ? '💵 Фактура · в брой' : '🧾 Фактура · платена'}
+                        </span>
                     : prop.prepaid
                       ? <span className="inline-block bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs px-2 py-0.5 rounded-full">⏩ Предплатено</span>
                     : prop.is_paid

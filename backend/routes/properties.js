@@ -168,6 +168,19 @@ module.exports = function(db) {
     const manualMap = {};
     manualPaid.forEach(p => { manualMap[p.property_id] = p; });
 
+    // Платени наемни фактури (карта през портала / Stripe, или ✓ Платена от
+    // Фактури). Иначе наемател, платил с карта, излизаше „не е платил" —
+    // Атанасов, гараж 62, 09.2026. Про-рата фактура се брои за платен месец.
+    const invPaid = db.prepare(
+      `SELECT property_id, SUM(total) AS paid_amount, COUNT(*) AS inv_count,
+              MAX(payment_method) AS payment_method, MAX(paid_at) AS paid_at
+       FROM rent_invoices
+       WHERE type='invoice' AND COALESCE(product,'наем')='наем' AND month = ? AND paid_at IS NOT NULL
+       GROUP BY property_id`
+    ).all(month);
+    const invMap = {};
+    invPaid.forEach(p => { invMap[p.property_id] = p; });
+
     // Cumulative покритие (предплащане): платено до месеца vs дължим наем от началото.
     const cumRows = db.prepare(
       `SELECT property_id, SUM(CASE WHEN UPPER(COALESCE(currency,'BGN'))='BGN' THEN сума/1.95583 ELSE сума END) as paid
@@ -178,6 +191,9 @@ module.exports = function(db) {
     cumRows.forEach(r => { cumMap[r.property_id] = r.paid; });
     db.prepare(`SELECT property_id, SUM(amount) as paid FROM manual_rent_payments WHERE month <= ? GROUP BY property_id`)
       .all(month).forEach(r => { cumMap[r.property_id] = (cumMap[r.property_id] || 0) + r.paid; });
+    db.prepare(`SELECT property_id, SUM(total) as paid FROM rent_invoices
+                WHERE type='invoice' AND COALESCE(product,'наем')='наем' AND paid_at IS NOT NULL AND month <= ? GROUP BY property_id`)
+      .all(month).forEach(r => { cumMap[r.property_id] = (cumMap[r.property_id] || 0) + r.paid; });
     const startMap = {};
     db.prepare(`SELECT property_id, MIN(месец) as start FROM transactions
                 WHERE категория='наем' AND operation='Кт' AND property_id IS NOT NULL AND COALESCE(месец,'') != ''
@@ -187,7 +203,8 @@ module.exports = function(db) {
     const result = props.map(p => {
       const bank   = bankMap[p.id];
       const manual = manualMap[p.id];
-      const paid_amount = (bank ? bank.paid_amount : 0) + (manual ? manual.amount : 0);
+      const inv    = invMap[p.id];
+      const paid_amount = (bank ? bank.paid_amount : 0) + (manual ? manual.amount : 0) + (inv ? inv.paid_amount : 0);
       const rent = Number(p.наем) || 0;
       const due = rent > 0 ? monthsIncl(startMap[p.id], month) * rent : 0;
       const prepaid_covered = due > 0 && (cumMap[p.id] || 0) + 0.5 >= due;
@@ -196,9 +213,10 @@ module.exports = function(db) {
         paid_amount,
         tx_count:      bank   ? bank.tx_count      : 0,
         bank_txs:      bankTxMap[p.id] || [],
-        is_paid:       !!(bank || manual || prepaid_covered),
-        prepaid:       !bank && !manual && prepaid_covered,
+        is_paid:       !!(bank || manual || inv || prepaid_covered),
+        prepaid:       !bank && !manual && !inv && prepaid_covered,
         manual_payment: manual || null,
+        invoice_payment: inv || null, // платена фактура (карта/Stripe или ✓ Платена)
       };
     });
 
@@ -258,6 +276,9 @@ module.exports = function(db) {
       const manualThisMonth = new Set(db.prepare(
         `SELECT property_id FROM manual_rent_payments WHERE month = ?`
       ).all(month).map(r => r.property_id));
+      db.prepare(`SELECT DISTINCT property_id FROM rent_invoices
+                  WHERE type='invoice' AND COALESCE(product,'наем')='наем' AND month = ? AND paid_at IS NOT NULL`)
+        .all(month).forEach(r => manualThisMonth.add(r.property_id));
 
       const prevTxs = db.prepare(
         `SELECT id, property_id, дата, сума, контрагент FROM transactions
@@ -356,6 +377,15 @@ module.exports = function(db) {
          WHERE month >= ? AND month <= ?`
       ).all(monthFrom, monthTo);
 
+      // Платени наемни фактури (карта/Stripe, ✓ Платена) — като ръчно плащане
+      const invoices = db.prepare(
+        `SELECT property_id, month, SUM(total) AS amount, MAX(payment_method) AS payment_method
+         FROM rent_invoices
+         WHERE type='invoice' AND COALESCE(product,'наем')='наем' AND paid_at IS NOT NULL
+           AND month >= ? AND month <= ?
+         GROUP BY property_id, month`
+      ).all(monthFrom, monthTo);
+
       // Index: key = `${property_id}-${YYYY-MM}`
       const cellMap = {};
       for (const r of bank) {
@@ -368,6 +398,12 @@ module.exports = function(db) {
         if (!cellMap[key]) cellMap[key] = { bank_amount: 0, tx_count: 0, manual_amount: 0 };
         cellMap[key].manual_amount = r.amount;
         cellMap[key].manual_type   = r.payment_type;
+      }
+      for (const r of invoices) {
+        const key = `${r.property_id}-${r.month}`;
+        if (!cellMap[key]) cellMap[key] = { bank_amount: 0, tx_count: 0, manual_amount: 0 };
+        cellMap[key].manual_amount = (cellMap[key].manual_amount || 0) + r.amount;
+        cellMap[key].manual_type   = cellMap[key].manual_type || (r.payment_method === 'stripe' ? 'карта' : r.payment_method || 'фактура');
       }
 
       // Предплатен излишък от ПРЕДИ годината — за коректно пренасяне (напр. голяма
