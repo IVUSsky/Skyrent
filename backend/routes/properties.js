@@ -6,6 +6,7 @@ const fs      = require('fs');
 const { optimizeMany, isDisplayable } = require('../lib/imageOptimize');
 const { imagesOnly, safeExt } = require('../lib/uploadFilter');
 const { renovationByProperty } = require('../lib/renovationCosts');
+const { reconcileInvoices } = require('../lib/invoiceReconcile');
 
 const DATA_DIR   = process.env.DATA_DIR || path.join(__dirname, '../data');
 const PHOTOS_DIR = path.join(DATA_DIR, 'property_photos');
@@ -175,7 +176,7 @@ module.exports = function(db) {
       `SELECT property_id, SUM(total) AS paid_amount, COUNT(*) AS inv_count,
               MAX(payment_method) AS payment_method, MAX(paid_at) AS paid_at
        FROM rent_invoices
-       WHERE type='invoice' AND COALESCE(product,'наем')='наем' AND month = ? AND paid_at IS NOT NULL
+       WHERE type='invoice' AND COALESCE(product,'наем')='наем' AND month = ? AND paid_at IS NOT NULL AND bank_tx_id IS NULL AND manual_payment_id IS NULL
        GROUP BY property_id`
     ).all(month);
     const invMap = {};
@@ -192,7 +193,7 @@ module.exports = function(db) {
     db.prepare(`SELECT property_id, SUM(amount) as paid FROM manual_rent_payments WHERE month <= ? GROUP BY property_id`)
       .all(month).forEach(r => { cumMap[r.property_id] = (cumMap[r.property_id] || 0) + r.paid; });
     db.prepare(`SELECT property_id, SUM(total) as paid FROM rent_invoices
-                WHERE type='invoice' AND COALESCE(product,'наем')='наем' AND paid_at IS NOT NULL AND month <= ? GROUP BY property_id`)
+                WHERE type='invoice' AND COALESCE(product,'наем')='наем' AND paid_at IS NOT NULL AND month <= ? AND bank_tx_id IS NULL AND manual_payment_id IS NULL GROUP BY property_id`)
       .all(month).forEach(r => { cumMap[r.property_id] = (cumMap[r.property_id] || 0) + r.paid; });
     const startMap = {};
     db.prepare(`SELECT property_id, MIN(месец) as start FROM transactions
@@ -381,7 +382,7 @@ module.exports = function(db) {
       const invoices = db.prepare(
         `SELECT property_id, month, SUM(total) AS amount, MAX(payment_method) AS payment_method
          FROM rent_invoices
-         WHERE type='invoice' AND COALESCE(product,'наем')='наем' AND paid_at IS NOT NULL
+         WHERE type='invoice' AND COALESCE(product,'наем')='наем' AND paid_at IS NOT NULL AND bank_tx_id IS NULL AND manual_payment_id IS NULL
            AND month >= ? AND month <= ?
          GROUP BY property_id, month`
       ).all(monthFrom, monthTo);
@@ -502,6 +503,8 @@ module.exports = function(db) {
         VALUES (?, ?, ?, ?, ?)
         ON CONFLICT(property_id, month) DO UPDATE SET amount=excluded.amount, payment_type=excluded.payment_type, notes=excluded.notes
       `).run(req.params.id, month, Number(amount) || 0, payment_type || 'брой', notes || null);
+      // Фактурата за наем за месеца (ако има) → платена въз основа на това плащане
+      try { reconcileInvoices(db, { property_id: Number(req.params.id), month }); } catch (e) { console.warn('reconcile after mark-paid failed:', e.message); }
       res.json({ ok: true });
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -513,6 +516,7 @@ module.exports = function(db) {
     const month = req.query.month;
     if (!month) return res.status(400).json({ error: 'month е задължителен' });
     db.prepare('DELETE FROM manual_rent_payments WHERE property_id = ? AND month = ?').run(req.params.id, month);
+    try { reconcileInvoices(db, { property_id: Number(req.params.id), month }); } catch (e) { console.warn('reconcile after unmark failed:', e.message); }
     res.json({ ok: true });
   });
 

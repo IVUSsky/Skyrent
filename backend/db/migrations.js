@@ -476,6 +476,11 @@ function runTenantMigrations(db) {
   // Заварените депозитни фактури се съотнасят еднократно към договора на имота,
   // започнал последен преди датата на издаване (contracts е създадена по-горе).
   try { db.exec("ALTER TABLE rent_invoices ADD COLUMN contract_id INTEGER"); console.log('Migration: added rent_invoices.contract_id'); } catch(_) {}
+  // Платена въз основа на вече отчетено плащане (банков превод / ръчно плащане в
+  // Наематели) — lib/invoiceReconcile.js. Такива фактури НЕ се броят втори път
+  // в Наематели/матрицата; ако източникът изчезне, статусът пада.
+  try { db.exec("ALTER TABLE rent_invoices ADD COLUMN bank_tx_id INTEGER"); console.log('Migration: added rent_invoices.bank_tx_id'); } catch(_) {}
+  try { db.exec("ALTER TABLE rent_invoices ADD COLUMN manual_payment_id INTEGER"); console.log('Migration: added rent_invoices.manual_payment_id'); } catch(_) {}
   try {
     const done = db.prepare("SELECT value FROM settings WHERE key='deposit_contract_backfill'").get();
     if (!done) {
