@@ -170,6 +170,26 @@ export default function Tenants({ API }) {
     finally { setRederiving(false) }
   }
 
+  // Дубликати от двоен импорт (същият превод веднъж без име, веднъж с име /
+  // главни vs малки букви). Първо преглед на двойките, после изтриване.
+  const [deduping, setDeduping] = useState(false)
+  const dedupe = async () => {
+    setDeduping(true)
+    try {
+      const [y, m] = month.slice(0, 7).split('-').map(Number); const prev = `${m === 1 ? y - 1 : y}-${String(m === 1 ? 12 : m - 1).padStart(2, '0')}`
+      const body = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ from: prev }) }
+      const dry = await apiFetch(`${API}/api/import/transactions/dedupe?dry=1`, body).then(r => r.json())
+      if (!dry.ok) { showToast(dry.error || 'Грешка', 'error'); return }
+      if (!dry.found) { showToast('Няма дубликати от двоен импорт — двойните плащания са реални отделни преводи'); return }
+      const lines = dry.pairs.slice(0, 12).map(p => `• ${p.дата} ${Number(p.сума).toFixed(2)} ${p.currency || 'EUR'}: махам „${p.drop.контрагент || '(без име)'}", остава „${p.keep.контрагент}"`).join('\n')
+      if (!window.confirm(`Намерени ${dry.found} дубликата от двоен импорт (от ${prev} нататък):\n\n${lines}${dry.found > 12 ? '\n…' : ''}\n\nИзтрий ги?`)) return
+      const r = await apiFetch(`${API}/api/import/transactions/dedupe`, body).then(r => r.json())
+      showToast(r.ok ? `Изтрити ${r.deleted} дубликата` : (r.error || 'Грешка'), r.ok ? 'success' : 'error')
+      load()
+    } catch (e) { showToast(e.message, 'error') }
+    finally { setDeduping(false) }
+  }
+
   const sendReminder = (prop) => {
     apiFetch(`${API}/api/email/reminder`, {
       method: 'POST',
@@ -368,8 +388,13 @@ export default function Tenants({ API }) {
               {/* Duplicates */}
               {diag.duplicates.length > 0 && (
                 <div className="bg-white border border-red-200 rounded-lg overflow-hidden">
-                  <div className="px-3 py-2 bg-red-50 border-b border-red-200 text-sm font-semibold text-red-800">
-                    ⚠ Възможен дубликат — {diag.duplicates.length} имот(а) с ≥2 плащания за този месец
+                  <div className="px-3 py-2 bg-red-50 border-b border-red-200 text-sm font-semibold text-red-800 flex flex-wrap items-center justify-between gap-2">
+                    <span>⚠ Възможен дубликат — {diag.duplicates.length} имот(а) с ≥2 плащания за този месец</span>
+                    <button onClick={dedupe} disabled={deduping}
+                      title="Същият банков превод, влязъл два пъти от двата експорта на ProBanking (веднъж без име / с главни букви). Показва двойките преди да изтрие. Реалните двойни преводи (наем + депозит) не се пипат."
+                      className="px-3 py-1 text-xs font-medium bg-white border border-red-300 hover:bg-red-100 text-red-800 rounded-lg disabled:opacity-50">
+                      {deduping ? '…' : '🧹 Премахни дубликатите от двоен импорт'}
+                    </button>
                   </div>
                   <div className="divide-y divide-gray-100 text-sm">
                     {diag.duplicates.map(d => (

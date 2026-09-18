@@ -1,6 +1,7 @@
 const express = require('express');
 const { matchTenant } = require('../lib/tenantNameMatch');
 const { rentMonthFromReason } = require('../lib/rentMonth');
+const { sameCounterparty, findDuplicatePairs } = require('../lib/txDuplicates');
 const { orgContext } = require('../db/db');
 const multer = require('multer');
 const XLSX = require('xlsx');
@@ -15,13 +16,20 @@ module.exports = function(db) {
   const DEDUP_RATE = 1.95583;
   const toEur = (amt, cur) =>
     (String(cur || 'BGN').toUpperCase() === 'BGN' ? Number(amt || 0) / DEDUP_RATE : Number(amt || 0));
+  // Контрагентът НЕ е в SQL-а: двата експорта на ProBanking го пишат различно
+  // („ПЕТЯ СТОЙКОВА" / „Петя Стойкова", празен / „Danaya Daneva") — сравнява се
+  // нормализирано в JS (sameCounterparty), иначе всеки превод влиза два пъти.
   const DEDUP_SQL =
-    `SELECT id FROM transactions
-       WHERE дата=? AND operation=? AND контрагент=?
+    `SELECT id, контрагент, property_id FROM transactions
+       WHERE дата=? AND operation=?
          AND ABS((CASE WHEN UPPER(COALESCE(currency,'BGN'))='BGN'
                        THEN сума/${DEDUP_RATE} ELSE сума END) - ?) < 0.05`;
-  const isDup = (stmt, tx) =>
-    !!(tx.дата && stmt.get(tx.дата, tx.operation || '', tx.контрагент || '', toEur(tx.сума, tx.currency)));
+  const findDup = (stmt, tx) => {
+    if (!tx.дата) return null;
+    const rows = stmt.all(tx.дата, tx.operation || '', toEur(tx.сума, tx.currency));
+    return rows.find(r => sameCounterparty(r.контрагент, tx.контрагент)) || null;
+  };
+  const isDup = (stmt, tx) => !!findDup(stmt, tx);
 
   // ── Helper: load rules from DB ─────────────────────────────
   function loadRules() {
@@ -530,7 +538,14 @@ module.exports = function(db) {
         UPDATE expense_invoices SET paid=1, paid_date=?, bank_tx_id=?, payment_type='банков_импорт' WHERE id=?
       `);
 
-      let saved = 0, skipped = 0;
+      let saved = 0, skipped = 0, enriched = 0;
+      // Стар ред без контрагент (парсерът преди #227) + същият превод с име →
+      // не се вмъква втори път, а старият се допълва с името (и имота, ако няма).
+      const enrichTx = db.prepare(`UPDATE transactions SET контрагент=?,
+        property_id=COALESCE(property_id, ?),
+        категория=CASE WHEN property_id IS NULL AND ? IS NOT NULL THEN ? ELSE категория END,
+        месец=CASE WHEN property_id IS NULL AND ? IS NOT NULL THEN COALESCE(?, месец) ELSE месец END
+        WHERE id=?`);
 
       const doImport = db.transaction(() => {
         const sessionResult = insertSession.run(
@@ -544,8 +559,14 @@ module.exports = function(db) {
 
         for (const tx of transactions) {
           // Deduplication check
-          if (isDup(dupCheck, tx)) {
+          const dup = findDup(dupCheck, tx);
+          if (dup) {
             skipped++;
+            if (!String(dup.контрагент || '').trim() && String(tx.контрагент || '').trim()) {
+              const pid = tx.property_id || null;
+              enrichTx.run(tx.контрагент.trim(), pid, pid, tx.категория || null, pid, tx.месец || null, dup.id);
+              enriched++;
+            }
             continue;
           }
 
@@ -632,7 +653,7 @@ module.exports = function(db) {
       });
 
       const session_id = doImport();
-      res.json({ ok: true, session_id, saved, skipped });
+      res.json({ ok: true, session_id, saved, skipped, enriched });
     } catch (err) {
       console.error('Save error:', err);
       res.status(500).json({ error: err.message });
@@ -1310,31 +1331,77 @@ module.exports = function(db) {
     }
   });
 
+  // Изтриване на транзакция с cascade на свързаните записи. keepId (по избор):
+  // ръчно въведена фактура/лихва, вързана към изтривания превод, се пренасочва
+  // към запазения дубликат вместо да се губи.
+  function deleteTxCascade(id, keepId = null) {
+    // Cascade: махни референции в personal_income
+    const piRes = db.prepare('DELETE FROM personal_income WHERE bank_tx_id=?').run(id);
+    let relinked = 0;
+    if (keepId) {
+      // Ръчни фактури, вързани към дубликата → към запазения (ако той няма своя)
+      relinked += db.prepare(`UPDATE expense_invoices SET bank_tx_id=? WHERE bank_tx_id=? AND payment_type != 'банков_импорт'
+        AND NOT EXISTS (SELECT 1 FROM expense_invoices e2 WHERE e2.bank_tx_id=?)`).run(keepId, id, keepId).changes;
+      try {
+        relinked += db.prepare(`UPDATE bulgar_transactions SET bank_tx_id=? WHERE bank_tx_id=?
+          AND NOT EXISTS (SELECT 1 FROM bulgar_transactions b2 WHERE b2.bank_tx_id=?)`).run(keepId, id, keepId).changes;
+      } catch (_) {}
+    }
+    // Cascade: махни auto-created expense_invoices (и останалите вързани)
+    const eiRes = db.prepare('DELETE FROM expense_invoices WHERE bank_tx_id=?').run(id);
+    try { db.prepare('DELETE FROM bulgar_transactions WHERE bank_tx_id=?').run(id); } catch (_) {}
+    // Изтрий самата транзакция
+    const txRes = db.prepare('DELETE FROM transactions WHERE id=?').run(id);
+    return {
+      tx_deleted: txRes.changes,
+      personal_income_deleted: piRes.changes,
+      expense_invoices_deleted: eiRes.changes,
+      relinked,
+    };
+  }
+
   // DELETE /transactions/:id — изтрий конкретна транзакция с cascade на свързани records
   router.delete('/transactions/:id', (req, res) => {
     try {
       const id = req.params.id;
       const tx = db.prepare('SELECT id FROM transactions WHERE id=?').get(id);
       if (!tx) return res.status(404).json({ error: 'Not found' });
-
-      const doIt = db.transaction(() => {
-        // Cascade: махни референции в personal_income
-        const piRes = db.prepare('DELETE FROM personal_income WHERE bank_tx_id=?').run(id);
-        // Cascade: махни auto-created expense_invoices
-        const eiRes = db.prepare('DELETE FROM expense_invoices WHERE bank_tx_id=?').run(id);
-        // Изтрий самата транзакция
-        const txRes = db.prepare('DELETE FROM transactions WHERE id=?').run(id);
-        return {
-          tx_deleted: txRes.changes,
-          personal_income_deleted: piRes.changes,
-          expense_invoices_deleted: eiRes.changes,
-        };
-      });
-      const result = doIt();
+      const result = db.transaction(() => deleteTxCascade(id))();
       res.json({ ok: true, ...result });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
+  });
+
+  // POST /transactions/dedupe — маха дубликатите от двоен импорт на една и съща
+  // банкова операция (същата дата, операция и сума, но контрагентът е записан
+  // различно: празен / с име, главни / малки букви — виж lib/txDuplicates.js).
+  // ?dry=1 → само списък на двойките; body.from=YYYY-MM → само от този месец.
+  // Еднакво записаните двойки (наем + депозит в два превода) НЕ се пипат.
+  router.post('/transactions/dedupe', (req, res) => {
+    if (req.user?.role === 'tenant') return res.status(403).json({ error: 'Forbidden' });
+    try {
+      const dry = String(req.query.dry || req.body?.dry || '') === '1';
+      const from = /^\d{4}-\d{2}$/.test(req.body?.from || '') ? req.body.from : null;
+      const rows = db.prepare(`SELECT id, дата, operation, контрагент, основание, сума, currency, категория, property_id, месец
+                               FROM transactions ${from ? 'WHERE дата >= ?' : ''}`).all(...(from ? [from + '-01'] : []));
+      const pairs = findDuplicatePairs(rows).map(p => ({
+        keep: { id: p.keep.id, контрагент: p.keep.контрагент, основание: p.keep.основание },
+        drop: { id: p.drop.id, контрагент: p.drop.контрагент, основание: p.drop.основание },
+        дата: p.keep.дата, operation: p.keep.operation, сума: p.keep.сума, currency: p.keep.currency,
+        категория: p.keep.категория, property_id: p.keep.property_id,
+      }));
+      let deleted = 0, relinked = 0;
+      if (!dry && pairs.length) {
+        db.transaction(() => {
+          for (const p of pairs) {
+            const r = deleteTxCascade(p.drop.id, p.keep.id);
+            deleted += r.tx_deleted; relinked += r.relinked;
+          }
+        })();
+      }
+      res.json({ ok: true, dry, checked: rows.length, found: pairs.length, deleted, relinked, pairs });
+    } catch (err) { res.status(500).json({ error: err.message }); }
   });
 
   // POST /retag-2025-rent-currency — еднократен data fix.
