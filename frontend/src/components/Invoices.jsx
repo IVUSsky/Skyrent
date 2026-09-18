@@ -194,6 +194,25 @@ export default function Invoices({ API, role }) {
       .catch(e => { setGenerating(null); showToast(e.message, 'error') })
   }
 
+  // Сверява неплатените фактури за наем/депозит с банковите преводи и ръчните
+  // плащания (Наематели). Първо преглед, после прилагане.
+  const [reconciling, setReconciling] = useState(false)
+  const reconcile = async () => {
+    setReconciling(true)
+    try {
+      const body = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) }
+      const dry = await apiFetch(`${API}/api/invoices/reconcile?dry=1`, body).then(r => r.json())
+      if (!dry.ok) { showToast(dry.error || 'Грешка', 'error'); return }
+      if (!dry.changed) { showToast('Всичко е сверено — няма фактури, покрити от неотразени плащания'); return }
+      const lines = dry.changes.slice(0, 15).map(c => `• № ${c.invoice_number} (${c.product}, ${monthLabel(c.month)}) ${fmtMoney(c.total)} € → ${c.action === 'paid' ? `платена ${c.method === 'cash' ? 'в брой' : 'по банка'} ${c.paid_at || ''}` : 'връща се в неплатени (преводът липсва)'}`).join('\n')
+      if (!window.confirm(`${dry.changed} фактури ще се променят:\n\n${lines}${dry.changed > 15 ? '\n…' : ''}\n\nПродължи?`)) return
+      const r = await apiFetch(`${API}/api/invoices/reconcile`, body).then(r => r.json())
+      showToast(r.ok ? `Сверени ${r.changed} фактури` : (r.error || 'Грешка'), r.ok ? 'success' : 'error')
+      load()
+    } catch (e) { showToast(e.message, 'error') }
+    finally { setReconciling(false) }
+  }
+
   const generateAll = () => {
     const toGenerate = enabledProps.filter(p => !invoiceMap[`${p.id}_${filterMonth}`])
     if (!toGenerate.length) { showToast('Всички фактури вече са генерирани'); return }
@@ -423,6 +442,13 @@ export default function Invoices({ API, role }) {
               + Генерирай всички
             </button>
           )}
+          {role !== 'broker' && (
+            <button onClick={reconcile} disabled={reconciling}
+              title="Неплатени фактури за наем/депозит, чиито пари вече са влезли по банка (импорт) или са отбелязани в Наематели → платени. Първо показва какво ще промени."
+              className="px-4 py-1.5 text-sm font-medium bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 rounded-lg whitespace-nowrap disabled:opacity-50">
+              {reconciling ? '…' : '🔁 Свери с плащанията'}
+            </button>
+          )}
         </div>
       </div>
 
@@ -560,7 +586,7 @@ export default function Invoices({ API, role }) {
                       <td className="px-3 py-2 whitespace-nowrap text-xs">
                         {isCN ? <span className="text-gray-300">—</span>
                           : inv.paid_at
-                            ? <span className="text-green-700" title={PAY_LABEL[inv.payment_method] || inv.payment_method || ''}>✓ {fmtDate(inv.paid_at)}<span className="block text-[10px] text-gray-500">{PAY_LABEL[inv.payment_method] || inv.payment_method || ''}</span></span>
+                            ? <span className="text-green-700" title={inv.bank_tx_id ? 'по банков превод (импорт)' : inv.manual_payment_id ? 'отбелязано в Наематели' : (PAY_LABEL[inv.payment_method] || inv.payment_method || '')}>✓ {fmtDate(inv.paid_at)}<span className="block text-[10px] text-gray-500">{inv.bank_tx_id ? 'банков превод' : inv.manual_payment_id ? (inv.payment_method === 'cash' ? 'в брой (Наематели)' : 'Наематели') : (PAY_LABEL[inv.payment_method] || inv.payment_method || '')}</span></span>
                             : <span className="text-amber-700 font-medium">⏳ не</span>
                         }
                       </td>
@@ -605,7 +631,7 @@ export default function Invoices({ API, role }) {
                               ✓ Платена
                             </button>
                           )}
-                          {!isCN && inv.paid_at && inv.payment_method !== 'stripe' && role !== 'broker' && (
+                          {!isCN && inv.paid_at && inv.payment_method !== 'stripe' && !inv.bank_tx_id && !inv.manual_payment_id && role !== 'broker' && (
                             <button onClick={() => unmarkPaid(inv)}
                               className="px-2 py-1 text-xs bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 rounded" title="Върни в неплатени (ръчно маркирана)">
                               ✗

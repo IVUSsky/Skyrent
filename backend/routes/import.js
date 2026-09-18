@@ -2,6 +2,7 @@ const express = require('express');
 const { matchTenant } = require('../lib/tenantNameMatch');
 const { rentMonthFromReason } = require('../lib/rentMonth');
 const { sameCounterparty, findDuplicatePairs } = require('../lib/txDuplicates');
+const { reconcileInvoices } = require('../lib/invoiceReconcile');
 const { orgContext } = require('../db/db');
 const multer = require('multer');
 const XLSX = require('xlsx');
@@ -653,7 +654,10 @@ module.exports = function(db) {
       });
 
       const session_id = doImport();
-      res.json({ ok: true, session_id, saved, skipped, enriched });
+      // Новите преводи „наем"/„депозит" покриват ли неплатени фактури → платени
+      let reconciled = 0;
+      try { reconciled = reconcileInvoices(db, {}).changes.length; } catch (e) { console.warn('reconcile after import failed:', e.message); }
+      res.json({ ok: true, session_id, saved, skipped, enriched, reconciled });
     } catch (err) {
       console.error('Save error:', err);
       res.status(500).json({ error: err.message });
@@ -800,7 +804,9 @@ module.exports = function(db) {
           if (mon !== t.месец) updMon.run(mon, t.id);
         }
       }
-      res.json({ ok: true, dry, checked: rows.length, changed: changes.length, changes });
+      let reconciled = 0;
+      if (!dry && changes.length) { try { reconciled = reconcileInvoices(db, {}).changes.length; } catch (e) { console.warn('reconcile after rederive failed:', e.message); } }
+      res.json({ ok: true, dry, checked: rows.length, changed: changes.length, changes, reconciled });
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
 
@@ -1338,6 +1344,12 @@ module.exports = function(db) {
     // Cascade: махни референции в personal_income
     const piRes = db.prepare('DELETE FROM personal_income WHERE bank_tx_id=?').run(id);
     let relinked = 0;
+    // Фактура, платена въз основа на този превод → към запазения дубликат, иначе
+    // статусът пада (reconcile ще я вдигне пак, ако друг превод я покрива)
+    try {
+      if (keepId) relinked += db.prepare('UPDATE rent_invoices SET bank_tx_id=? WHERE bank_tx_id=?').run(keepId, id).changes;
+      else db.prepare('UPDATE rent_invoices SET paid_at=NULL, payment_method=NULL, bank_tx_id=NULL WHERE bank_tx_id=?').run(id);
+    } catch (_) {}
     if (keepId) {
       // Ръчни фактури, вързани към дубликата → към запазения (ако той няма своя)
       relinked += db.prepare(`UPDATE expense_invoices SET bank_tx_id=? WHERE bank_tx_id=? AND payment_type != 'банков_импорт'
@@ -1400,7 +1412,9 @@ module.exports = function(db) {
           }
         })();
       }
-      res.json({ ok: true, dry, checked: rows.length, found: pairs.length, deleted, relinked, pairs });
+      let reconciled = 0;
+      if (!dry && deleted) { try { reconciled = reconcileInvoices(db, {}).changes.length; } catch (e) { console.warn('reconcile after dedupe failed:', e.message); } }
+      res.json({ ok: true, dry, checked: rows.length, found: pairs.length, deleted, relinked, reconciled, pairs });
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
 

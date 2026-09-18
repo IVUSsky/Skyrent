@@ -7,6 +7,7 @@ const { notifyTenant } = require('../lib/notify');
 const { nextInvoiceNumber, peekNextInvoiceNumber, counterKey } = require('../lib/invoiceNumber');
 const { parseRecipients } = require('../lib/email');
 const { getIssuer, issuerComplete, brandEmailHtml } = require('../lib/branding');
+const { reconcileInvoices } = require('../lib/invoiceReconcile');
 
 const FONT_REGULAR = path.join(__dirname, '../fonts/arial.ttf');
 const FONT_BOLD    = path.join(__dirname, '../fonts/arialbd.ttf');
@@ -598,7 +599,15 @@ async function generateRentInvoice(db, { property_id, month, payment_type, notes
     sendInvoiceToKontrolisi(db, freshInv).catch(e => console.warn('kontrolisi auto-send failed:', e.message));
   }
 
-  return { ok: true, id: r.lastInsertRowid, invoice_number, filename, addons_total };
+  // Ако наемът за месеца вече е влязъл по банка (или е отбелязан в Наематели),
+  // фактурата се ражда платена — иначе стои „⏳ не" до ръчно ✓ (Себастиан, 09.2026).
+  let paid = null;
+  try {
+    const rc = reconcileInvoices(db, { property_id, month });
+    paid = rc.changes.find(c => c.id === r.lastInsertRowid && c.action === 'paid') || null;
+  } catch (e) { console.warn('reconcile after rent invoice failed:', e.message); }
+
+  return { ok: true, id: r.lastInsertRowid, invoice_number, filename, addons_total, paid };
 }
 
 // Гаранционният депозит по договор за наем не е наем: носи продукт 'депозит',
@@ -672,7 +681,14 @@ async function generateDepositInvoice(db, { property_id, contract_id, amount, wi
     });
   }
 
-  return { ok: true, ...r };
+  // Депозитът може вече да е преведен (или „наем + депозит" в един превод)
+  let paid = null;
+  try {
+    const rc = reconcileInvoices(db, { property_id });
+    paid = rc.changes.find(c => c.id === r.id && c.action === 'paid') || null;
+  } catch (e) { console.warn('reconcile after deposit invoice failed:', e.message); }
+
+  return { ok: true, ...r, paid };
 }
 
 // ─── Router ────────────────────────────────────────────────────────────────
@@ -747,12 +763,26 @@ module.exports = function(db) {
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
 
+  // POST /reconcile — сверява неплатените фактури за наем/депозит с банковите
+  // преводи и ръчните плащания (?dry=1 → само преглед; body.month → само месецът).
+  router.post('/reconcile', (req, res) => {
+    if (req.user?.role === 'tenant') return res.status(403).json({ error: 'Forbidden' });
+    try {
+      const dry = String(req.query.dry || req.body?.dry || '') === '1';
+      const month = /^\d{4}-\d{2}$/.test(req.body?.month || '') ? req.body.month : null;
+      const r = db.transaction(() => reconcileInvoices(db, { month, dry }))();
+      if (!r.ok) return res.status(500).json({ error: r.reason });
+      res.json({ ok: true, dry, checked: r.checked, changed: r.changes.length, changes: r.changes });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
   router.post('/:id/unmark-paid', (req, res) => {
     try {
       const inv = db.prepare('SELECT * FROM rent_invoices WHERE id=?').get(req.params.id);
       if (!inv) return res.status(404).json({ error: 'Фактурата не е намерена' });
       if (!inv.paid_at) return res.status(400).json({ error: 'Фактурата не е платена' });
       if (inv.payment_method === 'stripe') return res.status(400).json({ error: 'Stripe плащане — ползвай ↩️ refund, не ръчно' });
+      if (inv.bank_tx_id || inv.manual_payment_id) return res.status(400).json({ error: 'Платена по банков превод / отбелязано плащане — махни превода или плащането в Наематели, не фактурата' });
       db.prepare('UPDATE rent_invoices SET paid_at=NULL, payment_method=NULL WHERE id=?').run(inv.id);
       res.json({ ok: true });
     } catch (err) { res.status(500).json({ error: err.message }); }
