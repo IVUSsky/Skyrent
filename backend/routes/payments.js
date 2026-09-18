@@ -363,6 +363,18 @@ function webhookHandler(db) {
       return res.status(400).send(`Webhook Error: ${lastErr?.message}`);
     }
 
+    // Идемпотентност по event.id: Stripe доставя „поне веднъж" и повтаря, ако
+    // не получи 2xx бързо (пушът към рутера + PDF-ът отнемаха секунди). Второто
+    // доставяне минаваше по същия път и издаваше втора фактура (Конджа
+    // 1000000071/72, Стефан 1000000073/74 — 17–18.09.2026).
+    try {
+      const claimed = db.control.prepare('INSERT OR IGNORE INTO stripe_events (id, type) VALUES (?, ?)').run(event.id, event.type);
+      if (claimed.changes === 0) {
+        console.log(`Stripe: събитие ${event.id} (${event.type}) вече е обработено — пропускам`);
+        return res.json({ received: true, duplicate: true });
+      }
+    } catch (e) { console.error('[stripe_events]', e.message); }
+
     try {
       // SaaS billing събития (организационни абонаменти, Phase 3) — отделен
       // handler върху control.db. true → обработено, спираме дотук.
@@ -422,12 +434,16 @@ function webhookHandler(db) {
             try {
               const purchase = applyPurchase(db, purchaseId);
               const acc = db.prepare('SELECT * FROM internet_accounts WHERE id=?').get(purchase.account_id);
-              // Активирай в рутера веднага (best-effort)
+              // Активирай в рутера веднага (best-effort, с кратък timeout — webhook-ът
+              // трябва да отговори бързо; desired_access е записан и poll-ът ще го приложи)
               try {
-                await getRouterProvider().ensureUser(db, {
-                  username: acc.username, password: acc.password, mac_address: acc.mac_address,
-                  valid_until: acc.valid_until, property_id: acc.property_id,
-                });
+                await Promise.race([
+                  getRouterProvider().ensureUser(db, {
+                    username: acc.username, password: acc.password, mac_address: acc.mac_address,
+                    valid_until: acc.valid_until, property_id: acc.property_id,
+                  }),
+                  new Promise((_, rej) => setTimeout(() => rej(new Error('router push timeout (poll ще го приложи)')), 5000)),
+                ]);
                 db.prepare(`UPDATE internet_accounts SET router_synced_at=datetime('now'), status='active' WHERE id=?`).run(acc.id);
               } catch (e) {
                 console.error('router ensureUser after purchase failed:', e.message);
@@ -439,9 +455,12 @@ function webhookHandler(db) {
                 link: 'internet', ref_type: 'internet_purchase', ref_id: purchaseId,
               });
 
-              // Автоматична фактура за плащането + запис за месеца
+              // Автоматична фактура за плащането + запис за месеца.
+              // Атомарна „резервация" (invoice_id=0) ПРЕДИ бавната генерация на PDF:
+              // две едновременни обработки иначе и двете виждат NULL и издават по фактура.
               try {
-                if (!purchase.invoice_id) {
+                const claim = db.prepare('UPDATE internet_purchases SET invoice_id=0 WHERE id=? AND invoice_id IS NULL').run(purchaseId);
+                if (claim.changes === 1) {
                   const user = db.prepare('SELECT name FROM users WHERE id=?').get(acc.user_id);
                   const prop = db.prepare('SELECT адрес, наемател, invoice_recipient FROM properties WHERE id=?').get(acc.property_id);
 
@@ -482,6 +501,8 @@ function webhookHandler(db) {
                 }
               } catch (e) {
                 console.error('internet auto-invoice failed:', e.message);
+                // освобождаваме резервацията — следващ опит (ръчен) да може да издаде
+                try { db.prepare('UPDATE internet_purchases SET invoice_id=NULL WHERE id=? AND invoice_id=0').run(purchaseId); } catch (_) {}
               }
               console.log(`Stripe: internet purchase ${purchaseId} applied to account ${acc.id}`);
             } catch (err) {

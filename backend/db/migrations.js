@@ -942,6 +942,13 @@ function runTenantMigrations(db) {
 }
 
 function runControlMigrations(db) {
+  // Обработени Stripe събития — Stripe доставя „поне веднъж" и повтаря при
+  // бавен отговор; без този запис едно плащане издаваше две фактури.
+  db.exec(`CREATE TABLE IF NOT EXISTS stripe_events (
+    id TEXT PRIMARY KEY,
+    type TEXT,
+    received_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
   db.exec(`CREATE TABLE IF NOT EXISTS organizations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
