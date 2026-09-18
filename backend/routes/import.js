@@ -1,4 +1,5 @@
 const express = require('express');
+const { matchTenant } = require('../lib/tenantNameMatch');
 const { orgContext } = require('../db/db');
 const multer = require('multer');
 const XLSX = require('xlsx');
@@ -127,7 +128,7 @@ module.exports = function(db) {
   // ctx: { tenantMap, rules, unknownSet, unknownTenants, defaultScope }
   // Returns full transaction or null to skip.
   function enrichTransaction(rawTx, ctx) {
-    const { tenantMap, rules, unknownSet, unknownTenants, defaultScope = 'business' } = ctx;
+    const { tenantMap, rules, unknownSet, unknownTenants, defaultScope = 'business', tenants = [] } = ctx;
     let { дата, контрагент, контрагент_iban = '', контрагент_bic = '',
           основание = '', сума = 0, operation = '' } = rawTx;
     if (!дата) return null;
@@ -166,6 +167,20 @@ module.exports = function(db) {
       }
     }
 
+    // Последна инстанция: името на платеца срещу наемателите от Имоти
+    // (транслитерация, без значение на регистъра и реда на думите). Иначе
+    // всеки нов наемател излизаше „неплатил" до първото ръчно присвояване.
+    let matched_by = null;
+    if (!property_id && operation === 'Кт' && ['наем', 'приход_друг', 'депозит_получен'].includes(категория)) {
+      const hit = matchTenant(контрагент, tenants) || matchTenant(основание, tenants);
+      if (hit) {
+        property_id = hit.property_id;
+        if (категория !== 'депозит_получен') категория = 'наем';
+        validated = 0; // за преглед — присвоено по име, не по правило
+        matched_by = 'name';
+      }
+    }
+
     // "Неразпознати наематели" — само транзакции, за които НИТО tenantMap,
     // НИТО tx_rules успяха да присвоят имот. По-рано тази проверка ставаше
     // ПРЕДИ tx_rules цикъла и гледаше само property_id_from_map → показваше
@@ -185,11 +200,12 @@ module.exports = function(db) {
     return {
       дата, контрагент, контрагент_iban, контрагент_bic, основание,
       сума, operation, категория, property_id, месец, rule_id, validated, currency, scope,
+      matched_by,
     };
   }
 
   // ── Helper: parse one XLSX buffer ─────────────────────────
-  function parseBuffer(buffer, tenantMap, rules, defaultScope = 'business') {
+  function parseBuffer(buffer, tenantMap, rules, defaultScope = 'business', tenants = []) {
     const workbook = XLSX.read(buffer, { type: 'buffer', cellDates: true });
     const sheet    = workbook.Sheets[workbook.SheetNames[0]];
     const rawRows  = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
@@ -214,7 +230,7 @@ module.exports = function(db) {
     const transactions   = [];
     const unknownTenants = [];
     const unknownSet     = new Set();
-    const ctx = { tenantMap, rules, unknownSet, unknownTenants, defaultScope };
+    const ctx = { tenantMap, rules, unknownSet, unknownTenants, defaultScope, tenants };
 
     for (const row of rawRows.slice(headerRowIdx + 1)) {
       if (!row[0] && !row[4]) continue;
@@ -274,7 +290,7 @@ module.exports = function(db) {
 
   // ── Helper: parse PDF (auto-detect bank). По default → ProBanking
   // за обратна съвместимост.
-  async function parsePdfBuffer(buffer, tenantMap, rules, defaultScope = 'business') {
+  async function parsePdfBuffer(buffer, tenantMap, rules, defaultScope = 'business', tenants = []) {
     const bank = await detectPdfBank(buffer);
     let rawTx, accountIban = null, openingBalance = null, closingBalance = null, accountCurrency = null;
     if (bank === 'unicredit') {
@@ -294,7 +310,7 @@ module.exports = function(db) {
     const transactions   = [];
     const unknownTenants = [];
     const unknownSet     = new Set();
-    const ctx = { tenantMap, rules, unknownSet, unknownTenants, defaultScope };
+    const ctx = { tenantMap, rules, unknownSet, unknownTenants, defaultScope, tenants };
     for (const r of rawTx) {
       const tx = enrichTransaction(r, ctx);
       if (tx) transactions.push(tx);
@@ -314,7 +330,7 @@ module.exports = function(db) {
   }
 
   // Dispatch by file extension/mime. Подава defaultScope от account_scope_map.
-  async function parseFile(file, tenantMap, rules) {
+  async function parseFile(file, tenantMap, rules, tenants = []) {
     const scopeMap = loadAccountScopeMap();
     const name = (file.originalname || '').toLowerCase();
     const mime = (file.mimetype || '').toLowerCase();
@@ -323,8 +339,8 @@ module.exports = function(db) {
     // Първи pass — за да хванем accountIban, ползваме default scope='business'.
     // Не е big deal — keywords (заплата, household) винаги override-ват на personal.
     let result;
-    if (isPdf) result = await parsePdfBuffer(file.buffer, tenantMap, rules, 'business');
-    else       result = parseBuffer(file.buffer, tenantMap, rules, 'business');
+    if (isPdf) result = await parsePdfBuffer(file.buffer, tenantMap, rules, 'business', tenants);
+    else       result = parseBuffer(file.buffer, tenantMap, rules, 'business', tenants);
 
     const iban = result.accountIban;
     const accountScope = iban && scopeMap[iban.toUpperCase()] ? scopeMap[iban.toUpperCase()] : null;
@@ -332,8 +348,8 @@ module.exports = function(db) {
     // Втори pass само ако account scope е personal — пре-парсваме с този default.
     if (accountScope === 'personal') {
       const previous = { openingBalance: result.openingBalance, closingBalance: result.closingBalance, accountCurrency: result.accountCurrency };
-      if (isPdf) result = await parsePdfBuffer(file.buffer, tenantMap, rules, 'personal');
-      else       result = parseBuffer(file.buffer, tenantMap, rules, 'personal');
+      if (isPdf) result = await parsePdfBuffer(file.buffer, tenantMap, rules, 'personal', tenants);
+      else       result = parseBuffer(file.buffer, tenantMap, rules, 'personal', tenants);
       result.openingBalance ??= previous.openingBalance;
       result.closingBalance ??= previous.closingBalance;
       result.accountCurrency ??= previous.accountCurrency;
@@ -342,6 +358,13 @@ module.exports = function(db) {
     result.accountScope = accountScope || 'business';
     result.accountKnown = !!accountScope;
     return result;
+  }
+
+  // Наемателите от Имоти (активни, с име) за разпознаване по име на платеца
+  function loadTenants() {
+    try {
+      return db.prepare("SELECT id AS property_id, наемател AS name FROM properties WHERE статус = '✅' AND наемател IS NOT NULL AND TRIM(наемател) <> ''").all();
+    } catch { return []; }
   }
 
   // ── POST /parse (single file: xlsx или pdf) ────────────────
@@ -355,7 +378,7 @@ module.exports = function(db) {
       const normMap = Object.fromEntries(Object.entries(tenantMap).map(([k,v]) => [k.toLowerCase(), v]));
 
       const rules = loadRules();
-      const parsed = await parseFile(req.file, normMap, rules);
+      const parsed = await parseFile(req.file, normMap, rules, loadTenants());
       let { transactions, unknownTenants, accountIban, accountScope, accountKnown,
             openingBalance, closingBalance, accountCurrency } = parsed;
       const dupCheck = db.prepare(DEDUP_SQL);
@@ -383,6 +406,7 @@ module.exports = function(db) {
       if (tenantMapRow) { try { tenantMap = JSON.parse(tenantMapRow.value); } catch {} }
       const normMap = Object.fromEntries(Object.entries(tenantMap).map(([k,v]) => [k.toLowerCase(), v]));
       const rules   = loadRules();
+      const tenants = loadTenants();
 
       let allTx       = [];
       let allUnknown  = [];
@@ -392,7 +416,7 @@ module.exports = function(db) {
       for (const file of req.files) {
         try {
           const { transactions, unknownTenants, accountIban, accountScope, accountKnown,
-                  openingBalance, closingBalance, accountCurrency } = await parseFile(file, normMap, rules);
+                  openingBalance, closingBalance, accountCurrency } = await parseFile(file, normMap, rules, tenants);
           allTx      = allTx.concat(transactions);
           allUnknown = allUnknown.concat(unknownTenants.filter(u => !allUnknown.some(x => x.контрагент === u.контрагент)));
           if (accountIban && !accounts.some(a => a.iban === accountIban)) {

@@ -1322,7 +1322,7 @@ function ImportTab({ API, onSaved }) {
                 )}
                 {pendingCount > 0 && (
                   <span className="ml-2 text-sm font-normal text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">
-                    ⚡ {pendingCount} авто по правила
+                    ⚡ {pendingCount} авто по правила{transactions.filter(tx => tx.matched_by === 'name').length ? ` · 👤 ${transactions.filter(tx => tx.matched_by === 'name').length} по име на наемател` : ''}
                   </span>
                 )}
               </h3>
@@ -1409,9 +1409,11 @@ function ImportTab({ API, onSaved }) {
                         <td className="px-3 py-2 text-center whitespace-nowrap">
                           {tx.is_duplicate
                             ? <span className="text-red-500 text-xs font-bold" title="Вече съществува — ще се пропусне">⚠ дубл.</span>
-                            : tx.validated===0
-                              ? <span className="text-amber-500" title="Авто по правило">⚡</span>
-                              : <span className="text-gray-200">—</span>}
+                            : tx.matched_by === 'name'
+                              ? <span className="text-emerald-600" title="Разпознат по име на наемателя (провери имота)">👤</span>
+                              : tx.validated===0
+                                ? <span className="text-amber-500" title="Авто по правило">⚡</span>
+                                : <span className="text-gray-200">—</span>}
                           {batchWarn['new'+realIdx]?.length
                             ? <span className="ml-1 text-amber-600 text-xs cursor-help"
                                 title={batchWarn['new'+realIdx].map(w => w.title).join('; ')}>🟠</span>
