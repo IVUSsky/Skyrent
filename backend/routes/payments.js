@@ -495,6 +495,9 @@ function webhookHandler(db) {
                                       (prop?.['адрес'] ? ` — ${prop['адрес']}` : ''),
                     notes: `Интернет услуга — ${purchase.plan_name}` +
                            (prop?.['адрес'] ? ` (${prop['адрес']})` : ''),
+                    // фактурата се издава ЗАЩОТО плащането е минало → платена със Stripe
+                    paid_at: (purchase.paid_at || new Date().toISOString()).slice(0, 19).replace('T', ' '),
+                    payment_method: 'stripe',
                   });
                   db.prepare('UPDATE internet_purchases SET invoice_id=? WHERE id=?').run(inv.id, purchaseId);
                   console.log(`Stripe: internet invoice ${inv.invoice_number} created for purchase ${purchaseId} (${period})`);

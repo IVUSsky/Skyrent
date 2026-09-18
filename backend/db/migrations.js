@@ -736,6 +736,27 @@ function runTenantMigrations(db) {
     console.log('Seeded internet_plans with', seed.length, 'plans');
   }
   console.log('internet_* tables ready');
+  // Интернет фактурите се издават от webhook-а СЛЕД успешно Stripe плащане, но
+  // досега не се маркираха като платени. Еднократно: платена покупка (по имот,
+  // сума и ден) → фактурата е платена със Stripe.
+  try {
+    const done = db.prepare("SELECT value FROM settings WHERE key='internet_invoice_paid_backfill'").get();
+    if (!done) {
+      db.exec(`UPDATE rent_invoices SET
+                 paid_at = (SELECT p.paid_at FROM internet_purchases p JOIN internet_accounts a ON a.id = p.account_id
+                            WHERE p.status='paid' AND a.property_id = rent_invoices.property_id
+                              AND ABS(p.amount - rent_invoices.total) < 0.01
+                              AND date(p.paid_at) = date(rent_invoices.issued_at) LIMIT 1),
+                 payment_method = 'stripe'
+               WHERE product='интернет' AND type='invoice' AND paid_at IS NULL
+                 AND EXISTS (SELECT 1 FROM internet_purchases p JOIN internet_accounts a ON a.id = p.account_id
+                             WHERE p.status='paid' AND a.property_id = rent_invoices.property_id
+                               AND ABS(p.amount - rent_invoices.total) < 0.01
+                               AND date(p.paid_at) = date(rent_invoices.issued_at))`);
+      db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('internet_invoice_paid_backfill', '1')").run();
+    }
+  } catch(_) {}
+
 
   // Stripe payment records
   db.exec(`CREATE TABLE IF NOT EXISTS stripe_payments (

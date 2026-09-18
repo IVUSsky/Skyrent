@@ -425,7 +425,7 @@ async function createSimpleInvoice(db, {
   tenant_name = '', recipient_name = '', recipient_address = '',
   recipient_eik = '', recipient_mol = '', notes = null,
   product = 'наем', line_description = null, vat_rate: vatOverride,
-  contract_id = null,
+  contract_id = null, paid_at = null, payment_method = null,
 }) {
   const issuer = getIssuer(db);
   const invoice_number = nextInvoiceNumber(db, { rent: product === 'наем' });
@@ -454,13 +454,14 @@ async function createSimpleInvoice(db, {
       (invoice_number, type, product, property_id, month, tenant_name, recipient_name,
        recipient_address, recipient_eik, recipient_mol, amount, vat_rate, vat_amount,
        total, payment_type, tax_event_date, due_date, issued_at, pdf_path, notes,
-       addons_total, addons_json, contract_id)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+       addons_total, addons_json, contract_id, paid_at, payment_method)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
   `).run(
     invoice_number, 'invoice', product, property_id, month, inv.tenant_name,
     inv.recipient_name, inv.recipient_address, inv.recipient_eik, inv.recipient_mol,
     net, vat_rate, vat_amount, grossN,
-    payment_type, issued_at, null, issued_at, filename, notes, 0, null, contract_id
+    payment_type, issued_at, null, issued_at, filename, notes, 0, null, contract_id,
+    paid_at || null, paid_at ? (payment_method || null) : null
   );
   // Авто-изпращане към счетоводител (Kontrolisi), ако е включено — best-effort
   if (kontrolisiAutoOn(db)) {
