@@ -150,6 +150,26 @@ export default function Tenants({ API }) {
       .catch(e => showToast('Грешка: ' + e.message, 'error'))
   }
 
+  // Прилага новите правила за разпознаване върху вече импортираните преводи
+  // (име на наемател, месец от основанието, „наем + депозит"). Първо преглед.
+  const [rederiving, setRederiving] = useState(false)
+  const rederive = async () => {
+    setRederiving(true)
+    try {
+      const from = month.slice(0, 7)
+      const [y, m] = from.split('-').map(Number); const prev = `${m === 1 ? y - 1 : y}-${String(m === 1 ? 12 : m - 1).padStart(2, '0')}`
+      const dry = await apiFetch(`${API}/api/import/transactions/rederive?dry=1`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ from: prev }) }).then(r => r.json())
+      if (!dry.ok) { showToast(dry.error || 'Грешка', 'error'); return }
+      if (!dry.changed) { showToast('Нищо за преизчисляване — всичко е разпознато'); return }
+      const lines = dry.changes.slice(0, 12).map(c => `• ${c.контрагент}: ${c.what}${c.from ? ` ${c.from}` : ''} → ${c.to}`).join('\n')
+      if (!window.confirm(`Ще се променят ${dry.changed} превода (от ${prev} нататък):\n\n${lines}${dry.changed > 12 ? '\n…' : ''}\n\nПродължи?`)) return
+      const r = await apiFetch(`${API}/api/import/transactions/rederive`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ from: prev }) }).then(r => r.json())
+      showToast(r.ok ? `Преизчислени ${r.changed} превода` : (r.error || 'Грешка'), r.ok ? 'success' : 'error')
+      load()
+    } catch (e) { showToast(e.message, 'error') }
+    finally { setRederiving(false) }
+  }
+
   const sendReminder = (prop) => {
     apiFetch(`${API}/api/email/reminder`, {
       method: 'POST',
@@ -272,6 +292,13 @@ export default function Tenants({ API }) {
             </div>
           )}
 
+          {view === 'month' && (
+            <button onClick={rederive} disabled={rederiving}
+              title="Прилага новите правила върху вече импортираните преводи: имот по име на наемател, месец от основанието (напр. SEPTEMVRI 2026 на 31.08 → септември), наем + депозит → наем. Първо показва какво ще промени."
+              className="flex items-center gap-2 px-4 py-2 text-sm font-medium bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 rounded-lg disabled:opacity-50">
+              {rederiving ? '…' : '🔄 Преразпознай преводите'}
+            </button>
+          )}
           {view === 'month' && (
             <button
               onClick={sendReminderAll}
