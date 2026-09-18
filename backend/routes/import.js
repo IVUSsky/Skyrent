@@ -740,6 +740,49 @@ module.exports = function(db) {
     }
   });
 
+  // POST /transactions/rederive — прилага новите правила върху ВЕЧЕ импортирани
+  // редове (дубликатите при повторен импорт се прескачат, така че старите редове
+  // иначе остават със стария месец/категория). Пипа само каквото не е пипано на
+  // ръка: (1) Кт без имот → по име на наемател; (2) „наем + депозит" → наем;
+  // (3) наем с месец = месеца на превода → месецът от основанието. ?dry=1 само брои.
+  router.post('/transactions/rederive', (req, res) => {
+    if (req.user?.role === 'tenant') return res.status(403).json({ error: 'Forbidden' });
+    try {
+      const dry = String(req.query.dry || req.body?.dry || '') === '1';
+      const from = /^\d{4}-\d{2}$/.test(req.body?.from || '') ? req.body.from : null;
+      const tenants = loadTenants();
+      const rows = db.prepare(`SELECT id, дата, контрагент, основание, категория, property_id, месец FROM transactions
+                               WHERE operation='Кт' ${from ? "AND дата >= ?" : ''}`).all(...(from ? [from + '-01'] : []));
+      const changes = [];
+      const updName = db.prepare("UPDATE transactions SET property_id=?, категория=? WHERE id=?");
+      const updCat  = db.prepare("UPDATE transactions SET категория='наем' WHERE id=?");
+      const updMon  = db.prepare("UPDATE transactions SET месец=? WHERE id=?");
+      for (const t of rows) {
+        const osn = String(t.основание || '').toLowerCase();
+        const hasRent = ['наем', 'rent', 'naem'].some(k => osn.includes(k));
+        let cat = t.категория, prop = t.property_id, mon = t.месец;
+        // (2) наем + депозит в едно движение → наем
+        if (cat === 'депозит_получен' && hasRent) { cat = 'наем'; changes.push({ id: t.id, what: 'категория', from: t.категория, to: cat, контрагент: t.контрагент }); }
+        // (1) без имот → по име на наемател (само наем/приход_друг/депозит)
+        if (!prop && ['наем', 'приход_друг', 'депозит_получен'].includes(cat)) {
+          const hit = matchTenant(t.контрагент, tenants) || matchTenant(t.основание, tenants);
+          if (hit) { prop = hit.property_id; if (cat !== 'депозит_получен') cat = 'наем'; changes.push({ id: t.id, what: 'имот', to: hit.name, контрагент: t.контрагент, дата: t.дата }); }
+        }
+        // (3) месец от основанието — само ако месецът е „по подразбиране" (= месеца на превода)
+        if (cat === 'наем' && (!t.месец || t.месец === String(t.дата).slice(0, 7))) {
+          const m = rentMonthFromReason(t.основание, t.дата);
+          if (m && m !== mon) { mon = m; changes.push({ id: t.id, what: 'месец', from: t.месец, to: m, контрагент: t.контрагент, дата: t.дата }); }
+        }
+        if (!dry) {
+          if (prop !== t.property_id || cat !== t.категория) updName.run(prop, cat, t.id);
+          else if (cat !== t.категория) updCat.run(t.id);
+          if (mon !== t.месец) updMon.run(mon, t.id);
+        }
+      }
+      res.json({ ok: true, dry, checked: rows.length, changed: changes.length, changes });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
   // PATCH /transactions/:id/reclassify — директна смяна на категория/месец БЕЗ да
   // създава tx_rule (за разлика от /category). За еднократни корекции напр.
   // move-in депозит таггнат като наем, без бъдещите плащания на същия наемател
