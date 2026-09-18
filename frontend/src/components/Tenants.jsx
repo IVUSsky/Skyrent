@@ -207,7 +207,13 @@ export default function Tenants({ API }) {
   const paid = props.filter(p => p.is_paid)
   const unpaid = props.filter(p => !p.is_paid)
   const totalExpected = props.reduce((s, p) => s + (p['наем'] || 0), 0)
-  const totalPaid = props.reduce((s, p) => s + (p.paid_amount || 0), 0)
+  // Събран НАЕМ: по имот до размера на наема. Надплатеното (депозит в същия
+  // превод, предплащане) се брои отделно — иначе излизаше „Не са платили: −374 €"
+  // и 103% при 5 неплатили.
+  const totalPaid     = props.reduce((s, p) => s + (p.paid_amount || 0), 0)
+  const rentCollected = props.reduce((s, p) => s + Math.min(p.paid_amount || 0, p['наем'] || 0) + ((p.is_paid && !(p.paid_amount > 0)) ? (p['наем'] || 0) : 0), 0)
+  const overpaid      = props.reduce((s, p) => s + Math.max((p.paid_amount || 0) - (p['наем'] || 0), 0), 0)
+  const unpaidAmount  = unpaid.reduce((s, p) => s + (p['наем'] || 0), 0)
 
   const tableProps = {
     API, month,
@@ -291,21 +297,24 @@ export default function Tenants({ API }) {
           <div className="text-xs text-gray-500">{props.length} наематели</div>
         </div>
         <div className="bg-green-50 border border-green-200 rounded-xl p-4">
-          <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Платили</div>
-          <div className="text-2xl font-bold text-green-700 mt-1">{fmt(totalPaid)} €</div>
-          <div className="text-xs text-gray-500">{paid.length} наематели</div>
+          <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Събран наем</div>
+          <div className="text-2xl font-bold text-green-700 mt-1">{fmt(rentCollected)} €</div>
+          <div className="text-xs text-gray-500">
+            {paid.length} наематели
+            {overpaid > 0.5 && <span className="ml-1 text-emerald-700" title="Над наема (депозит в същия превод или предплащане) — не влиза в събрания наем">· +{fmt(overpaid)} € надплатено</span>}
+          </div>
         </div>
-        <div className="bg-red-50 border border-red-200 rounded-xl p-4">
+        <div className={`border rounded-xl p-4 ${unpaidAmount > 0 ? 'bg-red-50 border-red-200' : 'bg-green-50 border-green-200'}`}>
           <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Не са платили</div>
-          <div className="text-2xl font-bold text-red-700 mt-1">{fmt(totalExpected - totalPaid)} €</div>
+          <div className={`text-2xl font-bold mt-1 ${unpaidAmount > 0 ? 'text-red-700' : 'text-green-700'}`}>{fmt(unpaidAmount)} €</div>
           <div className="text-xs text-gray-500">{unpaid.length} наематели</div>
         </div>
         <div className="bg-gray-50 border border-gray-200 rounded-xl p-4">
           <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Събираемост</div>
           <div className="text-2xl font-bold text-gray-700 mt-1">
-            {totalExpected > 0 ? Math.round((totalPaid / totalExpected) * 100) : 0}%
+            {totalExpected > 0 ? Math.min(100, Math.round((rentCollected / totalExpected) * 100)) : 0}%
           </div>
-          <div className="text-xs text-gray-500">за {monthLabel(month)}</div>
+          <div className="text-xs text-gray-500">за {monthLabel(month)} · общо получено {fmt(totalPaid)} €</div>
         </div>
       </div>
 
