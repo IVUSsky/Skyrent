@@ -900,10 +900,16 @@ function generateAnnexPDF(annex, contract, issuer) {
     const rentDiff = newRent - oldRent;
     const rentWords = amountToWords(Math.round(newRent));
 
+    // Анекс само за наема (напр. интернетът минава на отделно плащане): крайната
+    // дата е същата → срокът НЕ се „удължава", остава непроменен.
+    const sameTerm = !!contract.end_date && String(annex.new_end_date) === String(contract.end_date);
     const articles = [
-      {
-        bg: `Чл. 1. Срокът на Договор за наем № ${cno} се удължава и страните се съгласяват имотът да бъде наеман до ${fmtDate(annex.new_end_date)}.`,
-        en: `Art. 1. The term of Lease Agreement No. ${cno} is hereby extended and the parties agree that the property shall be leased until ${fmtDate(annex.new_end_date)}.`,
+      sameTerm ? {
+        bg: `Чл. 1. Срокът на Договор за наем № ${cno} остава непроменен — до ${fmtDate(annex.new_end_date)}`,
+        en: `Art. 1. The term of Lease Agreement No. ${cno} remains unchanged — until ${fmtDate(annex.new_end_date).replace(/ г.$/, '')}.`,
+      } : {
+        bg: `Чл. 1. Срокът на Договор за наем № ${cno} се удължава и страните се съгласяват имотът да бъде наеман до ${fmtDate(annex.new_end_date)}`,
+        en: `Art. 1. The term of Lease Agreement No. ${cno} is hereby extended and the parties agree that the property shall be leased until ${fmtDate(annex.new_end_date).replace(/ г.$/, '')}.`,
       },
       {
         bg: `Чл. 2. Считано от ${fmtDate(annex.annex_date)}, месечната наемна цена се определя на ${newRent.toLocaleString('bg-BG')} ${annex.new_currency} (${rentWords} ${annex.new_currency === 'EUR' ? 'евро' : 'лева'})${rentDiff !== 0 ? `, което представлява ${rentDiff > 0 ? 'увеличение' : 'намаление'} от ${Math.abs(rentDiff).toLocaleString('bg-BG')} ${annex.new_currency} спрямо предходния наем` : ''}.`,
