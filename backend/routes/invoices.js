@@ -731,6 +731,32 @@ module.exports = function(db) {
     res.json(db.prepare(sql).all(...params));
   });
 
+  // Ръчно маркиране като платена (банков превод / в брой). Stripe плащанията
+  // се маркират от webhook-а; тях не пипаме оттук — за тях има ↩️ refund.
+  router.post('/:id/mark-paid', (req, res) => {
+    try {
+      const inv = db.prepare('SELECT * FROM rent_invoices WHERE id=?').get(req.params.id);
+      if (!inv) return res.status(404).json({ error: 'Фактурата не е намерена' });
+      if (inv.type !== 'invoice') return res.status(400).json({ error: 'Само фактура може да се маркира като платена' });
+      if (inv.paid_at) return res.status(400).json({ error: 'Фактурата вече е платена' });
+      const method = ['bank', 'cash', 'other'].includes(req.body?.payment_method) ? req.body.payment_method : 'bank';
+      const paidAt = /^\d{4}-\d{2}-\d{2}$/.test(req.body?.paid_at || '') ? req.body.paid_at + ' 12:00:00' : new Date().toISOString().slice(0, 19).replace('T', ' ');
+      db.prepare('UPDATE rent_invoices SET paid_at=?, payment_method=? WHERE id=?').run(paidAt, method, inv.id);
+      res.json({ ok: true, paid_at: paidAt, payment_method: method });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  router.post('/:id/unmark-paid', (req, res) => {
+    try {
+      const inv = db.prepare('SELECT * FROM rent_invoices WHERE id=?').get(req.params.id);
+      if (!inv) return res.status(404).json({ error: 'Фактурата не е намерена' });
+      if (!inv.paid_at) return res.status(400).json({ error: 'Фактурата не е платена' });
+      if (inv.payment_method === 'stripe') return res.status(400).json({ error: 'Stripe плащане — ползвай ↩️ refund, не ръчно' });
+      db.prepare('UPDATE rent_invoices SET paid_at=NULL, payment_method=NULL WHERE id=?').run(inv.id);
+      res.json({ ok: true });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
   // Generate invoice
   router.post('/generate', async (req, res) => {
     try {
