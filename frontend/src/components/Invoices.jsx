@@ -114,10 +114,12 @@ export default function Invoices({ API, role }) {
   const invoiceProps = properties.filter(p => p['статус'] === '✅' && p['наемател'])
   const enabledProps = invoiceProps.filter(p => p.invoice_enabled)
 
-  // Check which props already have invoice for current month
+  // Check which props already have RENT invoice for current month. Само наем —
+  // интернет/депозит фактурите за същия имот и месец не са „фактура за наема"
+  // (иначе имот с платен интернет през Stripe изчезва от „Без фактура").
   const invoiceMap = {}
   invoices.forEach(inv => {
-    if (inv.type === 'invoice') invoiceMap[`${inv.property_id}_${inv.month}`] = inv
+    if (inv.type === 'invoice' && (!inv.product || inv.product === 'наем')) invoiceMap[`${inv.property_id}_${inv.month}`] = inv
   })
 
   const toggleInvoiceEnabled = (propId, enabled) => {
