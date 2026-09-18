@@ -43,3 +43,24 @@ describe('matchTenant — платецът от банката срещу нае
     expect(matchTenant('IVAN PETROV', two)).toBeNull();
   });
 });
+
+describe('толерантност към транслитерация', () => {
+  const T2 = [
+    { property_id: 20, name: 'Гьоркем Йълдърън' },
+    { property_id: 21, name: 'ИВАНОВА ЕМИЛИЯ ВАСИЛЕВА' },
+    { property_id: 22, name: 'Росен Чавдаров Козовски' },
+    { property_id: 23, name: 'Иван Петров' },
+    { property_id: 24, name: 'Иван Георгиев' },
+  ];
+  it('една буква разлика в дълга дума (Йълдърън ↔ ЙЪЛДЪРЪМ)', () => {
+    expect(matchTenant('ГЬОРКЕМ ЙЪЛДЪРЪМ', T2)?.property_id).toBe(20);
+  });
+  it('латиница без бащино: Emilia Ivanova, Rosen Kozovski', () => {
+    expect(matchTenant('Emilia Ivanova', T2)?.property_id).toBe(21);
+    expect(matchTenant('Rosen Kozovski', T2)?.property_id).toBe(22);
+  });
+  it('рядко първо име само по себе си стига, често — не', () => {
+    expect(matchTenant('GYORKEM', T2)?.property_id).toBe(20);
+    expect(matchTenant('IVAN', T2)).toBeNull();
+  });
+});
