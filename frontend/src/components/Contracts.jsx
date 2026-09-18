@@ -1601,6 +1601,14 @@ export default function Contracts({ API }) {
                     <input type="date" value={annexForm.new_end_date}
                       onChange={e => setAnnexForm(f => ({ ...f, new_end_date: e.target.value }))}
                       className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500" />
+                    {annexModal.end_date && (
+                      <div className="mt-1 text-[11px]">
+                        {annexForm.new_end_date === annexModal.end_date
+                          ? <span className="text-gray-500">Срокът остава непроменен (само наемът се променя)</span>
+                          : <button type="button" onClick={() => setAnnexForm(f => ({ ...f, new_end_date: annexModal.end_date }))}
+                              className="text-purple-700 hover:underline">Без промяна на срока (до {fmtDate(annexModal.end_date)})</button>}
+                      </div>
+                    )}
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-gray-600 mb-1">Нова наемна цена</label>
