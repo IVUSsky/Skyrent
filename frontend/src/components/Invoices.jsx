@@ -21,6 +21,18 @@ export default function Invoices({ API, role }) {
   // Filters & search
   const [filterMonth, setFilterMonth] = useState(defaultMonth)
   const [filterType, setFilterType]   = useState('')        // '' | 'invoice' | 'credit_note'
+  const [filterPaid, setFilterPaid]   = useState('')        // '' | 'paid' | 'unpaid' (клиентски филтър)
+  const PAY_LABEL = { stripe: 'карта (Stripe)', bank: 'банка', cash: 'в брой', other: 'друго' }
+  const markPaid = (inv, method) => {
+    apiFetch(`${API}/api/invoices/${inv.id}/mark-paid`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ payment_method: method }) })
+      .then(r => r.json()).then(d => { if (d.ok) { showToast(`№ ${inv.invoice_number} — платена (${PAY_LABEL[method]})`); load() } else showToast(d.error || 'Грешка', 'error') })
+      .catch(e => showToast(e.message, 'error'))
+  }
+  const unmarkPaid = (inv) => {
+    apiFetch(`${API}/api/invoices/${inv.id}/unmark-paid`, { method: 'POST' })
+      .then(r => r.json()).then(d => { if (d.ok) { showToast(`№ ${inv.invoice_number} — върната в неплатени`); load() } else showToast(d.error || 'Грешка', 'error') })
+      .catch(e => showToast(e.message, 'error'))
+  }
   const [search, setSearch]           = useState('')
   const [dateFrom, setDateFrom]       = useState('')
   const [dateTo, setDateTo]           = useState('')
@@ -263,6 +275,9 @@ export default function Invoices({ API, role }) {
   const sumTotal  = totalInvoices.reduce((s, i) => s + (i.total || 0), 0)
   const sumCN     = totalCreditNotes.reduce((s, i) => s + (i.total || 0), 0)
   const sumNet    = sumTotal - sumCN
+  const unpaidInvoices = totalInvoices.filter(i => !i.paid_at)
+  const sumUnpaid = unpaidInvoices.reduce((s, i) => s + (i.total || 0), 0)
+  const shownInvoices = invoices.filter(i => filterPaid === '' ? true : filterPaid === 'paid' ? (i.type !== 'invoice' || i.paid_at) : (i.type === 'invoice' && !i.paid_at))
 
   return (
     <div className="fin-surface">
@@ -383,6 +398,14 @@ export default function Invoices({ API, role }) {
               </button>
             ))}
           </div>
+          <div className="flex gap-1">
+            {[['', 'Платени и не'], ['paid', '✓ Платени'], ['unpaid', '⏳ Неплатени']].map(([val, label]) => (
+              <button key={val} onClick={() => setFilterPaid(val)}
+                className={`px-3 py-1.5 text-xs rounded-lg border font-medium ${filterPaid === val ? 'bg-green-600 text-white border-green-600' : 'bg-white text-gray-600 border-gray-300'}`}>
+                {label}
+              </button>
+            ))}
+          </div>
 
           {/* Search */}
           <div className="flex items-center gap-2 flex-1 min-w-[180px]">
@@ -402,7 +425,7 @@ export default function Invoices({ API, role }) {
       </div>
 
       {/* Summary cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-5">
         <div className="bg-blue-50 border border-blue-200 rounded-xl p-3">
           <div className="text-xs text-gray-500 font-semibold uppercase">Фактури</div>
           <div className="text-xl font-bold text-blue-700">{fmtMoney(sumTotal)} €</div>
@@ -416,6 +439,11 @@ export default function Invoices({ API, role }) {
         <div className="bg-green-50 border border-green-200 rounded-xl p-3">
           <div className="text-xs text-gray-500 font-semibold uppercase">Нетно</div>
           <div className="text-xl font-bold text-green-700">{fmtMoney(sumNet)} €</div>
+        </div>
+        <div className={`border rounded-xl p-3 ${unpaidInvoices.length ? 'bg-amber-50 border-amber-200' : 'bg-green-50 border-green-200'}`}>
+          <div className="text-xs text-gray-500 font-semibold uppercase">Неплатени</div>
+          <div className={`text-xl font-bold ${unpaidInvoices.length ? 'text-amber-700' : 'text-green-700'}`}>{fmtMoney(sumUnpaid)} €</div>
+          <div className="text-xs text-gray-400">{unpaidInvoices.length} бр.</div>
         </div>
         <div className="bg-gray-50 border border-gray-200 rounded-xl p-3">
           <div className="text-xs text-gray-500 font-semibold uppercase">ДДС</div>
@@ -474,6 +502,7 @@ export default function Invoices({ API, role }) {
                     ['total', 'Данъчна осн.'],
                     ['total', 'ДДС'],
                     ['total', 'Общо'],
+                    ['', 'Платена'],
                     ['', 'Изпратена'],
                     ['', 'Действия'],
                   ].map(([col, label], idx) => (
@@ -486,7 +515,7 @@ export default function Invoices({ API, role }) {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {invoices.map((inv, i) => {
+                {shownInvoices.map((inv, i) => {
                   const prop = properties.find(p => p.id === inv.property_id)
                   const isCN = inv.type === 'credit_note'
                   const sign = isCN ? -1 : 1
@@ -527,6 +556,13 @@ export default function Invoices({ API, role }) {
                         </span>
                       </td>
                       <td className="px-3 py-2 whitespace-nowrap text-xs">
+                        {isCN ? <span className="text-gray-300">—</span>
+                          : inv.paid_at
+                            ? <span className="text-green-700" title={PAY_LABEL[inv.payment_method] || inv.payment_method || ''}>✓ {fmtDate(inv.paid_at)}<span className="block text-[10px] text-gray-500">{PAY_LABEL[inv.payment_method] || inv.payment_method || ''}</span></span>
+                            : <span className="text-amber-700 font-medium">⏳ не</span>
+                        }
+                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap text-xs">
                         {inv.sent_at
                           ? <span className="text-green-600">✅ {fmtDate(inv.sent_at)}</span>
                           : <span className="text-gray-300">—</span>
@@ -558,6 +594,19 @@ export default function Invoices({ API, role }) {
                             <button onClick={() => { setCnModal(inv); setCnForm({ reason: '', notes: '' }) }}
                               className="px-2 py-1 text-xs bg-purple-50 border border-purple-200 text-purple-700 hover:bg-purple-100 rounded" title="Издай кредитно известие">
                               КИ
+                            </button>
+                          )}
+                          {!isCN && !inv.paid_at && role !== 'broker' && (
+                            <button onClick={() => markPaid(inv, 'bank')}
+                              className="px-2 py-1 text-xs bg-green-50 border border-green-200 text-green-700 hover:bg-green-100 rounded" title="Маркирай като платена по банков път (в брой — с десен бутон)"
+                              onContextMenu={e => { e.preventDefault(); markPaid(inv, 'cash') }}>
+                              ✓ Платена
+                            </button>
+                          )}
+                          {!isCN && inv.paid_at && inv.payment_method !== 'stripe' && role !== 'broker' && (
+                            <button onClick={() => unmarkPaid(inv)}
+                              className="px-2 py-1 text-xs bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 rounded" title="Върни в неплатени (ръчно маркирана)">
+                              ✗
                             </button>
                           )}
                           {!isCN && inv.paid_at && inv.payment_method === 'stripe' && role !== 'broker' && (
