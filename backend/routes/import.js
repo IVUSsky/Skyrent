@@ -1,5 +1,6 @@
 const express = require('express');
 const { matchTenant } = require('../lib/tenantNameMatch');
+const { rentMonthFromReason } = require('../lib/rentMonth');
 const { orgContext } = require('../db/db');
 const multer = require('multer');
 const XLSX = require('xlsx');
@@ -48,7 +49,10 @@ module.exports = function(db) {
     let property_id = property_id_from_map;
     let scope = defaultScope;
 
-    const isDeposit = ['депозит','deposit','гаранция','garantion'].some(kw => kontLower.includes(kw) || osnLower.includes(kw));
+    const hasRentWord = ['наем','rent','naem'].some(kw => osnLower.includes(kw));
+    // „НАЕМ + ДЕПОЗИТ" в едно движение → наем (месецът да е платен); депозитът
+    // се следи през фактурата за депозит, не през категорията на превода.
+    const isDeposit = ['депозит','deposit','гаранция','garantion'].some(kw => kontLower.includes(kw) || osnLower.includes(kw)) && !hasRentWord;
     // Personal income keywords (Кт): заплата(и), договор за управление, ДУ, salary
     const isSalary  = ['заплата','заплати','salary','net salary','net pay'].some(kw => kontLower.includes(kw) || osnLower.includes(kw));
     const isMgmtFee = ['договор за управление','договор управление','управителски','дог. упр.','ду възнагр'].some(kw => osnLower.includes(kw) || kontLower.includes(kw));
@@ -85,7 +89,7 @@ module.exports = function(db) {
         категория = 'лихва_болгар';
         scope = 'personal';
       } else {
-        const hasRentKw = ['наем','rent'].some(kw => osnLower.includes(kw) || kontLower.includes(kw));
+        const hasRentKw = ['наем','rent','naem'].some(kw => osnLower.includes(kw) || kontLower.includes(kw));
         if (hasRentKw || property_id !== null) {
           категория = 'наем';
         } else if (kontLower.includes('иво лазаров') || osnLower.includes('заем')) {
@@ -195,7 +199,9 @@ module.exports = function(db) {
     // 2026 плащанията са СМЕСЕНИ (някои в лева, някои в евро) и колоната е вярна.
     // Fallback само ако липсва: 2026+ дати → EUR, иначе BGN.
     const currency = rawTx.currency || (дата >= '2026-01-01' ? 'EUR' : 'BGN');
-    const месец    = rawTx.месец || дата.slice(0, 7);
+    // Наем: месецът ЗА който се плаща, ако основанието го казва („SEPTEMVRI 2026"
+    // на 31.08 → 2026-09); иначе месецът на превода.
+    const месец    = (категория === 'наем' && rentMonthFromReason(основание, дата)) || rawTx.месец || дата.slice(0, 7);
 
     return {
       дата, контрагент, контрагент_iban, контрагент_bic, основание,
