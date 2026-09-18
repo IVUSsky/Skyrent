@@ -227,15 +227,36 @@ module.exports = function(db) {
     }
     if (headerRowIdx === -1) throw new Error('Could not find header row with "Дата и час"');
 
+    // Колоните по ИМЕ от header-а, не по фиксирана позиция. ProBanking има два
+    // експорта: „по сметка" (Дата и час е кол. 0) и „Движения по сметки" — всички
+    // сметки (пред датата има „Сметка - име" и „IBAN"). Вторият досега даваше
+    // 0 транзакции: датата се четеше от кол. 0 (празна). Резервно — старите индекси.
+    const hdr = rawRows[headerRowIdx].map(c => String(c || '').replace(/\s+/g, ' ').trim().toLowerCase());
+    const findCol = (pred, from = 0) => { for (let i = from; i < hdr.length; i++) if (pred(hdr[i])) return i; return -1; };
+    const cDate = findCol(h => h.includes('дата и час'));
+    const cCur  = findCol(h => h === 'валута', cDate + 1);
+    const cAmt  = findCol(h => h === 'сума', cDate + 1);               // първата „Сума" = във валутата на сметката
+    const cOp   = findCol(h => h.startsWith('операция'));
+    const cBic  = findCol(h => h === 'swift' || h === 'bic');
+    const cName = findCol(h => h.includes('име на контрагента') || h === 'контрагент');
+    const cIban = findCol(h => h.includes('сметка на контрагента') || h === 'iban на контрагента');
+    const cOsn  = findCol(h => h.startsWith('основание'));
+    const cAcct = findCol(h => h === 'iban');                           // IBAN на сметката (само при „всички сметки")
+    const C = {
+      date: cDate >= 0 ? cDate : 0, cur: cCur, amt: cAmt >= 0 ? cAmt : 4, op: cOp >= 0 ? cOp : 7,
+      bic: cBic >= 0 ? cBic : 9, name: cName >= 0 ? cName : 10, iban: cIban >= 0 ? cIban : 11, osn: cOsn >= 0 ? cOsn : 12,
+    };
+
     const transactions   = [];
     const unknownTenants = [];
     const unknownSet     = new Set();
     const ctx = { tenantMap, rules, unknownSet, unknownTenants, defaultScope, tenants };
 
     for (const row of rawRows.slice(headerRowIdx + 1)) {
-      if (!row[0] && !row[4]) continue;
-      const dateRaw = String(row[0] || '').trim();
+      if (!row[C.date] && !row[C.amt]) continue;
+      const dateRaw = String(row[C.date] || '').trim();
       if (!dateRaw) continue;
+      if (cAcct >= 0 && !accountIban && row[cAcct]) accountIban = String(row[cAcct]).replace(/\s/g, '').toUpperCase();
 
       let дата = '';
       const dm = dateRaw.match(/(\d{2})\.(\d{2})\.(\d{4})/);
@@ -249,7 +270,7 @@ module.exports = function(db) {
       }
       if (!дата) continue;
 
-      const суmaRaw = row[4];
+      const суmaRaw = row[C.amt];
       const сума = typeof суmaRaw === 'number'
         ? суmaRaw
         : parseFloat(String(суmaRaw || '').replace(/\s/g, '').replace(',', '.')) || 0;
@@ -258,12 +279,13 @@ module.exports = function(db) {
         дата,
         // Нормализирани (не само trim) — виж бележката в probankingPdfParser.js:
         // вариращи вътрешни интервали чупеха auto-learn съвпадението.
-        контрагент:      String(row[10] || '').replace(/\s+/g, ' ').trim(),
-        контрагент_iban: String(row[11] || '').replace(/\s/g,'').toUpperCase(),
-        контрагент_bic:  String(row[9]  || '').trim().toUpperCase(),
-        основание:       String(row[12] || '').replace(/\s+/g, ' ').trim(),
+        контрагент:      String(row[C.name] || '').replace(/\s+/g, ' ').trim(),
+        контрагент_iban: String(row[C.iban] || '').replace(/\s/g,'').toUpperCase(),
+        контрагент_bic:  String(row[C.bic]  || '').trim().toUpperCase(),
+        основание:       String(row[C.osn]  || '').replace(/\s+/g, ' ').trim(),
         сума,
-        operation:       String(row[7]  || '').trim(),
+        operation:       String(row[C.op]   || '').trim(),
+        currency:        C.cur >= 0 && row[C.cur] ? String(row[C.cur]).trim().toUpperCase() : undefined,
       }, ctx);
       if (tx) transactions.push(tx);
     }
