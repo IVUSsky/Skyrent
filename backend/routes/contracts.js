@@ -11,6 +11,7 @@ const { optimizeMany, isDisplayable } = require('../lib/imageOptimize');
 const { imagesOnly, safeExt } = require('../lib/uploadFilter');
 const { getIssuer, issuerComplete } = require('../lib/branding');
 const { kontrolisiContractsOn, sendContractToKontrolisi } = require('../lib/kontrolisiContract');
+const { reinstateContract } = require('../lib/contractReinstate');
 
 const FONT_REGULAR = path.join(__dirname, '../fonts/arial.ttf');
 const FONT_BOLD    = path.join(__dirname, '../fonts/arialbd.ttf');
@@ -1678,6 +1679,39 @@ module.exports = function(db) {
         .run(end_date || new Date().toISOString().slice(0,10), contract.property_id);
     }
     res.json({ ok: true });
+  });
+
+  // Възстановяване на прекратен договор — обратното на ⛔.
+  // Пазачът е същият като при активирането: имотът не може да има два действащи
+  // договора от един вид. Крайната дата се пита наново, защото прекратяването я е
+  // презаписало с деня, в който е натиснат ⛔.
+  router.post('/:id/reinstate', (req, res) => {
+    try {
+      const contract = db.prepare('SELECT * FROM contracts WHERE id=?').get(req.params.id);
+      if (!contract) return res.status(404).json({ error: 'Not found' });
+      if (contract.status !== 'terminated') {
+        return res.status(400).json({ error: 'Само прекратен договор може да се възстанови' });
+      }
+
+      const kind = contractKind(contract.kind);
+      if (contract.property_id) {
+        const other = db.prepare(
+          "SELECT id, contract_number, tenant_name, end_date FROM contracts WHERE property_id=? AND status='active' AND id<>? AND COALESCE(kind,'наем')=?"
+        ).get(contract.property_id, contract.id, kind);
+        if (other) {
+          return res.status(409).json({
+            error: `Имотът вече има действащ договор ${other.contract_number || '#' + other.id}`
+                 + (other.tenant_name ? ` с ${other.tenant_name}` : '')
+                 + (other.end_date ? ` (до ${other.end_date})` : '')
+                 + '. Прекрати го, преди да възстановиш този.',
+            conflict_contract_id: other.id,
+          });
+        }
+      }
+
+      const result = reinstateContract(db, contract, { endDate: req.body?.end_date });
+      res.json({ ok: true, ...result, contract: db.prepare('SELECT * FROM contracts WHERE id=?').get(contract.id) });
+    } catch (err) { res.status(500).json({ error: err.message }); }
   });
 
   // Send by email
