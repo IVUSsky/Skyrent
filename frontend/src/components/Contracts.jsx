@@ -547,6 +547,10 @@ export default function Contracts({ API }) {
       .finally(() => setEditSaving(false))
   }
   const [termDate, setTermDate] = useState(new Date().toISOString().slice(0,10))
+  // ↩️ Възстановяване на прекратен договор — прекратяването е презаписало
+  // крайната дата с деня на натискане, затова тя се пита наново.
+  const [reinstateModal, setReinstateModal] = useState(null)
+  const [reinstateDate, setReinstateDate] = useState('')
   const [annexModal, setAnnexModal] = useState(null)
   const [annexForm, setAnnexForm] = useState({ annex_date: '', new_end_date: '', new_monthly_rent: '', new_currency: 'EUR', notes: '' })
   const [annexes, setAnnexes] = useState([])
@@ -743,6 +747,16 @@ export default function Contracts({ API }) {
     })
       .then(r => r.json())
       .then(d => { d.ok ? (setTermModal(null), showToast('Договорът е прекратен'), load()) : showToast(d.error, 'error') })
+  }
+
+  const reinstate = () => {
+    apiFetch(`${API}/api/contracts/${reinstateModal.id}/reinstate`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ end_date: reinstateDate }),
+    })
+      .then(r => r.json())
+      .then(d => { d.ok ? (setReinstateModal(null), showToast('Договорът е действащ отново'), load()) : showToast(d.error, 'error') })
+      .catch(e => showToast(e.message, 'error'))
   }
 
   const deleteContract = (c) => {
@@ -1120,6 +1134,12 @@ export default function Contracts({ API }) {
                               <button onClick={() => { setTermModal(c); setTermDate(new Date().toISOString().slice(0,10)) }}
                                 className="px-2 py-1 text-xs bg-red-50 border border-red-200 text-red-600 hover:bg-red-100 rounded" title="Прекрати">
                                 ⛔
+                              </button>
+                            )}
+                            {c.status === 'terminated' && (
+                              <button onClick={() => { setReinstateModal(c); setReinstateDate(c.end_date || '') }}
+                                className="px-2 py-1 text-xs bg-emerald-50 border border-emerald-300 text-emerald-700 hover:bg-emerald-100 rounded" title="Възстанови (върни като действащ)">
+                                ↩️
                               </button>
                             )}
                             {c.status === 'active' && c.tenant_email && (
@@ -1909,6 +1929,23 @@ export default function Contracts({ API }) {
             <div className="flex justify-end gap-2">
               <button onClick={() => setTermModal(null)} className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg">Отказ</button>
               <button onClick={terminateContract} className="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg">Прекрати</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {reinstateModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6">
+            <h3 className="font-bold text-gray-900 mb-3">Възстановяване на договор</h3>
+            <p className="text-sm text-gray-600 mb-4">Договор № {reinstateModal.contract_number || '#' + reinstateModal.id} с {reinstateModal.tenant_name}</p>
+            <label className="block text-xs font-medium text-gray-700 mb-1">Краен срок на договора</label>
+            <input type="date" value={reinstateDate} onChange={e => setReinstateDate(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-2 focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+            <p className="text-[11px] text-gray-500 mb-4">Прекратяването е записало тук деня, в който е спрян договорът. Върни истинския краен срок или остави празно за безсрочен.</p>
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setReinstateModal(null)} className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg">Отказ</button>
+              <button onClick={reinstate} className="px-4 py-2 text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg">Възстанови</button>
             </div>
           </div>
         </div>
