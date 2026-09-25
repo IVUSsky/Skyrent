@@ -8,6 +8,7 @@ const { nextInvoiceNumber, peekNextInvoiceNumber, counterKey } = require('../lib
 const { parseRecipients } = require('../lib/email');
 const { getIssuer, issuerComplete, brandEmailHtml } = require('../lib/branding');
 const { reconcileInvoices } = require('../lib/invoiceReconcile');
+const { amountToWordsBG } = require('../lib/bgWords');
 
 const FONT_REGULAR = path.join(__dirname, '../fonts/arial.ttf');
 const FONT_BOLD    = path.join(__dirname, '../fonts/arialbd.ttf');
@@ -64,40 +65,6 @@ function fmtDate(d) {
 const EUR_BGN_RATE = 1.95583;
 const eurToBgn = (eur) => Math.round(Number(eur || 0) * EUR_BGN_RATE * 100) / 100;
 
-// Сума словом на български (за фактурите — законово изискване).
-function bgThreeDigits(num, gender) {
-  const ones = {
-    n: ['', 'едно', 'две', 'три', 'четири', 'пет', 'шест', 'седем', 'осем', 'девет'],
-    m: ['', 'един', 'два', 'три', 'четири', 'пет', 'шест', 'седем', 'осем', 'девет'],
-    f: ['', 'една', 'две', 'три', 'четири', 'пет', 'шест', 'седем', 'осем', 'девет'],
-  }[gender] || [];
-  const teens = ['десет', 'единадесет', 'дванадесет', 'тринадесет', 'четиринадесет', 'петнадесет', 'шестнадесет', 'седемнадесет', 'осемнадесет', 'деветнадесет'];
-  const tens = ['', '', 'двадесет', 'тридесет', 'четиридесет', 'петдесет', 'шестдесет', 'седемдесет', 'осемдесет', 'деветдесет'];
-  const hund = ['', 'сто', 'двеста', 'триста', 'четиристотин', 'петстотин', 'шестстотин', 'седемстотин', 'осемстотин', 'деветстотин'];
-  const h = Math.floor(num / 100), rem = num % 100, t = Math.floor(rem / 10), u = rem % 10;
-  let tp = [];
-  if (rem >= 10 && rem <= 19) tp.push(teens[rem - 10]);
-  else { if (t) tp.push(tens[t]); if (u) tp.push(ones[u]); }
-  const tail = tp.length === 2 ? tp[0] + ' и ' + tp[1] : (tp[0] || '');
-  if (h && tail) return tp.length === 2 ? hund[h] + ' ' + tail : hund[h] + ' и ' + tail;
-  if (h) return hund[h];
-  return tail;
-}
-function bgIntToWords(n) {
-  n = Math.floor(Math.abs(n));
-  if (n === 0) return 'нула';
-  const mil = Math.floor(n / 1000000), th = Math.floor((n % 1000000) / 1000), rest = n % 1000;
-  const g = [];
-  if (mil) g.push(bgThreeDigits(mil, 'm') + ' ' + (mil === 1 ? 'милион' : 'милиона'));
-  if (th) g.push(th === 1 ? 'хиляда' : bgThreeDigits(th, 'f') + ' хиляди');
-  if (rest) g.push(bgThreeDigits(rest, 'n'));
-  let res = g.join(' ');
-  if (g.length > 1 && rest > 0 && rest < 100) {
-    const last = g[g.length - 1];
-    if (!last.includes(' и ')) res = g.slice(0, -1).join(' ') + ' и ' + last;
-  }
-  return res.replace(/\s+/g, ' ').trim();
-}
 // Данните на получателя по ред на достоверност:
 //   1. `properties.invoice_recipient` — изричната настройка, ако някой я е
 //      попълнил (напр. фактура на фирма, различна от наемателя);
@@ -137,11 +104,6 @@ function idLabel(value, mol) {
   return 'ЕГН/ЕИК';
 }
 
-// напр. 25.98 → "двадесет и пет евро и 98 евроцента"
-function amountToWordsBG(amount) {
-  const x = Math.round(Math.abs(Number(amount || 0)) * 100);
-  return `${bgIntToWords(Math.floor(x / 100))} евро и ${String(x % 100).padStart(2, '0')} евроцента`;
-}
 
 // Invoice number: 10-digit sequential per year, e.g. 2026000001
 function getSmtp(db) {

@@ -11,6 +11,7 @@ const { optimizeMany, isDisplayable } = require('../lib/imageOptimize');
 const { imagesOnly, safeExt } = require('../lib/uploadFilter');
 const { getIssuer, issuerComplete } = require('../lib/branding');
 const { kontrolisiContractsOn, sendContractToKontrolisi } = require('../lib/kontrolisiContract');
+const { amountToWords } = require('../lib/bgWords');
 
 const FONT_REGULAR = path.join(__dirname, '../fonts/arial.ttf');
 const FONT_BOLD    = path.join(__dirname, '../fonts/arialbd.ttf');
@@ -204,24 +205,6 @@ function buildFields(contract, issuer) {
     'СЪСТОЯНИЕ_ИМОТА':        contract.property_state || 'След направен ремонт с напълно изправни и функциониращи уреди',
     'ИНВЕНТАР':               contract.inventory || '',
   };
-}
-
-// Simple number-to-words for BGN/EUR amounts (basic)
-function amountToWords(n) {
-  if (!n) return 'нула';
-  const num = Math.round(Number(n));
-  const ones = ['','един','два','три','четири','пет','шест','седем','осем','девет',
-                 'десет','единадесет','дванадесет','тринадесет','четиринадесет','петнадесет',
-                 'шестнадесет','седемнадесет','осемнадесет','деветнадесет'];
-  const tens = ['','','двадесет','тридесет','четиридесет','петдесет','шестдесет','седемдесет','осемдесет','деветдесет'];
-  if (num < 20) return ones[num];
-  if (num < 100) return tens[Math.floor(num/10)] + (num%10 ? ' и ' + ones[num%10] : '');
-  if (num < 1000) {
-    const h = Math.floor(num/100);
-    const rest = num % 100;
-    return (h === 1 ? 'сто' : h === 2 ? 'двеста' : ones[h] + 'ста') + (rest ? ' ' + amountToWords(rest) : '');
-  }
-  return String(num);
 }
 
 // Generate PDF from template text
