@@ -10,6 +10,7 @@ const { parseRecipients } = require('../lib/email');
 const { optimizeMany, isDisplayable } = require('../lib/imageOptimize');
 const { imagesOnly, safeExt } = require('../lib/uploadFilter');
 const { getIssuer, issuerComplete } = require('../lib/branding');
+const { normalizeIdCard } = require('../lib/idCard');
 const { kontrolisiContractsOn, sendContractToKontrolisi } = require('../lib/kontrolisiContract');
 const { reinstateContract } = require('../lib/contractReinstate');
 
@@ -154,7 +155,12 @@ function buildFields(contract, issuer) {
     'НАЕМАТЕЛ_АДРЕС':         contract.tenant_address   || '',
     'НАЕМАТЕЛ_ЕГН':           contract.tenant_egn       || '',
     'НАЕМАТЕЛ_МОЛ':           contract.tenant_mol       || '',
-    'НАЕМАТЕЛ_ДОКУМЕНТ':      contract.tenant_doc       || '',
+    // В бланките стои „л.к. № {{НАЕМАТЕЛ_ДОКУМЕНТ}}" → тук трябва НОМЕРЪТ.
+    // Заварените договори нямат tenant_doc_number → fallback към стария tenant_doc.
+    'НАЕМАТЕЛ_ДОКУМЕНТ':      contract.tenant_doc_number || contract.tenant_doc || '',
+    'НАЕМАТЕЛ_ДОКУМЕНТ_НОМЕР': contract.tenant_doc_number || '',
+    'НАЕМАТЕЛ_ДОКУМЕНТ_ВИД':  contract.tenant_doc       || '',
+    'НАЕМАТЕЛ_ДОКУМЕНТ_ВАЛИДЕН': contract.tenant_doc_valid_until || '',
     'НАЕМАТЕЛ_ДОКУМЕНТ_ДАТА': contract.tenant_doc_date  || '',
     'НАЕМАТЕЛ_ДОКУМЕНТ_СТРАНА': contract.tenant_doc_country || '',
     'НАЕМАТЕЛ_РОДЕН':         contract.tenant_dob       || '',
@@ -1024,7 +1030,8 @@ module.exports = function(db) {
 {
   "tenant_name": "Пълно име ТОЧНО както е изписано на документа",
   "egn": "ЕГН/ЛНЧ или личен номер от документа — точно както е изписан",
-  "id_number": "Номер на документа",
+  "id_number": "Номер на документа — САМО номерът, без дати",
+  "mrz": "Машинно четимата зона (редовете с <<< на гърба) — препиши ги дословно, ред по ред; ако не се вижда → \"\"",
   "id_issued_by": "Издаден от (напр. МВР / issuing authority)",
   "id_issued_date": "Дата на издаване във формат ГГГГ-ММ-ДД",
   "id_valid_until": "Валиден до във формат ГГГГ-ММ-ДД",
@@ -1036,6 +1043,10 @@ module.exports = function(db) {
 - При българска лична карта ползвай кирилския запис на имената (както е отпечатан на картата).
 - При чуждестранен документ запази оригиналния запис (обикновено латиница) и НЕ добавяй българска версия.
 - ЕГН на българска карта е ТОЧНО 10 цифри — препиши цифра по цифра, провери внимателно (чести грешки: 0/O, 1/I, 5/6, 8/3)
+- НОМЕРЪТ НА ДОКУМЕНТА при българска лична карта е ТОЧНО 9 цифри и стои на ЛИЦЕВАТА страна, ДОЛУ ВДЯСНО, до надписа „№" (на гърба се повтаря в MRZ, на първия ред след IDBGR). Той НЕ Е дата и НЕ Е ЕГН.
+- НЕ слагай дата в "id_number". Редовете „Дата на издаване / Date of issue" и „Валидна до / Date of expiry" отиват съответно в "id_issued_date" и "id_valid_until" — никога в "id_number".
+- Ако номерът не се чете ясно → "id_number": "" (по-добре празно, отколкото сгрешено).
+- Ако гърбът е приложен, ПРЕПИШИ MRZ дословно (всеки ред отделно, със знаците <). Тя е най-надеждният източник за номера, ЕГН и датите.
 - Ако дадено поле липсва или е нечетимо → празен низ ""
 - Не измисляй данни` });
 
@@ -1046,25 +1057,26 @@ module.exports = function(db) {
       });
       const raw = response.content.map(c => c.text || '').join('').trim();
       const s = raw.indexOf('{'), e = raw.lastIndexOf('}');
-      let data;
-      try { data = JSON.parse(raw.slice(s, e + 1)); }
+      let parsed;
+      try { parsed = JSON.parse(raw.slice(s, e + 1)); }
       catch (_) { return res.status(422).json({ error: 'Не успях да разчета данните — опитай с по-ясна/добре осветена снимка' }); }
+      // Проверка и подреждане: номер, който е дата, отпада; MRZ (с контролни
+      // цифри) е с предимство; ЕГН минава през контролна сума. Виж lib/idCard.js.
+      const norm = normalizeIdCard(parsed);
+      const data = norm.data;
 
       // Авто-запис в указателя — данните да не се губят, ако договорът не бъде довършен.
       // Пази ВСИЧКО от документа: номер, издаден от, дата, валидност, рождена дата, адрес.
-      const docBits = [
-        data.id_number      ? 'документ № ' + data.id_number       : '',
-        data.id_issued_by   ? 'изд. от ' + data.id_issued_by       : '',
-        data.id_valid_until ? 'валиден до ' + data.id_valid_until  : '',
-      ].filter(Boolean).join(', ');
       upsertParty({
         name: data.tenant_name, egn: data.egn, address: data.permanent_address,
-        doc_type: docBits, doc_date: data.id_issued_date, dob: data.birth_date,
+        doc_type: 'лична карта', doc_number: data.id_number, doc_date: data.id_issued_date, dob: data.birth_date,
       }, 'авто от сканиран документ');
 
       res.json({
         ok: true,
         data,
+        warnings: norm.warnings,
+        mrz: norm.mrz,
         id_front_path: path.basename(front.path),
         id_back_path: back ? path.basename(back.path) : null,
       });
@@ -1134,7 +1146,7 @@ module.exports = function(db) {
     res.json(db.prepare('SELECT * FROM tenant_directory ORDER BY name COLLATE NOCASE').all());
   });
 
-  const PARTY_FIELDS = ['name', 'egn', 'address', 'phone', 'email', 'doc_type', 'doc_date', 'doc_country', 'dob', 'notes'];
+  const PARTY_FIELDS = ['name', 'egn', 'address', 'phone', 'email', 'doc_type', 'doc_number', 'doc_date', 'doc_country', 'dob', 'notes'];
 
   // Авто-запис в указателя: upsert по ЕГН (ако има), иначе по име. Попълва
   // само празните полета на съществуващ запис — не изтрива въведени данни.
@@ -1148,16 +1160,17 @@ module.exports = function(db) {
         db.prepare(`UPDATE tenant_directory SET
             egn=COALESCE(NULLIF(egn,''),NULLIF(?,'')), address=COALESCE(NULLIF(address,''),NULLIF(?,'')),
             phone=COALESCE(NULLIF(phone,''),NULLIF(?,'')), email=COALESCE(NULLIF(email,''),NULLIF(?,'')),
-            doc_type=COALESCE(NULLIF(doc_type,''),NULLIF(?,'')), doc_date=COALESCE(NULLIF(doc_date,''),NULLIF(?,'')),
+            doc_type=COALESCE(NULLIF(doc_type,''),NULLIF(?,'')), doc_number=COALESCE(NULLIF(doc_number,''),NULLIF(?,'')),
+            doc_date=COALESCE(NULLIF(doc_date,''),NULLIF(?,'')),
             doc_country=COALESCE(NULLIF(doc_country,''),NULLIF(?,'')), dob=COALESCE(NULLIF(dob,''),NULLIF(?,'')),
             updated_at=CURRENT_TIMESTAMP WHERE id=?`)
           .run(t.egn || '', t.address || '', t.phone || '', t.email || '',
-               t.doc_type || '', t.doc_date || '', t.doc_country || '', t.dob || '', ex.id);
+               t.doc_type || '', t.doc_number || '', t.doc_date || '', t.doc_country || '', t.dob || '', ex.id);
       } else {
-        db.prepare(`INSERT INTO tenant_directory (name, egn, address, phone, email, doc_type, doc_date, doc_country, dob, notes)
-            VALUES (?,?,?,?,?,?,?,?,?,?)`)
+        db.prepare(`INSERT INTO tenant_directory (name, egn, address, phone, email, doc_type, doc_number, doc_date, doc_country, dob, notes)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
           .run(name, t.egn || null, t.address || null, t.phone || null, t.email || null,
-               t.doc_type || null, t.doc_date || null, t.doc_country || null, t.dob || null, sourceNote);
+               t.doc_type || null, t.doc_number || null, t.doc_date || null, t.doc_country || null, t.dob || null, sourceNote);
       }
     } catch (e) { console.warn('party upsert failed:', e.message); }
   }
@@ -1278,6 +1291,8 @@ module.exports = function(db) {
         tenant_email:        fields.tenant_email        || prop?.['email']   || '',
         tenant_mol:          fields.tenant_mol          || '',
         tenant_doc:          fields.tenant_doc          || '',
+        tenant_doc_number:   fields.tenant_doc_number   || '',
+        tenant_doc_valid_until: fields.tenant_doc_valid_until || '',
         tenant_doc_date:     fields.tenant_doc_date     || '',
         tenant_doc_country:  fields.tenant_doc_country  || '',
         tenant_dob:          fields.tenant_dob          || '',
@@ -1336,19 +1351,19 @@ module.exports = function(db) {
         INSERT INTO contracts (template_id, property_id, contract_number, status,
           landlord_type, landlord_name, landlord_address, landlord_egn, landlord_phone, landlord_lk, landlord_lk_date,
           tenant_name, tenant_address, tenant_egn, tenant_phone, tenant_email, tenant_mol,
-          tenant_doc, tenant_doc_date, tenant_doc_country, tenant_dob,
+          tenant_doc, tenant_doc_number, tenant_doc_valid_until, tenant_doc_date, tenant_doc_country, tenant_dob,
           property_address, property_description, property_area,
           monthly_rent, currency, deposit, payment_day,
           start_date, end_date, delivery_date, conditions, notes,
           абонат_ток, абонат_вода, абонат_тец, абонат_вход,
           pdf_path, protocol_pdf_path, id_front_path, id_back_path, kind)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       `).run(
         contract.template_id, contract.property_id, contract.contract_number, contract.status,
         contract.landlord_type, contract.landlord_name, contract.landlord_address, contract.landlord_egn,
         contract.landlord_phone, contract.landlord_lk, contract.landlord_lk_date,
         contract.tenant_name, contract.tenant_address, contract.tenant_egn, contract.tenant_phone, contract.tenant_email, contract.tenant_mol,
-        contract.tenant_doc, contract.tenant_doc_date, contract.tenant_doc_country, contract.tenant_dob,
+        contract.tenant_doc, contract.tenant_doc_number, contract.tenant_doc_valid_until, contract.tenant_doc_date, contract.tenant_doc_country, contract.tenant_dob,
         contract.property_address, contract.property_description, contract.property_area,
         contract.monthly_rent, contract.currency, contract.deposit, contract.payment_day,
         contract.start_date, contract.end_date, contract.delivery_date, contract.conditions, contract.notes,
@@ -1360,7 +1375,7 @@ module.exports = function(db) {
       upsertParty({
         name: contract.tenant_name, egn: contract.tenant_egn, address: contract.tenant_address,
         phone: contract.tenant_phone, email: contract.tenant_email,
-        doc_type: contract.tenant_doc, doc_date: contract.tenant_doc_date,
+        doc_type: contract.tenant_doc, doc_number: contract.tenant_doc_number, doc_date: contract.tenant_doc_date,
         doc_country: contract.tenant_doc_country, dob: contract.tenant_dob,
       }, 'авто при създаване на договор');
 
@@ -1410,6 +1425,7 @@ module.exports = function(db) {
   // Редакция на ключови полета (напр. забравена такса) + нов PDF от шаблона.
   // Архивните договори (сканът Е pdf_path) не се регенерират — само данните.
   const EDITABLE = ['tenant_name', 'tenant_email', 'tenant_phone', 'tenant_address', 'tenant_egn',
+    'tenant_doc', 'tenant_doc_number', 'tenant_doc_date', 'tenant_doc_valid_until', 'tenant_doc_country', 'tenant_dob',
     'monthly_rent', 'currency', 'deposit', 'payment_day', 'start_date', 'end_date', 'delivery_date',
     'conditions', 'notes'];
   router.put('/:id', async (req, res) => {
