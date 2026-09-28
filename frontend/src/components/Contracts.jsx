@@ -39,7 +39,7 @@ Today, {{ДАТА_ДНЕС}}, in Sofia, between the parties:
 
 и / and
 
-**НАЕМАТЕЛ / TENANT:** {{НАЕМАТЕЛ_ИМЕ}}, с адрес / address: {{НАЕМАТЕЛ_АДРЕС}}, ЕГН / ID No: {{НАЕМАТЕЛ_ЕГН}}, {{НАЕМАТЕЛ_ДОКУМЕНТ}} № {{НАЕМАТЕЛ_ДОКУМЕНТ_ДАТА}}, издаден в / issued in {{НАЕМАТЕЛ_ДОКУМЕНТ_СТРАНА}}, роден / born: {{НАЕМАТЕЛ_РОДЕН}}, тел: {{НАЕМАТЕЛ_ТЕЛЕФОН}}, имейл / email: {{НАЕМАТЕЛ_ИМЕЙЛ}}
+**НАЕМАТЕЛ / TENANT:** {{НАЕМАТЕЛ_ИМЕ}}, с адрес / address: {{НАЕМАТЕЛ_АДРЕС}}, ЕГН / ID No: {{НАЕМАТЕЛ_ЕГН}}, {{НАЕМАТЕЛ_ДОКУМЕНТ_ВИД}} № {{НАЕМАТЕЛ_ДОКУМЕНТ_НОМЕР}}, издаден в / issued in {{НАЕМАТЕЛ_ДОКУМЕНТ_СТРАНА}}, роден / born: {{НАЕМАТЕЛ_РОДЕН}}, тел: {{НАЕМАТЕЛ_ТЕЛЕФОН}}, имейл / email: {{НАЕМАТЕЛ_ИМЕЙЛ}}
 
 се сключи настоящият договор / the following agreement is concluded:
 
@@ -324,8 +324,10 @@ const PLACEHOLDER_HELP = [
   ['{{НАЕМАТЕЛ_ИМЕ}}', 'Наемател'],
   ['{{НАЕМАТЕЛ_ЕГН}}', 'ЕГН наемател'],
   ['{{НАЕМАТЕЛ_ТЕЛЕФОН}}', 'Тел. наемател'],
-  ['{{НАЕМАТЕЛ_ДОКУМЕНТ}}', 'Вид документ (паспорт/ЛК)'],
-  ['{{НАЕМАТЕЛ_ДОКУМЕНТ_ДАТА}}', 'Номер на документа'],
+  ['{{НАЕМАТЕЛ_ДОКУМЕНТ_ВИД}}', 'Вид документ (паспорт/ЛК)'],
+  ['{{НАЕМАТЕЛ_ДОКУМЕНТ_НОМЕР}}', 'Номер на документа'],
+  ['{{НАЕМАТЕЛ_ДОКУМЕНТ_ДАТА}}', 'Дата на издаване'],
+  ['{{НАЕМАТЕЛ_ДОКУМЕНТ_ВАЛИДЕН}}', 'Валиден до'],
   ['{{НАЕМАТЕЛ_ДОКУМЕНТ_СТРАНА}}', 'Страна издател'],
   ['{{НАЕМАТЕЛ_РОДЕН}}', 'Дата на раждане'],
   ['{{ИМОТ_АДРЕС}}', 'Адрес на имота'],
@@ -369,7 +371,8 @@ export default function Contracts({ API }) {
     landlord_lk: '', landlord_lk_date: '',
     tenant_name: '', tenant_address: '', tenant_egn: '', tenant_phone: '', tenant_email: '',
     tenant_mol: '',
-    tenant_doc: 'лична карта', tenant_doc_date: '', tenant_doc_country: 'България', tenant_dob: '',
+    tenant_doc: 'лична карта', tenant_doc_number: '', tenant_doc_date: '', tenant_doc_valid_until: '',
+    tenant_doc_country: 'България', tenant_dob: '',
     id_front_path: '', id_back_path: '',
     property_address: '', property_description: '', property_area: '',
     monthly_rent: '', currency: 'EUR', deposit: '', payment_day: '5',
@@ -380,6 +383,7 @@ export default function Contracts({ API }) {
   const [idFront, setIdFront] = useState(null)
   const [idBack, setIdBack] = useState(null)
   const [extractingId, setExtractingId] = useState(false)
+  const [idWarnings, setIdWarnings] = useState([])   // бележки от проверката на разчетеното
   const [directory, setDirectory] = useState([])   // указател на наематели
   const [savingParty, setSavingParty] = useState(false)
 
@@ -453,12 +457,18 @@ export default function Contracts({ API }) {
         tenant_address:     x.permanent_address|| f.tenant_address,
         tenant_dob:         x.birth_date       || f.tenant_dob,
         tenant_doc:         'лична карта',
+        tenant_doc_number:  x.id_number        || f.tenant_doc_number,
         tenant_doc_date:    x.id_issued_date   || f.tenant_doc_date,
+        tenant_doc_valid_until: x.id_valid_until || f.tenant_doc_valid_until,
         tenant_doc_country: f.tenant_doc_country || 'България',
         id_front_path:      d.id_front_path    || '',
         id_back_path:       d.id_back_path     || '',
       }))
-      showToast('Данните са извлечени — прегледай ги (особено ЕГН) преди запазване')
+      setIdWarnings(Array.isArray(d.warnings) ? d.warnings : [])
+      showToast((d.warnings || []).length
+        ? 'Данните са извлечени, но има какво да се сверѝ — виж бележките под бутона'
+        : 'Данните са извлечени — прегледай ги (особено ЕГН и номера) преди запазване',
+        (d.warnings || []).length ? 'error' : 'success')
     } catch (e) {
       showToast('Грешка при извличане', 'error')
     } finally { setExtractingId(false) }
@@ -475,7 +485,7 @@ export default function Contracts({ API }) {
       ...f,
       tenant_name: p.name || '', tenant_egn: p.egn || '', tenant_address: p.address || '',
       tenant_phone: p.phone || '', tenant_email: p.email || '', tenant_dob: p.dob || '',
-      tenant_doc: p.doc_type || f.tenant_doc, tenant_doc_date: p.doc_date || '',
+      tenant_doc: p.doc_type || f.tenant_doc, tenant_doc_number: p.doc_number || '', tenant_doc_date: p.doc_date || '',
       tenant_doc_country: p.doc_country || f.tenant_doc_country,
     }))
   }
@@ -487,6 +497,7 @@ export default function Contracts({ API }) {
       const body = {
         name: newForm.tenant_name, egn: newForm.tenant_egn, address: newForm.tenant_address,
         phone: newForm.tenant_phone, email: newForm.tenant_email, doc_type: newForm.tenant_doc,
+        doc_number: newForm.tenant_doc_number,
         doc_date: newForm.tenant_doc_date, doc_country: newForm.tenant_doc_country, dob: newForm.tenant_dob,
       }
       const r = await apiFetch(`${API}/api/contracts/parties`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
@@ -1327,7 +1338,12 @@ export default function Contracts({ API }) {
                     {extractingId ? 'Извличане…' : '✨ Извлечи данните'}
                   </button>
                   {newForm.id_front_path && <span className="ml-2 text-xs text-green-700">✓ снимките са прикачени към досието</span>}
-                  <p className="text-[11px] text-amber-700 mt-2">⚠️ Прегледай извлечените данни (особено ЕГН) преди да запазиш. Снимките на ЛК се пазят към досието на договора.</p>
+                  {idWarnings.length > 0 && (
+                    <ul className="mt-2 space-y-1 rounded-lg border border-amber-300 bg-amber-50 p-2 text-[11px] text-amber-900">
+                      {idWarnings.map((w, i) => <li key={i}>⚠️ {w}</li>)}
+                    </ul>
+                  )}
+                  <p className="text-[11px] text-amber-700 mt-2">⚠️ Прегледай извлечените данни (особено ЕГН и номера на документа) преди да запазиш. Номерът на българска лична карта е 9 цифри и стои на лицевата страна долу дясно; ако снимаш и гърба, той се сверява с машинно четимата зона. Снимките на ЛК се пазят към досието на договора.</p>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -1357,8 +1373,20 @@ export default function Contracts({ API }) {
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-gray-600 mb-1">Номер на документа</label>
+                    <input type="text" value={newForm.tenant_doc_number} onChange={e=>setNewForm(f=>({...f,tenant_doc_number:e.target.value}))}
+                      placeholder="123456789 (9 цифри, лицева страна долу дясно)"
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Дата на издаване</label>
                     <input type="text" value={newForm.tenant_doc_date} onChange={e=>setNewForm(f=>({...f,tenant_doc_date:e.target.value}))}
-                      placeholder="123456789"
+                      placeholder="2020-05-12"
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Валиден до</label>
+                    <input type="text" value={newForm.tenant_doc_valid_until} onChange={e=>setNewForm(f=>({...f,tenant_doc_valid_until:e.target.value}))}
+                      placeholder="2030-05-12"
                       className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
                   </div>
                   <div>

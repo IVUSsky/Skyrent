@@ -380,6 +380,10 @@ function runTenantMigrations(db) {
   // Migrate new contract fields
   ['landlord_type TEXT DEFAULT \'физическо\'','landlord_lk TEXT','landlord_lk_date TEXT',
    'tenant_doc TEXT','tenant_doc_date TEXT','tenant_doc_country TEXT','tenant_dob TEXT','delivery_date DATE',
+   // Номерът на документа имаше само етикет във формата, но не и собствена
+   // колона — вписваше се в tenant_doc_date (дата!), а разчетеният номер се
+   // изхвърляше. Отделно поле + пренасяне на заварените стойности по-долу.
+   'tenant_doc_number TEXT','tenant_doc_valid_until TEXT',
    'tenant_mol TEXT',
    'абонат_ток TEXT','абонат_вода TEXT','абонат_тец TEXT','абонат_вход TEXT',
    'tenant_user_id INTEGER REFERENCES users(id)',
@@ -824,7 +828,69 @@ function runTenantMigrations(db) {
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`);
+  try { db.exec("ALTER TABLE tenant_directory ADD COLUMN doc_number TEXT"); console.log('Migration: added tenant_directory.doc_number'); } catch(_) {}
   console.log('tenant_directory table ready');
+
+  // Пренасяне на заварените номера на документи: досега номерът попадаше в
+  // tenant_doc_date (полето беше етикетирано „Номер на документа") или се
+  // навиваше в текста на tenant_doc / doc_type („документ № 641228123, изд. от…").
+  try {
+    const done = db.prepare("SELECT value FROM settings WHERE key='doc_number_backfill'").get();
+    if (!done) {
+      const numOf = (v) => {
+        const s = String(v || "").replace(/[^0-9A-Za-z]/g, "");
+        const m = String(v || "").match(/(?:^|\D)(\d{9})(?:\D|$)/);
+        return m ? m[1] : (/^\d{9}$/.test(s) ? s : "");
+      };
+      let moved = 0;
+      for (const c of db.prepare("SELECT id, tenant_doc, tenant_doc_date, tenant_doc_number FROM contracts").all()) {
+        if (c.tenant_doc_number) continue;
+        const fromDate = /^\d{9}$/.test(String(c.tenant_doc_date || "").trim()) ? String(c.tenant_doc_date).trim() : "";
+        const fromDoc  = numOf(c.tenant_doc);
+        const num = fromDate || fromDoc;
+        if (!num) continue;
+        db.prepare("UPDATE contracts SET tenant_doc_number=?, tenant_doc_date=?, tenant_doc=? WHERE id=?")
+          .run(num, fromDate ? "" : (c.tenant_doc_date || ""), /лична|паспорт/i.test(c.tenant_doc || "") || !c.tenant_doc ? (c.tenant_doc || "лична карта") : "лична карта", c.id);
+        moved++;
+      }
+      for (const p of db.prepare("SELECT id, doc_type, doc_date, doc_number FROM tenant_directory").all()) {
+        if (p.doc_number) continue;
+        const fromDate = /^\d{9}$/.test(String(p.doc_date || "").trim()) ? String(p.doc_date).trim() : "";
+        const num = fromDate || numOf(p.doc_type);
+        if (!num) continue;
+        db.prepare("UPDATE tenant_directory SET doc_number=?, doc_date=? WHERE id=?").run(num, fromDate ? "" : (p.doc_date || ""), p.id);
+        moved++;
+      }
+      db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('doc_number_backfill', ?)").run(String(moved));
+      if (moved) console.log('Migration: пренесени номера на документи →', moved);
+    }
+  } catch (e) { console.warn('doc_number backfill skipped:', e.message); }
+
+  // Бланките ползваха два взаимно изключващи се начина за номера на документа:
+  // „л.к. № {{НАЕМАТЕЛ_ДОКУМЕНТ}}" (= вид документ!) и „{{НАЕМАТЕЛ_ДОКУМЕНТ}} №
+  // {{НАЕМАТЕЛ_ДОКУМЕНТ_ДАТА}}" (= дата на мястото на номера). Оттук нататък:
+  // _ВИД = вид, _НОМЕР = номер, _ДАТА = дата на издаване, _ВАЛИДЕН = валиден до.
+  try {
+    const done = db.prepare("SELECT value FROM settings WHERE key='doc_placeholder_rewrite'").get();
+    if (!done) {
+      const REPL = [
+        ["{{НАЕМАТЕЛ_ДОКУМЕНТ}} № {{НАЕМАТЕЛ_ДОКУМЕНТ_ДАТА}}", "{{НАЕМАТЕЛ_ДОКУМЕНТ_ВИД}} № {{НАЕМАТЕЛ_ДОКУМЕНТ_НОМЕР}}"],
+        ["№ {{НАЕМАТЕЛ_ДОКУМЕНТ_ДАТА}}", "№ {{НАЕМАТЕЛ_ДОКУМЕНТ_НОМЕР}}"],
+        ["л.к. № {{НАЕМАТЕЛ_ДОКУМЕНТ}}", "л.к. № {{НАЕМАТЕЛ_ДОКУМЕНТ_НОМЕР}}"],
+        ["документ за самоличност {{НАЕМАТЕЛ_ДОКУМЕНТ}}", "документ за самоличност {{НАЕМАТЕЛ_ДОКУМЕНТ_ВИД}} № {{НАЕМАТЕЛ_ДОКУМЕНТ_НОМЕР}}"],
+        ["документ / ID document {{НАЕМАТЕЛ_ДОКУМЕНТ}}", "документ / ID document {{НАЕМАТЕЛ_ДОКУМЕНТ_ВИД}} № {{НАЕМАТЕЛ_ДОКУМЕНТ_НОМЕР}}"],
+      ];
+      let fixed = 0;
+      for (const t of db.prepare("SELECT id, content FROM contract_templates").all()) {
+        let c = t.content || "";
+        const before = c;
+        for (const [a, b] of REPL) c = c.split(a).join(b);
+        if (c !== before) { db.prepare("UPDATE contract_templates SET content=? WHERE id=?").run(c, t.id); fixed++; }
+      }
+      db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('doc_placeholder_rewrite', ?)").run(String(fixed));
+      if (fixed) console.log('Migration: поправени бланки (номер на документ) →', fixed);
+    }
+  } catch (e) { console.warn('doc placeholder rewrite skipped:', e.message); }
 
   // Нотариални актове — качени документи (PDF/JPEG→PDF) + извлечен текст/данни.
   // Свързват се с имот; могат да обновят данните му и да открият допълнителни
