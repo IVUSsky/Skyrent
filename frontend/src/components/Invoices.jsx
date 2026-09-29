@@ -198,6 +198,15 @@ export default function Invoices({ API, role }) {
   // плащания (Наематели). Първо преглед, после прилагане.
   const [reconciling, setReconciling] = useState(false)
 
+  // ДДС справка за календарния месец — от сървъра, за да не зависи от филтрите
+  const [vat, setVat] = useState(null)
+  const [vatOpen, setVatOpen] = useState(false)
+  useEffect(() => {
+    if (!useMonthFilter || !filterMonth) { setVat(null); return }
+    apiFetch(`${API}/api/invoices/vat-summary?month=${filterMonth}&rows=1`)
+      .then(r => r.json()).then(d => setVat(d && d.ok ? d : null)).catch(() => setVat(null))
+  }, [API, filterMonth, useMonthFilter, invoices])
+
   // Месечно автоматично издаване (и по желание изпращане) — настройка в базата
   const [auto, setAuto] = useState({ enabled: false, day: 1, send: false, last_run: null })
   const [autoBusy, setAutoBusy] = useState(false)
@@ -544,13 +553,102 @@ export default function Invoices({ API, role }) {
           <div className={`text-xl font-bold ${unpaidInvoices.length ? 'text-amber-700' : 'text-green-700'}`}>{fmtMoney(sumUnpaid)} €</div>
           <div className="text-xs text-gray-400">{unpaidInvoices.length} бр.</div>
         </div>
-        <div className="bg-gray-50 border border-gray-200 rounded-xl p-3">
-          <div className="text-xs text-gray-500 font-semibold uppercase">ДДС</div>
+        <button type="button" onClick={() => setVatOpen(o => !o)}
+          title="Начислен ДДС по издадените документи за календарния месец (по дата на данъчното събитие), минус ДДС по кредитните известия. Не зависи от филтрите."
+          className="bg-gray-50 border border-gray-200 hover:bg-gray-100 rounded-xl p-3 text-left">
+          <div className="text-xs text-gray-500 font-semibold uppercase">ДДС по издадените</div>
           <div className="text-xl font-bold text-gray-700">
-            {fmtMoney(invoices.filter(i => i.type==='invoice').reduce((s,i) => s+(i.vat_amount||0),0) - totalCreditNotes.reduce((s,i) => s+(i.vat_amount||0),0))} €
+            {fmtMoney(vat ? vat.vat_due : invoices.filter(i => i.type==='invoice').reduce((s,i) => s+(i.vat_amount||0),0) - totalCreditNotes.reduce((s,i) => s+(i.vat_amount||0),0))} €
           </div>
-        </div>
+          <div className="text-xs text-gray-400">{vat ? `${vat.invoices.count} докум. · ${vatOpen ? 'скрий' : 'подробно'}` : 'за месеца'}</div>
+        </button>
       </div>
+
+      {/* ДДС справка за календарния месец */}
+      {vatOpen && vat && (
+        <div className="bg-white border border-gray-200 rounded-xl p-4 mb-5 shadow-sm">
+          <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">
+            <h3 className="font-bold text-gray-800">🧾 ДДС за {monthLabel(vat.month)}</h3>
+            <span className="text-xs text-gray-500">по дата на данъчното събитие (или издаване) — затова може да се различава от таблицата долу, която е по наемен месец</span>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+            <div className="rounded-lg border border-gray-200 p-3">
+              <div className="text-xs text-gray-500 uppercase font-semibold">Данъчна основа</div>
+              <div className="text-lg font-bold text-gray-800">{fmtMoney(vat.invoices.base)} €</div>
+              <div className="text-xs text-gray-400">{vat.invoices.count} фактури</div>
+            </div>
+            <div className="rounded-lg border border-gray-200 p-3">
+              <div className="text-xs text-gray-500 uppercase font-semibold">Начислен ДДС</div>
+              <div className="text-lg font-bold text-gray-800">{fmtMoney(vat.invoices.vat)} €</div>
+            </div>
+            <div className="rounded-lg border border-purple-200 bg-purple-50 p-3">
+              <div className="text-xs text-gray-500 uppercase font-semibold">ДДС по КИ</div>
+              <div className="text-lg font-bold text-purple-700">−{fmtMoney(vat.credit_notes.vat)} €</div>
+              <div className="text-xs text-gray-400">{vat.credit_notes.count} бр.</div>
+            </div>
+            <div className="rounded-lg border-2 border-green-300 bg-green-50 p-3">
+              <div className="text-xs text-gray-600 uppercase font-semibold">ДДС по издадените</div>
+              <div className="text-2xl font-bold text-green-800">{fmtMoney(vat.vat_due)} €</div>
+              <div className="text-[11px] text-gray-500">от него се приспада ДДС по покупките</div>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-4 text-xs text-gray-600 mb-3">
+            {Object.entries(vat.by_product).map(([k, v]) => (
+              <span key={k} className="rounded-lg bg-gray-50 border border-gray-200 px-2 py-1">
+                {k}: <strong>{fmtMoney(v.total)} €</strong> (ДДС {fmtMoney(v.vat)} €, {v.count} бр.)
+              </span>
+            ))}
+            {Object.entries(vat.by_rate).filter(([r]) => r !== '20').map(([r, v]) => (
+              <span key={'r' + r} className="rounded-lg bg-amber-50 border border-amber-200 px-2 py-1">
+                ставка {r}%: основа <strong>{fmtMoney(v.base)} €</strong>
+              </span>
+            ))}
+          </div>
+          {vat.rows?.length > 0 && (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead className="bg-gray-50 text-gray-600">
+                  <tr>
+                    <th className="px-2 py-1 text-left">№</th>
+                    <th className="px-2 py-1 text-left">Дата</th>
+                    <th className="px-2 py-1 text-left">Към кого</th>
+                    <th className="px-2 py-1 text-left">Имот / услуга</th>
+                    <th className="px-2 py-1 text-right">Основа</th>
+                    <th className="px-2 py-1 text-right">ДДС</th>
+                    <th className="px-2 py-1 text-right">Общо</th>
+                    <th className="px-2 py-1"></th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {vat.rows.map(r => (
+                    <tr key={r.id} className={r.type === 'credit_note' ? 'bg-purple-50' : ''}>
+                      <td className="px-2 py-1 font-mono">{r.invoice_number}{r.type === 'credit_note' ? ' (КИ)' : ''}</td>
+                      <td className="px-2 py-1 whitespace-nowrap">{fmtDate(r.doc_date)}</td>
+                      <td className="px-2 py-1">{r.recipient_name || r.tenant_name || '—'}</td>
+                      <td className="px-2 py-1">{r.property_address || '—'}<span className="text-gray-400"> · {r.product}</span></td>
+                      <td className="px-2 py-1 text-right">{r.type === 'credit_note' ? '−' : ''}{fmtMoney(r.amount)}</td>
+                      <td className="px-2 py-1 text-right">{r.type === 'credit_note' ? '−' : ''}{fmtMoney(r.vat_amount)}</td>
+                      <td className="px-2 py-1 text-right font-medium">{r.type === 'credit_note' ? '−' : ''}{fmtMoney(r.total)}</td>
+                      <td className="px-2 py-1 text-right">
+                        <a href={authUrl(`${API}/api/invoices/${r.id}/pdf`)} target="_blank" rel="noreferrer" title="Отвори фактурата">📄</a>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot className="bg-gray-50 font-semibold text-gray-800">
+                  <tr>
+                    <td className="px-2 py-1" colSpan={4}>Общо за {monthLabel(vat.month)}</td>
+                    <td className="px-2 py-1 text-right">{fmtMoney(vat.invoices.base - vat.credit_notes.base)}</td>
+                    <td className="px-2 py-1 text-right">{fmtMoney(vat.vat_due)}</td>
+                    <td className="px-2 py-1 text-right">{fmtMoney(vat.invoices.total - vat.credit_notes.total)}</td>
+                    <td></td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Депозити по действащи договори без издадена фактура */}
       {depositPending.length > 0 && (
