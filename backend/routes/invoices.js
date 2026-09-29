@@ -692,6 +692,71 @@ async function generateDepositInvoice(db, { property_id, contract_id, amount, wi
 }
 
 // ─── Router ────────────────────────────────────────────────────────────────
+// Изпраща фактура/КИ на наемателя (Resend — Railway блокира SMTP портовете).
+// Отделно от маршрута, защото активирането на договор също може да я прати.
+// Връща { ok, sent_to } или { ok:false, status, error } — без да хвърля.
+async function sendInvoiceEmail(db, inv, emailOverride) {
+  if (!inv) return { ok: false, status: 404, error: 'Фактурата не е намерена' };
+  const prop = db.prepare('SELECT email FROM properties WHERE id = ?').get(inv.property_id);
+  const contract = inv.contract_id
+    ? db.prepare('SELECT tenant_email FROM contracts WHERE id=?').get(inv.contract_id)
+    : db.prepare("SELECT tenant_email FROM contracts WHERE property_id=? AND status='active' AND COALESCE(kind,'наем')='наем' ORDER BY id DESC LIMIT 1").get(inv.property_id);
+  const toEmail = emailOverride || prop?.email || contract?.tenant_email;
+  if (!toEmail) return { ok: false, status: 400, error: 'Няма email адрес' };
+  let recipients;
+  try { recipients = parseRecipients(toEmail); }
+  catch (e) { return { ok: false, status: 400, error: e.message }; }
+
+  const resendKey = process.env.RESEND_API_KEY;
+  if (!resendKey) return { ok: false, status: 400, error: 'RESEND_API_KEY не е конфигуриран' };
+
+  const filepath = path.join(PDF_DIR, inv.pdf_path || '');
+  if (!inv.pdf_path || !fs.existsSync(filepath)) return { ok: false, status: 404, error: 'PDF не е намерен' };
+
+  const issuer    = getIssuer(db);
+  const fromEmail = process.env.RESEND_FROM_EMAIL || 'info@skycapital.pro';
+  const isCN      = inv.type === 'credit_note';
+  const docLabel  = isCN ? `Кредитно известие № ${inv.invoice_number}` : `Фактура № ${inv.invoice_number}`;
+  const recipientName = inv.recipient_name || inv.tenant_name || '';
+  // Текстът следва продукта — депозитната фактура не е „за наем"
+  const product = inv.product || 'наем';
+  const subjectFor = product === 'депозит' ? 'гаранционен депозит'
+                   : product === 'интернет' ? `интернет услуга ${monthLabel(inv.month)}`
+                   : `наем ${monthLabel(inv.month)}`;
+  const bodyFor = product === 'депозит' ? 'за <strong>гаранционен депозит</strong>'
+                : product === 'интернет' ? `за <strong>интернет услуга</strong> за <strong>${monthLabel(inv.month)}</strong>`
+                : `за наем за <strong>${monthLabel(inv.month)}</strong>`;
+
+  const bodyHtml = `
+      <p>Уважаеми/а <strong>${recipientName}</strong>,</p>
+      <p>Прилагаме <strong>${docLabel.toLowerCase()}</strong> ${bodyFor} на стойност <strong>${fmtMoney(inv.total)} €</strong>.</p>
+      <p>Моля прегледайте приложения документ.</p>
+      <p style="margin-top:24px;">С уважение,<br><strong>${issuer.name || 'Skyrent'}</strong></p>`;
+
+  try {
+    const pdfBase64 = fs.readFileSync(filepath).toString('base64');
+    const response  = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        from: `${issuer.name || 'Skyrent'} <${fromEmail}>`,
+        to: recipients,
+        subject: `${docLabel} — ${subjectFor}`,
+        html: brandEmailHtml(bodyHtml, issuer),
+        attachments: [
+          { filename: `${docLabel.replace(/\s/g, '_')}.pdf`, content: pdfBase64 },
+        ],
+      }),
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) return { ok: false, status: 500, error: result.message || 'Грешка при изпращане' };
+    db.prepare("UPDATE rent_invoices SET sent_at = datetime('now') WHERE id = ?").run(inv.id);
+    return { ok: true, sent_to: recipients.join(', ') };
+  } catch (err) {
+    return { ok: false, status: 500, error: err.message };
+  }
+}
+
 module.exports = function(db) {
   const router = express.Router();
 
@@ -1055,56 +1120,9 @@ module.exports = function(db) {
   router.post('/:id/send', async (req, res) => {
     const inv = db.prepare('SELECT * FROM rent_invoices WHERE id = ?').get(req.params.id);
     if (!inv) return res.status(404).json({ error: 'Not found' });
-
-    const prop = db.prepare('SELECT email FROM properties WHERE id = ?').get(inv.property_id);
-    const toEmail = req.body.email || prop?.email;
-    if (!toEmail) return res.status(400).json({ error: 'Няма email адрес' });
-    let recipients;
-    try { recipients = parseRecipients(toEmail); }
-    catch (e) { return res.status(400).json({ error: e.message }); }
-
-    const resendKey = process.env.RESEND_API_KEY;
-    if (!resendKey) return res.status(400).json({ error: 'RESEND_API_KEY не е конфигуриран' });
-
-    const filepath = path.join(PDF_DIR, inv.pdf_path);
-    if (!fs.existsSync(filepath)) return res.status(404).json({ error: 'PDF не е намерен' });
-
-    const issuer    = getIssuer(db);
-    const fromEmail = process.env.RESEND_FROM_EMAIL || 'info@skycapital.pro';
-    const isCN      = inv.type === 'credit_note';
-    const docLabel  = isCN ? `Кредитно известие № ${inv.invoice_number}` : `Фактура № ${inv.invoice_number}`;
-    const recipientName = inv.recipient_name || inv.tenant_name || '';
-
-    const bodyHtml = `
-      <p>Уважаеми/а <strong>${recipientName}</strong>,</p>
-      <p>Прилагаме <strong>${docLabel.toLowerCase()}</strong> за наем за
-      <strong>${monthLabel(inv.month)}</strong> на стойност <strong>${fmtMoney(inv.total)} €</strong>.</p>
-      <p>Моля прегледайте приложения документ.</p>
-      <p style="margin-top:24px;">С уважение,<br><strong>${issuer.name || 'Skyrent'}</strong></p>`;
-
-    try {
-      const pdfBase64 = fs.readFileSync(filepath).toString('base64');
-      const response  = await fetch('https://api.resend.com/emails', {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          from: `${issuer.name || 'Skyrent'} <${fromEmail}>`,
-          to: recipients,
-          subject: `${docLabel} — наем ${monthLabel(inv.month)}`,
-          html: brandEmailHtml(bodyHtml, issuer),
-          attachments: [
-            { filename: `${docLabel.replace(/\s/g,'_')}.pdf`, content: pdfBase64 },
-          ],
-        }),
-      });
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok) return res.status(500).json({ error: result.message || 'Грешка при изпращане' });
-
-      db.prepare("UPDATE rent_invoices SET sent_at = datetime('now') WHERE id = ?").run(inv.id);
-      res.json({ ok: true });
-    } catch (err) {
-      res.status(500).json({ error: err.message });
-    }
+    const r = await sendInvoiceEmail(db, inv, req.body?.email);
+    if (!r.ok) return res.status(r.status || 500).json({ error: r.error });
+    res.json({ ok: true, sent_to: r.sent_to });
   });
 
   // Update invoice (regenerates PDF). Accepts total (с ДДС) + vat_rate and
@@ -1191,6 +1209,7 @@ module.exports = function(db) {
 // Експорт за преизползване от други модули (напр. интернет webhook)
 module.exports.createSimpleInvoice = createSimpleInvoice;
 module.exports.generateRentInvoice = generateRentInvoice;
+module.exports.sendInvoiceEmail = sendInvoiceEmail;
 module.exports.generateDepositInvoice = generateDepositInvoice;
 module.exports.autoInvoiceOnActivateOn = autoInvoiceOnActivateOn;
 // Изнесена, за да може оформлението да се провери с истински рендер, а не

@@ -678,7 +678,7 @@ export default function Contracts({ API }) {
   // Активиране — модал вместо верига от confirm(): наемна фактура + депозитна
   // фактура (с ДДС по подразбиране — решението на Иво от 14.09) с отметки.
   const [actModal, setActModal] = useState(null)
-  const [actOpts, setActOpts] = useState({ issue_invoice: true, issue_deposit: true, deposit_with_vat: true })
+  const [actOpts, setActOpts] = useState({ issue_invoice: true, issue_deposit: true, deposit_with_vat: true, send_email: false })
   const [activating, setActivating] = useState(false)
 
   // Интернет договор: ДОСТАВЧИК е винаги фирмата (издателят), не физическо лице
@@ -688,7 +688,8 @@ export default function Contracts({ API }) {
 
   const activateContract = (c) => {
     const isNet = kindOf(c) === 'интернет'
-    setActOpts({ issue_invoice: !isNet, issue_deposit: !isNet && Number(c.deposit) > 0, deposit_with_vat: true })
+    // Изпращането е изключено по подразбиране — тръгва само ако Иво го избере.
+    setActOpts({ issue_invoice: !isNet, issue_deposit: !isNet && Number(c.deposit) > 0, deposit_with_vat: true, send_email: false })
     setActModal(c)
   }
 
@@ -701,6 +702,7 @@ export default function Contracts({ API }) {
         issue_invoice: actOpts.issue_invoice,
         issue_deposit_invoice: actOpts.issue_deposit,
         deposit_with_vat: actOpts.deposit_with_vat,
+        send_invoice_email: actOpts.send_email,
       }),
     })
       .then(r => r.json())
@@ -713,7 +715,11 @@ export default function Contracts({ API }) {
         if (d.deposit_invoice?.invoice_number && !d.deposit_invoice.skipped) msg += ` • депозит № ${d.deposit_invoice.invoice_number} издадена`
         else if (d.deposit_invoice?.skipped === 'duplicate') msg += ` • депозитът вече е фактуриран (№ ${d.deposit_invoice.invoice_number})`
         else if (d.deposit_invoice?.skipped) msg += ' • депозитната фактура не е издадена (' + d.deposit_invoice.skipped + ')'
-        showToast(msg)
+        const sent = [d.invoice, d.deposit_invoice].filter(x => x?.sent).length
+        const failed = [d.invoice, d.deposit_invoice].find(x => x && x.sent === false)
+        if (sent) msg += ` • изпратена на ${d.invoice?.sent_to || d.deposit_invoice?.sent_to}`
+        if (failed) msg += ` • НЕ е изпратена: ${failed.send_error}`
+        showToast(msg, failed ? 'error' : 'success')
         setActModal(null)
         load()
       })
@@ -1842,6 +1848,17 @@ export default function Contracts({ API }) {
                     </div>
                   ) : (
                     <div className="text-xs text-gray-400">Договорът е без депозит.</div>
+                  )}
+                  {(actOpts.issue_invoice || actOpts.issue_deposit) && (
+                    <label className="flex items-start gap-2 cursor-pointer">
+                      <input type="checkbox" className="mt-0.5" checked={actOpts.send_email} onChange={e => setActOpts(o => ({ ...o, send_email: e.target.checked }))} />
+                      <span>
+                        <span className="font-medium text-gray-800">✉️ Изпрати фактурата на наемателя</span>
+                        <span className="block text-xs text-gray-500">
+                          PDF по имейл{actModal.tenant_email ? ' на ' + actModal.tenant_email : ' (на имейла на имота)'} — същото като бутона ✉️ във Фактури. Без отметка фактурата само се издава и наемателят я вижда в портала.
+                        </span>
+                      </span>
+                    </label>
                   )}
                 </>
               )}

@@ -5,7 +5,7 @@ const path = require('path');
 const fs = require('fs');
 const multer = require('multer');
 const { ensureTenantUser, sendWelcomeEmail } = require('../lib/tenantOnboarding');
-const { generateRentInvoice, generateDepositInvoice, autoInvoiceOnActivateOn } = require('./invoices');
+const { generateRentInvoice, generateDepositInvoice, autoInvoiceOnActivateOn, sendInvoiceEmail } = require('./invoices');
 const { parseRecipients } = require('../lib/email');
 const { optimizeMany, isDisplayable } = require('../lib/imageOptimize');
 const { imagesOnly, safeExt } = require('../lib/uploadFilter');
@@ -1608,6 +1608,23 @@ module.exports = function(db) {
       } catch (e) {
         console.error('Deposit invoice on activate failed:', e.message);
         deposit_invoice = { skipped: 'error', error: e.message };
+      }
+
+      // Изпращане на издадените фактури до наемателя — САМО по изрична отметка
+      // в диалога (send_invoice_email). Адресът е този на имота, иначе от
+      // договора; може да се подаде и изрично (invoice_email).
+      if (req.body?.send_invoice_email === true) {
+        for (const slot of [invoice, deposit_invoice]) {
+          if (!slot?.id) continue;
+          try {
+            const row = db.prepare('SELECT * FROM rent_invoices WHERE id=?').get(slot.id);
+            const r = await sendInvoiceEmail(db, row, req.body?.invoice_email);
+            slot.sent = r.ok;
+            if (r.ok) slot.sent_to = r.sent_to; else slot.send_error = r.error;
+          } catch (e) {
+            slot.sent = false; slot.send_error = e.message;
+          }
+        }
       }
 
       // Договорът отива и при счетоводителя, за да го види навреме, а не в края
