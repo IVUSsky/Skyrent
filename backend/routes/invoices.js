@@ -7,6 +7,7 @@ const { notifyTenant } = require('../lib/notify');
 const { nextInvoiceNumber, peekNextInvoiceNumber, counterKey } = require('../lib/invoiceNumber');
 const { parseRecipients } = require('../lib/email');
 const { readSettings: monthlySettings, writeSettings: writeMonthlySettings, runMonthlyInvoicing } = require('../lib/monthlyInvoiceCron');
+const { vatSummary, vatRows } = require('../lib/vatSummary');
 const { getIssuer, issuerComplete, brandEmailHtml } = require('../lib/branding');
 const { reconcileInvoices } = require('../lib/invoiceReconcile');
 
@@ -1115,6 +1116,16 @@ module.exports = function(db) {
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="invoices_export.csv"`);
     res.send(csv);
+  });
+
+  // ДДС по издадените документи за календарен месец (по данъчно събитие/дата
+  // на издаване — не по наемния месец). Не зависи от филтрите на екрана.
+  router.get('/vat-summary', (req, res) => {
+    try {
+      const month = String(req.query.month || '').slice(0, 7);
+      const s = vatSummary(db, month);
+      res.json({ ok: true, ...s, rows: String(req.query.rows || '') === '1' ? vatRows(db, month) : undefined });
+    } catch (e) { res.status(400).json({ error: e.message }); }
   });
 
   // ─── Месечно автоматично фактуриране ────────────────────────────────────
