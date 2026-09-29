@@ -320,6 +320,14 @@ async function main() {
   setTimeout(runExpiryCheck, 30 * 1000);
   setInterval(runExpiryCheck, 24 * 60 * 60 * 1000);
 
+  // ─── Месечно издаване на наемните фактури (по настройка) ─────────────────
+  try {
+    const { startMonthlyInvoiceCron } = require('./lib/monthlyInvoiceCron');
+    startMonthlyInvoiceCron({ controlDb, getOrgDb });
+  } catch (e) {
+    console.error('Failed to start monthly invoice cron:', e.message);
+  }
+
   // ─── Investments cron (gold price + alerts + AI reports) ─────────────────
   try {
     const { startInvestmentsCron } = require('./lib/investmentsCron');

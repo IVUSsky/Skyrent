@@ -197,6 +197,41 @@ export default function Invoices({ API, role }) {
   // Сверява неплатените фактури за наем/депозит с банковите преводи и ръчните
   // плащания (Наематели). Първо преглед, после прилагане.
   const [reconciling, setReconciling] = useState(false)
+
+  // Месечно автоматично издаване (и по желание изпращане) — настройка в базата
+  const [auto, setAuto] = useState({ enabled: false, day: 1, send: false, last_run: null })
+  const [autoBusy, setAutoBusy] = useState(false)
+  useEffect(() => {
+    apiFetch(`${API}/api/invoices/auto-monthly`).then(r => r.json()).then(d => { if (d && !d.error) setAuto(d) }).catch(() => {})
+  }, [API])
+  const saveAuto = (patch) => {
+    const next = { ...auto, ...patch }
+    setAuto(next)
+    apiFetch(`${API}/api/invoices/auto-monthly`, { method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: next.enabled, day: next.day, send: next.send }) })
+      .then(r => r.json())
+      .then(d => d.ok ? showToast('Записано') : showToast(d.error || 'Грешка', 'error'))
+      .catch(e => showToast(e.message, 'error'))
+  }
+  const runAuto = async () => {
+    setAutoBusy(true)
+    try {
+      const dry = await apiFetch(`${API}/api/invoices/auto-monthly/run?dry=1`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ month: filterMonth }) }).then(r => r.json())
+      if (!dry.ok) { showToast(dry.error || 'Грешка', 'error'); return }
+      if (!dry.created.length) { showToast(`Няма какво да се издаде за ${monthLabel(filterMonth)} — всички фактури вече са издадени`); return }
+      const lines = dry.created.slice(0, 15).map(c => `• ${c.адрес} — ${c.наемател}`).join('\n')
+      const willSend = auto.send ? `\n\nЩе бъдат и ИЗПРАТЕНИ по мейл на наемателите.` : ''
+      if (!window.confirm(`Ще се издадат ${dry.created.length} фактури за ${monthLabel(filterMonth)}:\n\n${lines}${dry.created.length > 15 ? '\n…' : ''}${willSend}\n\nПродължи?`)) return
+      const r = await apiFetch(`${API}/api/invoices/auto-monthly/run`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ month: filterMonth }) }).then(r => r.json())
+      if (!r.ok) { showToast(r.error || 'Грешка', 'error'); return }
+      let msg = `Издадени ${r.created.length} фактури`
+      if (r.sent.length) msg += ` • изпратени ${r.sent.length}`
+      if (r.errors.length) msg += ` • грешки ${r.errors.length}`
+      showToast(msg, r.errors.length ? 'error' : 'success')
+      load()
+    } catch (e) { showToast(e.message, 'error') }
+    finally { setAutoBusy(false) }
+  }
   const reconcile = async () => {
     setReconciling(true)
     try {
@@ -332,9 +367,45 @@ export default function Invoices({ API, role }) {
       {/* Property settings panel */}
       <details className="mb-5">
         <summary className="cursor-pointer bg-white rounded-xl shadow border border-gray-100 px-5 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-50 select-none">
-          ⚙️ Настройки — кому се издава фактура ({enabledProps.length} активни)
+          ⚙️ Настройки — кому се издава фактура ({enabledProps.length} активни){auto.enabled ? ' · 🔁 авто на ' + auto.day + '-о число' + (auto.send ? ' + изпращане' : '') : ''}
         </summary>
         <div className="bg-white border border-gray-200 border-t-0 rounded-b-xl px-5 pb-4 pt-2 shadow">
+          {/* Месечен автомат — по подразбиране изключен */}
+          <div className={`rounded-lg border p-3 mb-2 ${auto.enabled ? 'bg-green-50 border-green-200' : 'border-gray-200'}`}>
+            <label className="flex items-start gap-2 cursor-pointer">
+              <input type="checkbox" className="mt-0.5" checked={!!auto.enabled} onChange={e => saveAuto({ enabled: e.target.checked })} />
+              <span>
+                <span className="font-medium text-gray-800">🔁 Издавай наемните фактури автоматично всеки месец</span>
+                <span className="block text-xs text-gray-500">За всички имоти от списъка долу. Вече издадена фактура не се дублира. Проверката е всяка сутрин в 07:00.</span>
+              </span>
+            </label>
+            {auto.enabled && (
+              <div className="mt-2 ml-6 space-y-2">
+                <label className="flex items-center gap-2 text-sm">
+                  <span className="text-gray-600">на</span>
+                  <select value={auto.day} onChange={e => saveAuto({ day: Number(e.target.value) })}
+                    className="border border-gray-300 rounded-lg px-2 py-1 text-sm">
+                    {Array.from({ length: 28 }, (_, i) => i + 1).map(d => <option key={d} value={d}>{d}</option>)}
+                  </select>
+                  <span className="text-gray-600">-о число от месеца</span>
+                </label>
+                <label className="flex items-start gap-2 cursor-pointer">
+                  <input type="checkbox" className="mt-0.5" checked={!!auto.send} onChange={e => saveAuto({ send: e.target.checked })} />
+                  <span>
+                    <span className="text-gray-800">✉️ и ги изпращай по мейл на наемателите</span>
+                    <span className="block text-xs text-gray-500">PDF на имейла на имота (иначе този от договора). Без отметка фактурите само се издават.</span>
+                  </span>
+                </label>
+                <div className="flex items-center gap-2 pt-1">
+                  <button onClick={runAuto} disabled={autoBusy}
+                    className="px-3 py-1.5 text-xs font-medium bg-white border border-gray-300 hover:bg-gray-50 rounded-lg disabled:opacity-50">
+                    {autoBusy ? '…' : `▶️ Пусни сега за ${monthLabel(filterMonth)}`}
+                  </button>
+                  <span className="text-[11px] text-gray-500">{auto.last_run ? `последно: ${monthLabel(auto.last_run)}` : 'още не е пускано'}</span>
+                </div>
+              </div>
+            )}
+          </div>
           <div className="space-y-1 mt-2">
             {invoiceProps.map(prop => {
               let rec = {}

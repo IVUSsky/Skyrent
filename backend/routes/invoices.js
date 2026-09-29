@@ -6,6 +6,7 @@ const { getAddonChargesForProperty, markDepositsCharged } = require('../lib/addo
 const { notifyTenant } = require('../lib/notify');
 const { nextInvoiceNumber, peekNextInvoiceNumber, counterKey } = require('../lib/invoiceNumber');
 const { parseRecipients } = require('../lib/email');
+const { readSettings: monthlySettings, writeSettings: writeMonthlySettings, runMonthlyInvoicing } = require('../lib/monthlyInvoiceCron');
 const { getIssuer, issuerComplete, brandEmailHtml } = require('../lib/branding');
 const { reconcileInvoices } = require('../lib/invoiceReconcile');
 
@@ -1114,6 +1115,35 @@ module.exports = function(db) {
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="invoices_export.csv"`);
     res.send(csv);
+  });
+
+  // ─── Месечно автоматично фактуриране ────────────────────────────────────
+  // Настройка + ръчно пускане/преглед. Самият крон е в server.js (07:00 дневно).
+  router.get('/auto-monthly', (req, res) => {
+    const s = monthlySettings(db);
+    const last = db.prepare("SELECT value FROM settings WHERE key='monthly_invoicing_last_run'").get();
+    res.json({ ...s, last_run: last?.value || null });
+  });
+
+  router.put('/auto-monthly', (req, res) => {
+    if (req.user?.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+    try {
+      const s = writeMonthlySettings(db, {
+        enabled: req.body?.enabled, day: req.body?.day, send: req.body?.send,
+      });
+      res.json({ ok: true, ...s });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // ?dry=1 → само какво би издал; иначе издава (и изпраща, ако е включено)
+  router.post('/auto-monthly/run', async (req, res) => {
+    if (req.user?.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+    try {
+      const dry = String(req.query.dry || req.body?.dry || '') === '1';
+      const month = /^\d{4}-\d{2}$/.test(req.body?.month || '') ? req.body.month : undefined;
+      const r = await runMonthlyInvoicing(db, { dry, month, send: req.body?.send });
+      res.json({ ok: true, ...r });
+    } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
   // Send invoice by email (via Resend — Railway blocks SMTP ports)
