@@ -16,6 +16,7 @@ const TABS = [
   { id: 'addons',       label: 'Услуги',     icon: '🛍️' },
   { id: 'internet',     label: 'Интернет',   icon: '🌐' },
   { id: 'support',      label: 'Поддръжка',  icon: '🛟' },
+  { id: 'apartment',    label: 'Апартамент', icon: '🔌' },
   { id: 'consumption',  label: 'Сметки',     icon: '📊' },
   { id: 'profile',      label: 'Профил',     icon: '👤' },
 ]
@@ -239,6 +240,7 @@ export default function TenantApp({ userName, onLogout, mustChangePassword }) {
         {tab === 'addons'      && <Addons />}
         {tab === 'internet'    && <TenantInternet />}
         {tab === 'support'     && <TenantTickets />}
+        {tab === 'apartment'   && <Apartment property={property} />}
         {tab === 'consumption' && <Consumption property={property} />}
         {tab === 'profile'     && <Profile me={me} onChangePassword={() => setShowPwd(true)} />}
       </main>
@@ -1151,6 +1153,106 @@ function TenantTickets() {
             )
           })
       }
+    </div>
+  )
+}
+
+// Устройствата в апартамента: консумация на живо + управление на разрешеното.
+// Данните идват от /api/tenant/apartment — tuya id-тата не стигат до браузъра.
+function Apartment({ property }) {
+  const { t: tr } = useTenantI18n()
+  const [data, setData] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState(null)
+  const [err, setErr] = useState('')
+
+  const load = () => apiFetch(`${API}/api/tenant/apartment`)
+    .then(r => r.json())
+    .then(d => { setData(d && d.ok ? d : { devices: [] }); setLoading(false) })
+    .catch(() => { setData({ devices: [] }); setLoading(false) })
+
+  useEffect(() => { load() }, [])
+  // Опресняване през 30 сек, докато табът е отворен
+  useEffect(() => {
+    const id = setInterval(load, 30000)
+    return () => clearInterval(id)
+  }, [])
+
+  const toggle = async (d) => {
+    const on = !(d.status?.on)
+    if (!on && !window.confirm(`${tr('apt.confirmOff')} „${d.name}"?`)) return
+    setBusy(d.id); setErr('')
+    try {
+      const r = await apiFetch(`${API}/api/tenant/apartment/devices/${d.id}/control`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ on }),
+      }).then(r => r.json())
+      if (!r.ok) setErr(r.error || tr('apt.err'))
+      await load()
+    } catch (e) { setErr(tr('apt.err')) }
+    finally { setBusy(null) }
+  }
+
+  if (loading) return <div className="bg-white rounded-lg p-4 text-sm text-gray-500 text-center">{tr('common.loading')}</div>
+  const devices = data?.devices || []
+
+  return (
+    <div className="space-y-3">
+      {property && (
+        <div className="bg-white rounded-lg p-3 border">
+          <div className="text-xs text-gray-500">{tr('common.property')}</div>
+          <div className="font-semibold">{property.адрес}</div>
+        </div>
+      )}
+
+      {devices.length > 0 && data.total_power_w != null && (
+        <div className="bg-slate-800 text-white rounded-xl p-4">
+          <div className="text-xs text-slate-300">{tr('apt.total')}</div>
+          <div className="text-3xl font-bold">{data.total_power_w} W</div>
+        </div>
+      )}
+
+      {err && <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg p-2 text-sm">{err}</div>}
+
+      {devices.length === 0 ? (
+        <div className="bg-white rounded-lg p-4 text-sm text-gray-500 text-center">{tr('apt.none')}</div>
+      ) : devices.map(d => (
+        <div key={d.id} className="bg-white rounded-xl shadow-sm p-4">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="font-semibold text-slate-800">{d.name}</div>
+              <div className="text-xs text-gray-500">
+                {d.status?.online === false
+                  ? <span className="text-amber-600">⚠️ {tr('apt.offline')}</span>
+                  : d.controllable
+                    ? (d.status?.on ? '🟢 ' + tr('apt.stateOn') : '⚪️ ' + tr('apt.stateOff'))
+                    : tr('apt.readonly')}
+              </div>
+            </div>
+            {d.controllable && d.status?.online !== false && (
+              <button onClick={() => toggle(d)} disabled={busy === d.id}
+                className={`px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50 ${d.status?.on ? 'bg-slate-100 text-slate-700' : 'bg-emerald-600 text-white'}`}>
+                {busy === d.id ? tr('apt.working') : (d.status?.on ? tr('apt.off') : tr('apt.on'))}
+              </button>
+            )}
+          </div>
+          {(d.status?.power_w != null || d.status?.energy_kwh != null) && (
+            <div className="mt-3 grid grid-cols-2 gap-3 text-center">
+              {d.status?.power_w != null && (
+                <div className="bg-slate-50 rounded-lg p-2">
+                  <div className="text-[11px] text-gray-500">{tr('apt.now')}</div>
+                  <div className="text-lg font-bold text-slate-800">{d.status.power_w} W</div>
+                </div>
+              )}
+              {d.status?.energy_kwh != null && (
+                <div className="bg-slate-50 rounded-lg p-2">
+                  <div className="text-[11px] text-gray-500">{tr('apt.month')}</div>
+                  <div className="text-lg font-bold text-slate-800">{d.status.energy_kwh} kWh</div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      ))}
     </div>
   )
 }

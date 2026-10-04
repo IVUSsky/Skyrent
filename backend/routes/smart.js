@@ -1,81 +1,9 @@
 const express = require('express');
-const crypto  = require('crypto');
-const fetch   = require('node-fetch');
+const { tuyaRequest } = require('../lib/tuyaClient');
 
 module.exports = function(db) {
   const router = express.Router();
 
-  const ACCESS_ID     = process.env.TUYA_ACCESS_ID;
-  const ACCESS_SECRET = process.env.TUYA_ACCESS_SECRET;
-  const BASE_URL      = process.env.TUYA_BASE_URL || 'https://openapi.tuyaeu.com';
-
-  // ── Tuya API signing ────────────────────────────────────────
-  function sign(method, path, body, token, t, nonce) {
-    const bodyHash   = crypto.createHash('sha256').update(body || '').digest('hex');
-    const stringToSign = [method, bodyHash, '', path].join('\n');
-    const signStr = ACCESS_ID + token + t + nonce + stringToSign;
-    return crypto.createHmac('sha256', ACCESS_SECRET).update(signStr).digest('hex').toUpperCase();
-  }
-
-  // Sort query params alphabetically — required by Tuya signing algorithm
-  function sortedPath(path) {
-    const idx = path.indexOf('?');
-    if (idx === -1) return path;
-    const base   = path.slice(0, idx);
-    const sorted = path.slice(idx + 1).split('&').sort().join('&');
-    return base + '?' + sorted;
-  }
-
-  async function tuyaRequest(method, path, body) {
-    const t     = Date.now().toString();
-    const nonce = crypto.randomBytes(8).toString('hex');
-
-    // ── Step 1: Get access token ──────────────────────────────
-    const tokenPath = '/v1.0/token?grant_type=1';
-    const tokenStringToSign = ['GET', crypto.createHash('sha256').update('').digest('hex'), '', tokenPath].join('\n');
-    const tokenSignStr = ACCESS_ID + t + nonce + tokenStringToSign;
-    const tokenSign = crypto.createHmac('sha256', ACCESS_SECRET).update(tokenSignStr).digest('hex').toUpperCase();
-
-    const tokenRes = await fetch(`${BASE_URL}${tokenPath}`, {
-      headers: {
-        'client_id':   ACCESS_ID,
-        'sign':        tokenSign,
-        't':           t,
-        'sign_method': 'HMAC-SHA256',
-        'nonce':       nonce,
-      }
-    });
-    const tokenData = await tokenRes.json();
-    if (!tokenData.success) throw new Error('Tuya token error: ' + (tokenData.msg || JSON.stringify(tokenData)));
-    const token = tokenData.result.access_token;
-
-    // ── Step 2: Make actual request ───────────────────────────
-    const t2       = Date.now().toString();
-    const nonce2   = crypto.randomBytes(8).toString('hex');
-    const bodyStr  = body ? JSON.stringify(body) : '';
-    const bodyHash = crypto.createHash('sha256').update(bodyStr).digest('hex');
-    const signPath = sortedPath(path); // sort query params for signing
-    const stringToSign = [method, bodyHash, '', signPath].join('\n');
-    const signStr  = ACCESS_ID + token + t2 + nonce2 + stringToSign;
-    const reqSign  = crypto.createHmac('sha256', ACCESS_SECRET).update(signStr).digest('hex').toUpperCase();
-
-    const res = await fetch(`${BASE_URL}${signPath}`, {
-      method,
-      headers: {
-        'client_id':    ACCESS_ID,
-        'access_token': token,
-        'sign':         reqSign,
-        't':            t2,
-        'sign_method':  'HMAC-SHA256',
-        'nonce':        nonce2,
-        'Content-Type': 'application/json',
-      },
-      body: body ? bodyStr : undefined,
-    });
-    const result = await res.json();
-    console.log('[Tuya]', method, path, '->', JSON.stringify(result));
-    return result;
-  }
 
   // ── DB migrations ───────────────────────────────────────────
   try {
@@ -89,6 +17,9 @@ module.exports = function(db) {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )`);
   } catch(_) {}
+  // Разрешено ли е НАЕМАТЕЛЯТ да управлява устройството от портала. По
+  // подразбиране не — главният предпазител никога (виж lib/tenantDeviceAccess.js).
+  try { db.exec('ALTER TABLE smart_devices ADD COLUMN tenant_control INTEGER DEFAULT 0'); } catch(_) {}
 
   // ── GET /api/smart/devices — list configured devices ────────
   router.get('/devices', (req, res) => {
@@ -118,9 +49,10 @@ module.exports = function(db) {
   // ── PATCH /api/smart/devices/:id ────────────────────────────
   router.patch('/devices/:id', (req, res) => {
     try {
-      const { name, type, property_id } = req.body;
-      db.prepare('UPDATE smart_devices SET name=COALESCE(?,name), type=COALESCE(?,type), property_id=COALESCE(?,property_id) WHERE id=?')
-        .run(name || null, type || null, property_id || null, req.params.id);
+      const { name, type, property_id, tenant_control } = req.body;
+      db.prepare('UPDATE smart_devices SET name=COALESCE(?,name), type=COALESCE(?,type), property_id=COALESCE(?,property_id), tenant_control=COALESCE(?,tenant_control) WHERE id=?')
+        .run(name || null, type || null, property_id || null,
+             tenant_control == null ? null : (tenant_control ? 1 : 0), req.params.id);
       res.json({ ok: true });
     } catch(err) { res.status(500).json({ error: err.message }); }
   });

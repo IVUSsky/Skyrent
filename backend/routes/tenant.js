@@ -36,6 +36,9 @@ const ticketStorage = multer.diskStorage({
 });
 const ticketUpload = multer({ storage: ticketStorage, limits: { fileSize: 10 * 1024 * 1024 } });
 
+const { devicesForTenant, assertTenantMayControl } = require('../lib/tenantDeviceAccess');
+const { deviceStatus, switchDevice, configured: tuyaConfigured } = require('../lib/tuyaClient');
+
 module.exports = function(db) {
   const router = express.Router();
 
@@ -593,6 +596,44 @@ module.exports = function(db) {
   });
 
   // ── In-app notifications (tenant) ─────────────────────────
+  // ── Апартамент: смарт устройства на имота на наемателя ──────────────────
+  // Вижда всичко (консумация), управлява само изрично разрешеното.
+  router.get('/apartment', async (req, res) => {
+    try {
+      const propId = tenantPropertyId(req.user.id);
+      const list = devicesForTenant(db, propId);
+      const withStatus = [];
+      for (const d of list) {
+        const row = db.prepare('SELECT tuya_device_id FROM smart_devices WHERE id=?').get(d.id);
+        const st = await deviceStatus(row.tuya_device_id);
+        withStatus.push({ ...d, status: st });
+      }
+      const totalW = withStatus.reduce((s, d) => s + (d.status?.power_w || 0), 0);
+      res.json({ ok: true, property_id: propId, devices: withStatus, total_power_w: Math.round(totalW * 10) / 10 });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  router.post('/apartment/devices/:id/control', async (req, res) => {
+    try {
+      const propId = tenantPropertyId(req.user.id);
+      const chk = assertTenantMayControl(db, propId, Number(req.params.id));
+      if (!chk.ok) return res.status(chk.status).json({ error: chk.error });
+      if (typeof req.body?.on !== 'boolean') return res.status(400).json({ error: 'on (true/false) е задължително' });
+      if (!tuyaConfigured()) return res.status(503).json({ error: 'Връзката с устройствата не е настроена — пиши на собственика' });
+      const r = await switchDevice(chk.device.tuya_device_id, req.body.on);
+      // Следа кой е включил какво — за спорове „не съм го пипал"
+      try {
+        db.prepare(`CREATE TABLE IF NOT EXISTS smart_logs (
+          id INTEGER PRIMARY KEY AUTOINCREMENT, device_id INTEGER, action TEXT, value TEXT,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`).run();
+        db.prepare('INSERT INTO smart_logs (device_id, action, value) VALUES (?,?,?)')
+          .run(chk.device.id, req.body.on ? 'on' : 'off', JSON.stringify({ by: 'tenant', user_id: req.user.id }));
+      } catch (_) {}
+      if (!r.ok) return res.status(502).json({ error: 'Устройството не отговори — опитай пак след малко' });
+      res.json({ ok: true });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
   router.get('/notifications', (req, res) => {
     const rows = db.prepare(`
       SELECT id, kind, title, body, link, ref_type, ref_id, read_at, created_at
