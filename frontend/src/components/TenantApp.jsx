@@ -1291,6 +1291,23 @@ function AutopayCard() {
             <li>{tr('ap.b3')}</li>
             <li>{tr('ap.b4')}</li>
           </ul>
+          <details className="mb-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
+            <summary className="cursor-pointer text-sm font-medium text-slate-700">{tr('dd.help')}</summary>
+            <div className="mt-2 space-y-2 text-xs text-slate-600">
+              <p>{tr('dd.which')}</p>
+              <div>
+                <div className="font-medium text-slate-700 mb-1">{tr('dd.revolutTitle')}</div>
+                <ol className="list-decimal ml-4 space-y-0.5">
+                  <li>{tr('dd.r1')}</li>
+                  <li>{tr('dd.r2')}</li>
+                  <li>{tr('dd.r3')}</li>
+                  <li>{tr('dd.r4')}</li>
+                  <li>{tr('dd.r5')}</li>
+                </ol>
+              </div>
+              <p className="rounded border border-amber-200 bg-amber-50 p-2 text-amber-900">{tr('dd.bgBank')}</p>
+            </div>
+          </details>
           <button onClick={setup} disabled={loading}
             className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-semibold px-4 py-2 rounded-lg">
             {loading ? tr('ap.starting') : tr('ap.activate')}
