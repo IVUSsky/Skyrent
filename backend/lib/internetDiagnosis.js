@@ -109,4 +109,4 @@ function diagnoseInternet(db, userId, now = new Date()) {
   return out;
 }
 
-module.exports = { diagnoseInternet, minutesSince, SILENT_MINUTES };
+module.exports = { diagnoseInternet, minutesSince, propertyIdFor, SILENT_MINUTES };

@@ -39,3 +39,51 @@ describe('изпълнение на diagnose_internet', () => {
     expect(r.steps.join(' ')).toMatch(/ПЪРВИЯ порт/);
   });
 });
+
+describe("интернет достъп и контакти", () => {
+  let db;
+  beforeEach(() => {
+    db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE contracts (id INTEGER PRIMARY KEY, tenant_user_id INTEGER, property_id INTEGER, status TEXT, created_at TEXT);
+      CREATE TABLE internet_accounts (id INTEGER PRIMARY KEY AUTOINCREMENT, property_id INTEGER, username TEXT, password TEXT, status TEXT, valid_until TEXT);
+      CREATE TABLE routers (id INTEGER PRIMARY KEY AUTOINCREMENT, property_id INTEGER, mode TEXT);
+      CREATE TABLE apartment_knowledge (id INTEGER PRIMARY KEY AUTOINCREMENT, property_id INTEGER, wifi_ssid TEXT, wifi_password TEXT, contacts_json TEXT);
+      CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT);
+      INSERT INTO contracts (id, tenant_user_id, property_id, status, created_at) VALUES (1, 7, 58, 'active', '2026-09-01');
+      INSERT INTO settings (key, value) VALUES ('issuer', '{"name":"Скай Кепитъл ЕООД","email":"info@skycapital.pro","phone":"+359888123456"}');
+    `);
+  });
+
+  it("връща Wi-Fi и срока, когато са записани", () => {
+    db.prepare("INSERT INTO apartment_knowledge (property_id, wifi_ssid, wifi_password) VALUES (58, 'Sky rent ap.46', 'tajna123')").run();
+    db.prepare("INSERT INTO internet_accounts (property_id, username, password, status, valid_until) VALUES (58, 'user-27-8b65', 'pass', 'active', '2026-10-17T08:41:15Z')").run();
+    db.prepare("INSERT INTO routers (property_id, mode) VALUES (58, 'flat')").run();
+    const r = runTool(db, 7, "get_internet_access");
+    expect(r).toMatchObject({ has_service: true, wifi_ssid: "Sky rent ap.46", wifi_password: "tajna123", login_required: false });
+    expect(r.valid_until).toMatch(/2026-10-17/);
+  });
+
+  it("без записана Wi-Fi парола казва честно какво липсва", () => {
+    db.prepare("INSERT INTO internet_accounts (property_id, username, password, status, valid_until) VALUES (58, 'u', 'p', 'active', '2026-10-17T08:41:15Z')").run();
+    const r = runTool(db, 7, "get_internet_access");
+    expect(r.wifi_password).toBeNull();
+    expect(r.note).toMatch(/Поддръжка/);
+  });
+
+  it("имот без интернет данни → няма услуга", () => {
+    expect(runTool(db, 7, "get_internet_access")).toMatchObject({ has_service: false });
+  });
+
+  it("контактите идват от издателя и от имота", () => {
+    db.prepare("INSERT INTO apartment_knowledge (property_id, contacts_json) VALUES (58, '[{\"role\":\"домоуправител\",\"name\":\"Иван\",\"phone\":\"0888\"}]')").run();
+    const r = runTool(db, 7, "get_contacts");
+    expect(r.landlord).toMatchObject({ email: "info@skycapital.pro", phone: "+359888123456" });
+    expect(r.property_contacts[0]).toMatchObject({ role: "домоуправител" });
+  });
+
+  it("счупен contacts_json не чупи отговора", () => {
+    db.prepare("INSERT INTO apartment_knowledge (property_id, contacts_json) VALUES (58, 'не-json')").run();
+    expect(runTool(db, 7, "get_contacts").property_contacts).toEqual([]);
+  });
+});

@@ -3,7 +3,7 @@
 // Single rolling conversation per tenant (no session concept yet).
 
 const Anthropic = require('@anthropic-ai/sdk');
-const { diagnoseInternet } = require('./internetDiagnosis');
+const { diagnoseInternet, propertyIdFor } = require('./internetDiagnosis');
 
 const MODEL = 'claude-haiku-4-5-20251001';
 const MAX_HISTORY = 20;     // turns sent back to Claude on each call
@@ -231,6 +231,16 @@ const TOOLS = [
     description: 'Проверява състоянието на интернета за имота на наемателя: платен ли е пакетът, обажда ли се рутерът, спрян ли е достъпът от системата. Връща вероятната причина и конкретни стъпки. Използвай ВИНАГИ при оплакване „няма интернет", „нета не работи", „Wi-Fi не върви", бавен интернет или въпрос докога е платен интернетът.',
     input_schema: { type: 'object', properties: {}, required: [] },
   },
+  {
+    name: 'get_internet_access',
+    description: 'Връща данните за интернет достъпа на наемателя — име на Wi-Fi мрежата и парола (ако са записани), потребител и парола за интернет услугата, докога е платена. Използвай при въпроси „каква е паролата за Wi-Fi", „как да се свържа с нета", „докога ми е платен интернетът".',
+    input_schema: { type: 'object', properties: {}, required: [] },
+  },
+  {
+    name: 'get_contacts',
+    description: 'Връща данните за връзка с наемодателя (име, имейл, телефон) и контактите, записани за имота (домоуправител, техник). Използвай САМО когато наемателят изрично поиска контакт — имейл, телефон, „как да се свържа с вас".',
+    input_schema: { type: 'object', properties: {}, required: [] },
+  },
   // Server-side tool — Anthropic runs the search and feeds results to the
   // model inline. max_uses caps cost (~$10 per 1000 searches).
   {
@@ -248,6 +258,8 @@ const CUSTOM_TOOL_NAMES = new Set([
   'get_deposit_info',
   'get_payment_methods',
   'diagnose_internet',
+  'get_internet_access',
+  'get_contacts',
 ]);
 
 // ── Tool runners — internal queries ───────────────────────────────────
@@ -304,6 +316,51 @@ function runTool(db, userId, name) {
       currency: c.currency || 'EUR',
       contract_number: c.contract_number,
       note: 'Депозитът се връща при освобождаване на имота след проверка на инвентара.',
+    };
+  }
+
+  if (name === 'get_internet_access') {
+    const pid = propertyIdFor(db, userId);
+    if (!pid) return { has_service: false, note: 'Няма активен договор към имот.' };
+    const acc = db.prepare(
+      'SELECT username, password, status, valid_until FROM internet_accounts WHERE property_id=? ORDER BY id DESC LIMIT 1'
+    ).get(pid);
+    const router = db.prepare('SELECT mode FROM routers WHERE property_id=? LIMIT 1').get(pid);
+    let kb = {};
+    try { kb = db.prepare('SELECT wifi_ssid, wifi_password FROM apartment_knowledge WHERE property_id=?').get(pid) || {}; } catch (_) {}
+    if (!acc && !kb.wifi_ssid && !kb.wifi_password) {
+      return { has_service: false, note: 'За този имот няма записани данни за интернет. Ако мрежата е на наемателя, паролата е при него; иначе да пише в раздел 🛟 Поддръжка.' };
+    }
+    return {
+      has_service: true,
+      wifi_ssid: kb.wifi_ssid || null,
+      wifi_password: kb.wifi_password || null,
+      // При flat рутер няма отделно влизане — достъпът е по кабел/Wi-Fi парола
+      login_required: router ? router.mode !== 'flat' : null,
+      username: acc ? acc.username : null,
+      password: acc ? acc.password : null,
+      status: acc ? acc.status : null,
+      valid_until: acc ? acc.valid_until : null,
+      note: kb.wifi_password ? null : 'Паролата за Wi-Fi не е записана в системата — наемателят да пише в раздел 🛟 Поддръжка.',
+    };
+  }
+
+  if (name === 'get_contacts') {
+    const issuer = getIssuer(db);
+    const pid = propertyIdFor(db, userId);
+    let contacts = [];
+    try {
+      const row = pid ? db.prepare('SELECT contacts_json FROM apartment_knowledge WHERE property_id=?').get(pid) : null;
+      contacts = JSON.parse((row && row.contacts_json) || '[]');
+    } catch (_) { contacts = []; }
+    return {
+      landlord: {
+        name: issuer.name || 'Sky Capital',
+        email: issuer.email || null,
+        phone: issuer.phone || null,
+      },
+      property_contacts: contacts,
+      preferred_channel: 'Раздел 🛟 Поддръжка в портала — там се пише писмено и остава следа.',
     };
   }
 
@@ -379,6 +436,8 @@ async function askAgent(db, userId, userMessage) {
 
 НИКОГА не насочвай наемателя към телефон, имейл, обаждане или друг човешки контакт. Дори когато наистина не знаеш отговор — не препоръчвай контакт с управителя.
 
+ИЗКЛЮЧЕНИЕ: ако наемателят ИЗРИЧНО поиска контакт („дай ми имейла", „какъв е телефонът", "how do I contact you"), това не е препращане — извикай get_contacts и му дай данните. Когато не знаеш отговор на друг въпрос, насочвай към раздел 🛟 Поддръжка в портала (вътрешен канал, не е „обади се на").
+
 ═══ ЗАДЪЛЖИТЕЛНИ TOOL ИЗВИКВАНИЯ ═══
 Преди да отговориш на следните типове въпроси, ВИНАГИ първо извикай съответния tool. НЕ казвай "нямам тази информация" преди да си опитал tool-а:
 
@@ -388,7 +447,9 @@ async function askAgent(db, userId, userMessage) {
 | дължима сума, неплатено, баланс, фактура за месец X | get_unpaid_invoices |
 | как да платя, IBAN, банкова сметка, картово плащане | get_payment_methods |
 | депозит — размер, как се връща | get_deposit_info |
-| няма интернет, Wi-Fi не работи, бавен нет, докога е платен интернетът | diagnose_internet |
+| няма интернет, Wi-Fi не работи, бавен нет | diagnose_internet |
+| парола за Wi-Fi, име на мрежата, потребител/парола за нета, докога е платен интернетът | get_internet_access |
+| имейл или телефон за връзка, „как да се свържа с вас" | get_contacts |
 
 Ако tool върне поле = null или липсва (напр. monthly_rent: null), кажи: "В системата няма попълнена сума за наема" и насочи към раздел "📋 Договор" в портала. НЕ казвай "обърни се към управителя".
 
