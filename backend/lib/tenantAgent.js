@@ -3,6 +3,7 @@
 // Single rolling conversation per tenant (no session concept yet).
 
 const Anthropic = require('@anthropic-ai/sdk');
+const { diagnoseInternet } = require('./internetDiagnosis');
 
 const MODEL = 'claude-haiku-4-5-20251001';
 const MAX_HISTORY = 20;     // turns sent back to Claude on each call
@@ -225,6 +226,11 @@ const TOOLS = [
     description: 'Връща наличните начини за плащане на наема — IBAN на наемодателя и дали е достъпно картово плащане. Използвай когато наемателят пита как да плати.',
     input_schema: { type: 'object', properties: {}, required: [] },
   },
+  {
+    name: 'diagnose_internet',
+    description: 'Проверява състоянието на интернета за имота на наемателя: платен ли е пакетът, обажда ли се рутерът, спрян ли е достъпът от системата. Връща вероятната причина и конкретни стъпки. Използвай ВИНАГИ при оплакване „няма интернет", „нета не работи", „Wi-Fi не върви", бавен интернет или въпрос докога е платен интернетът.',
+    input_schema: { type: 'object', properties: {}, required: [] },
+  },
   // Server-side tool — Anthropic runs the search and feeds results to the
   // model inline. max_uses caps cost (~$10 per 1000 searches).
   {
@@ -241,6 +247,7 @@ const CUSTOM_TOOL_NAMES = new Set([
   'get_contract_details',
   'get_deposit_info',
   'get_payment_methods',
+  'diagnose_internet',
 ]);
 
 // ── Tool runners — internal queries ───────────────────────────────────
@@ -298,6 +305,10 @@ function runTool(db, userId, name) {
       contract_number: c.contract_number,
       note: 'Депозитът се връща при освобождаване на имота след проверка на инвентара.',
     };
+  }
+
+  if (name === 'diagnose_internet') {
+    return diagnoseInternet(db, userId);
   }
 
   if (name === 'get_payment_methods') {
@@ -377,8 +388,17 @@ async function askAgent(db, userId, userMessage) {
 | дължима сума, неплатено, баланс, фактура за месец X | get_unpaid_invoices |
 | как да платя, IBAN, банкова сметка, картово плащане | get_payment_methods |
 | депозит — размер, как се връща | get_deposit_info |
+| няма интернет, Wi-Fi не работи, бавен нет, докога е платен интернетът | diagnose_internet |
 
 Ако tool върне поле = null или липсва (напр. monthly_rent: null), кажи: "В системата няма попълнена сума за наема" и насочи към раздел "📋 Договор" в портала. НЕ казвай "обърни се към управителя".
+
+═══ ИНТЕРНЕТ — КАК СЕ ДИАГНОСТИЦИРА ═══
+При всяко оплакване за интернет първо извикай diagnose_internet и води наемателя по върнатите стъпки — ЕДНА стъпка наведнъж, с въпрос какво се случва, а не целия списък наведнъж.
+- likely_cause = expired_package → пакетът е изтекъл; насочи към раздел „🌐 Интернет" за нов пакет.
+- likely_cause = router_offline → рутерът няма линия. Най-честата причина е кабелът на доставчика: той трябва да е в ПЪРВИЯ порт на рутера (ether1 — най-вляво, до захранването). Ако е преместен в друг порт, рутерът свети и Wi-Fi мрежата се вижда, но интернет няма. Питай първо: свети ли рутерът; в кой поред е кабелът от стената; след това рестарт за 10 секунди.
+- likely_cause = device_side → линията работи; проблемът е в устройството или мрежата, към която е свързано.
+- likely_cause = blocked_by_system → кажи да изчака 5 минути след плащане, после да пише в Поддръжка.
+НЕ измисляй скорости, пароли за Wi-Fi или настройки, които ги няма в данните.
 
 ═══ ОБЩИ ПРАВИЛА ═══
 - Засечи езика на въпроса (български / English / русский / українська) и отговори на СЪЩИЯ език. Default — български.
@@ -465,4 +485,6 @@ async function askAgent(db, userId, userMessage) {
   return finalText;
 }
 
-module.exports = { askAgent, loadHistory };
+// TOOLS/runTool се изнасят и за тестове — така несъответствие между името на
+// инструмента и изпълнителя му се хваща, вместо да мълчи до първия реален въпрос.
+module.exports = { askAgent, loadHistory, TOOLS, CUSTOM_TOOL_NAMES, runTool };
