@@ -32,7 +32,9 @@ const RECORD_START_RE = /^(\d{9,11})(\d{4}-\d{2}-\d{2})(.*)$/;
 // Сума_eur + сума_bgn + ОП в края на ред. СТРОГ thousand sep:
 // `\d{1,3}(?: \d{3})*\.\d{2}` — иначе цифри от датата (напр. "22.03.24")
 // се сливаха с амоунта (24587.31 вместо 587.31).
-const AMOUNT_END_RE   = /^(\d{1,3}(?: \d{3})*\.\d{2})(\d{1,3}(?: \d{3})*\.\d{2})(ДТ|КТ)$/;
+// От 26.09.2026 банката спря левовата равностойност: редът е само „37.00    КТ"
+// вместо „102.00199.49КТ". Втората сума и интервалите преди операцията са опционални.
+const AMOUNT_END_RE   = /^(\d{1,3}(?: \d{3})*\.\d{2})(\d{1,3}(?: \d{3})*\.\d{2})?\s*(ДТ|КТ)$/;
 // Шум който се отрязва между записи (page separators).
 const NOISE_RE        = /^(-{20,}|Стр:\s*\d+|\s*)$/;
 // Линии които НЕ са основание (вътре в record body).
@@ -109,7 +111,7 @@ async function parseProBankingPdf(buffer) {
       // Check if current line is amount-end
       const amt = cur.match(AMOUNT_END_RE);
       if (amt) {
-        endInfo = { eur: parseAmount(amt[1]), bgn: parseAmount(amt[2]), op: amt[3] };
+        endInfo = { eur: parseAmount(amt[1]), bgn: amt[2] ? parseAmount(amt[2]) : null, op: amt[3] };
         j++;
         break;
       }
@@ -171,21 +173,29 @@ async function parseProBankingPdf(buffer) {
 // { index, eur, bgn, op, endsAtLineEnd }.
 function matchAmountAnywhere(str) {
   if (!str) return null;
-  // СТРОГА thousand separator format за да избегнем year-merge bug:
-  // "/22.03.24587.31" → не трябва да match-не "24587.31" а "587.31".
-  const re = /(\d{1,3}(?: \d{3})*\.\d{2})(\d{1,3}(?: \d{3})*\.\d{2})(ДТ|КТ)/g;
-  let m, last = null;
-  while ((m = re.exec(str)) !== null) {
-    last = m;
+  // Два формата, пробвани в този ред (НЕ един израз с опционална втора сума —
+  // той разчиташе "22.03.24587.31    ДТ" като 3.24 + 587.31):
+  //   1. до 25.09.2026: евро + левова равностойност, слепени ("102.00199.49КТ")
+  //   2. от 26.09.2026: само евро, с интервали ("37.00    КТ")
+  // Строгият разделител за хиляди пази от сливане с дата в текста.
+  const PATTERNS = [
+    { re: /(\d{1,3}(?: \d{3})*\.\d{2})(\d{1,3}(?: \d{3})*\.\d{2})(ДТ|КТ)/g, two: true },
+    { re: /(\d{1,3}(?: \d{3})*\.\d{2})\s+(ДТ|КТ)/g, two: false },
+    { re: /(\d{1,3}(?: \d{3})*\.\d{2})(ДТ|КТ)/g, two: false },
+  ];
+  for (const { re, two } of PATTERNS) {
+    let m, last = null;
+    while ((m = re.exec(str)) !== null) last = m;
+    if (!last) continue;
+    return {
+      index: last.index,
+      eur: parseAmount(last[1]),
+      bgn: two ? parseAmount(last[2]) : null,
+      op: two ? last[3] : last[2],
+      endsAtLineEnd: last.index + last[0].length === str.length,
+    };
   }
-  if (!last) return null;
-  return {
-    index: last.index,
-    eur: parseAmount(last[1]),
-    bgn: parseAmount(last[2]),
-    op: last[3],
-    endsAtLineEnd: last.index + last[0].length === str.length,
-  };
+  return null;
 }
 
 function parseAmount(s) {
@@ -267,4 +277,6 @@ function recordToTransaction(rec, accountCurrency) {
   };
 }
 
-module.exports = { parseProBankingPdf };
+// AMOUNT_END_RE/matchAmountAnywhere се изнасят за тест — форматът на
+// извлечението се сменя от банката и това трябва да се хваща с тест, не на живо.
+module.exports = { parseProBankingPdf, AMOUNT_END_RE, matchAmountAnywhere };
