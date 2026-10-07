@@ -7,6 +7,7 @@ const { optimizeMany, isDisplayable } = require('../lib/imageOptimize');
 const { imagesOnly, safeExt } = require('../lib/uploadFilter');
 const { renovationByProperty } = require('../lib/renovationCosts');
 const { reconcileInvoices } = require('../lib/invoiceReconcile');
+const { detectPrepaid } = require('../lib/prepaidDetect');
 
 const DATA_DIR   = process.env.DATA_DIR || path.join(__dirname, '../data');
 const PHOTOS_DIR = path.join(DATA_DIR, 'property_photos');
@@ -286,24 +287,20 @@ module.exports = function(db) {
          WHERE категория = 'наем' AND месец = ? AND property_id IS NOT NULL`
       ).all(prevMonth);
 
-      const prepaid = [];
-      for (const tx of prevTxs) {
-        if (paidThisMonth.has(tx.property_id) || manualThisMonth.has(tx.property_id)) continue;
-        const prop = propMap[tx.property_id];
-        if (!prop) continue;
-        const expected = prop.наем || 0;
-        if (expected <= 0) continue;
-        const diffPct = Math.abs(tx.сума - expected) / expected;
-        if (diffPct <= 0.1) {
-          prepaid.push({
-            property_id: tx.property_id,
-            адрес: prop.адрес,
-            наемател: prop.наемател,
-            expected,
-            tx_id: tx.id, дата: tx.дата, сума: tx.сума, контрагент: tx.контрагент,
-          });
-        }
-      }
+      // Колко е платено за предходния месец БЕЗ конкретния превод — ако без
+      // него месецът не е покрит, преводът е наемът за него, а не предплащане.
+      const prevPaidStmt = db.prepare(
+        `SELECT COALESCE(SUM(CASE WHEN UPPER(COALESCE(currency,'BGN'))='BGN' THEN сума/1.95583 ELSE сума END), 0) AS s
+           FROM transactions
+          WHERE категория='наем' AND operation='Кт' AND property_id=? AND месец=? AND id != ?`
+      );
+      const prevManual = db.prepare('SELECT COALESCE(SUM(amount),0) AS s FROM manual_rent_payments WHERE property_id=? AND month=?');
+      const prepaid = detectPrepaid({
+        prevTxs, prevMonth, propMap,
+        isPaidThisMonth: (pid) => paidThisMonth.has(pid) || manualThisMonth.has(pid),
+        paidPrevExcluding: (pid, txId) =>
+          prevPaidStmt.get(pid, prevMonth, txId).s + prevManual.get(pid, prevMonth).s,
+      });
 
       // 3. Unassigned 'наем' txs (no property_id) for the month
       const unassigned = db.prepare(
