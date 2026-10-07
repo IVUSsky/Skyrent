@@ -8,6 +8,8 @@ const { imagesOnly, safeExt } = require('../lib/uploadFilter');
 const { renovationByProperty } = require('../lib/renovationCosts');
 const { reconcileInvoices } = require('../lib/invoiceReconcile');
 const { detectPrepaid } = require('../lib/prepaidDetect');
+const { keepRentProperties } = require('../lib/rentScope');
+const { withTenantEmail } = require('../lib/tenantEmailFallback');
 
 const DATA_DIR   = process.env.DATA_DIR || path.join(__dirname, '../data');
 const PHOTOS_DIR = path.join(DATA_DIR, 'property_photos');
@@ -134,9 +136,12 @@ module.exports = function(db) {
   // Rent payment status for a given month
   router.get('/rent-status', (req, res) => {
     const month = req.query.month || new Date().toISOString().slice(0, 7);
-    const props = db.prepare(
+    // Имот само с интернет договор (ап.45/46) няма наем — не влиза в справката.
+    // Имейлът се допълва от договора, когато по имота липсва — иначе бутонът
+    // за напомняне нямаше на кого да пише.
+    const props = withTenantEmail(db, keepRentProperties(db, db.prepare(
       `SELECT * FROM properties WHERE статус = '✅' AND наемател IS NOT NULL AND наемател != '' ORDER BY адрес`
-    ).all();
+    ).all()));
 
     // Bank-imported payments — aggregate + per-tx detail
     const bankPaid = db.prepare(
@@ -234,10 +239,10 @@ module.exports = function(db) {
       const prevDate = new Date(y, m - 2, 1);
       const prevMonth = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, '0')}`;
 
-      const activeProps = db.prepare(
+      const activeProps = keepRentProperties(db, db.prepare(
         `SELECT id, адрес, наем, наемател FROM properties
          WHERE статус = '✅' AND наемател IS NOT NULL AND наемател != ''`
-      ).all();
+      ).all());
       const propMap = {};
       activeProps.forEach(p => { propMap[p.id] = p; });
 
@@ -352,12 +357,12 @@ module.exports = function(db) {
       const monthFrom = `${year}-01`;
       const monthTo   = `${year}-12`;
 
-      const props = db.prepare(
+      const props = keepRentProperties(db, db.prepare(
         `SELECT id, адрес, район, наемател, наем
          FROM properties
          WHERE статус = '✅' AND наемател IS NOT NULL AND наемател != ''
          ORDER BY адрес`
-      ).all();
+      ).all());
 
       const bank = db.prepare(
         `SELECT property_id, месец,
