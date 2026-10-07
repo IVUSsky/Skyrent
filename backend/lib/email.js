@@ -28,4 +28,16 @@ function parseRecipients(raw) {
   return out;
 }
 
-module.exports = { parseRecipients, EMAIL_RE };
+// Подателят на изходящите писма.
+//
+// Напомнянията за наем ползваха smtp.user от настройките, а той е празен →
+// пращаха се от onboarding@resend.dev. Това е тестовият адрес на Resend: от
+// него може да се пише САМО на собственика на акаунта, затова писмата до
+// наематели не тръгваха (07.10.2026 — гараж 62). Останалата система ползва
+// RESEND_FROM_EMAIL. Тук редът е еднакъв за всички.
+function resolveSender(smtp = {}) {
+  const configured = String(smtp.user || '').trim();
+  return process.env.RESEND_FROM_EMAIL || configured || 'info@skycapital.pro';
+}
+
+module.exports = { parseRecipients, EMAIL_RE, resolveSender };

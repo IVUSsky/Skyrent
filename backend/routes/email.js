@@ -1,6 +1,7 @@
 const express = require('express');
 const { Resend } = require('resend');
 const path = require('path');
+const { resolveSender } = require('../lib/email');
 
 module.exports = function(db) {
   const router = express.Router();
@@ -61,7 +62,7 @@ module.exports = function(db) {
 
     const smtp = getSmtpConfig();
     const senderName = from_name || smtp.from_name || 'Sky Capital';
-    const fromEmail = smtp.user || 'onboarding@resend.dev';
+    const fromEmail = resolveSender(smtp);
 
     const bodyHtml = `
       <p>Уважаеми/а <strong>${tenant_name}</strong>,</p>
@@ -96,7 +97,7 @@ module.exports = function(db) {
 
     const smtp = getSmtpConfig();
     const senderName = from_name || smtp.from_name || 'Sky Capital';
-    const fromEmail = smtp.user || 'onboarding@resend.dev';
+    const fromEmail = resolveSender(smtp);
 
     const results = [];
     for (const t of tenants) {

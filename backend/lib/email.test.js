@@ -78,3 +78,26 @@ describe('parseRecipients — validation / errors', () => {
     expect(() => parseRecipients('user@example')).toThrow(/Невалиден имейл/);
   });
 });
+
+describe('подател на изходящите писма', () => {
+  const { resolveSender } = require('./email');
+  const OLD = process.env.RESEND_FROM_EMAIL;
+  afterEach(() => { if (OLD === undefined) delete process.env.RESEND_FROM_EMAIL; else process.env.RESEND_FROM_EMAIL = OLD; });
+
+  it('променливата на средата е с предимство — като в останалата система', () => {
+    process.env.RESEND_FROM_EMAIL = 'info@skycapital.pro';
+    expect(resolveSender({ user: 'drug@example.com' })).toBe('info@skycapital.pro');
+  });
+
+  it('без променлива се ползва настройката', () => {
+    delete process.env.RESEND_FROM_EMAIL;
+    expect(resolveSender({ user: 'office@skycapital.pro' })).toBe('office@skycapital.pro');
+  });
+
+  it('празна настройка → фирменият адрес, НЕ тестовият на Resend', () => {
+    delete process.env.RESEND_FROM_EMAIL;
+    expect(resolveSender({})).toBe('info@skycapital.pro');
+    expect(resolveSender({ user: '   ' })).toBe('info@skycapital.pro');
+    expect(resolveSender()).not.toMatch(/resend\.dev/);
+  });
+});
