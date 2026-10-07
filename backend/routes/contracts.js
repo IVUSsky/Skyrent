@@ -188,6 +188,14 @@ function buildFields(contract, issuer) {
     'ИМОТ_АДРЕС':             contract.property_address     || '',
     'ИМОТ_ОПИСАНИЕ':          contract.property_description || '',
     'ИМОТ_ПЛОЩ':              contract.property_area ? `${contract.property_area} кв.м.` : '',
+    // Бланката редеше трите поотделно с твърди запетаи и завършваше с точка:
+    // при празно описание членът започваше със запетая, а „кв.м.“ + точката
+    // даваше „65 кв.м..“. Тук се сглобява само от наличните части.
+    'ИМОТ_ПЪЛНО_ОПИСАНИЕ':    [
+                                contract.property_description,
+                                contract.property_address,
+                                contract.property_area ? `с обща площ ${contract.property_area} кв.м` : '',
+                              ].map(x => String(x || '').trim()).filter(Boolean).join(', '),
     'НАЕМ':                   Number(contract.monthly_rent || 0).toLocaleString('bg-BG', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
     'ВАЛУТА':                 contract.currency || 'EUR',
     'ВАЛУТА_EN':              contract.currency || 'EUR',
@@ -253,7 +261,11 @@ function generateContractPDF(contract, template, issuer, photos = [], opts = {})
 
     const ML = 50;
     const MR = 50;
-    const HEADER_H = 100; // height reserved for letterhead
+    // Договор на физическо лице не се пише на фирмена бланка: логото, ЕИК-ът и
+    // IBAN-ът на дружеството нямат място в него — договорът казва „плащане в
+    // брой“, а на същата страница стоеше банковата сметка на фирмата.
+    const letterhead = landlordIsCompany(contract, issuer);
+    const HEADER_H = letterhead ? 100 : 46; // височина за бланката
     const FOOTER_H = 45;
 
     const doc = new PDFDocument({
@@ -292,35 +304,38 @@ function generateContractPDF(contract, template, issuer, photos = [], opts = {})
       pageNum++;
       const W = doc.page.width;
 
-      // Logo — left
-      if (resolvedLogo) {
-        try { doc.image(resolvedLogo, ML, 8, { height: 68, fit: [175, 68] }); } catch(_) {}
+      if (letterhead) {
+        // Logo — left
+        if (resolvedLogo) {
+          try { doc.image(resolvedLogo, ML, 8, { height: 68, fit: [175, 68] }); } catch(_) {}
+        }
+
+        // Company info — right (each line at fixed y, no flow)
+        const infoX = W - MR - 210;
+        const infoW = 210;
+        const infoRows = [
+          { text: issuer.name || '', bold: true,  y: 12 },
+          issuer.eik     ? { text: `ЕИК: ${issuer.eik}`,    bold: false, y: 24 } : null,
+          issuer.address ? { text: issuer.address,           bold: false, y: 35 } : null,
+          issuer.email   ? { text: issuer.email,             bold: false, y: 46 } : null,
+          issuer.iban    ? { text: `IBAN: ${issuer.iban}`,   bold: false, y: 57 } : null,
+        ].filter(Boolean);
+
+        infoRows.forEach(({ text, bold, y }) => {
+          doc.save();
+          doc.font(bold ? 'B' : 'R').fontSize(bold ? 8 : 7).fillColor(bold ? INK : MUTED);
+          // Clip to prevent overflow into logo area
+          doc.rect(infoX, y, infoW, 12).clip();
+          doc.text(text, infoX, y, { width: infoW, align: 'right', lineBreak: false });
+          doc.restore();
+        });
       }
-
-      // Company info — right (each line at fixed y, no flow)
-      const infoX = W - MR - 210;
-      const infoW = 210;
-      const infoRows = [
-        { text: issuer.name || '', bold: true,  y: 12 },
-        issuer.eik     ? { text: `ЕИК: ${issuer.eik}`,    bold: false, y: 24 } : null,
-        issuer.address ? { text: issuer.address,           bold: false, y: 35 } : null,
-        issuer.email   ? { text: issuer.email,             bold: false, y: 46 } : null,
-        issuer.iban    ? { text: `IBAN: ${issuer.iban}`,   bold: false, y: 57 } : null,
-      ].filter(Boolean);
-
-      infoRows.forEach(({ text, bold, y }) => {
-        doc.save();
-        doc.font(bold ? 'B' : 'R').fontSize(bold ? 8 : 7).fillColor(bold ? INK : MUTED);
-        // Clip to prevent overflow into logo area
-        doc.rect(infoX, y, infoW, 12).clip();
-        doc.text(text, infoX, y, { width: infoW, align: 'right', lineBreak: false });
-        doc.restore();
-      });
 
       // Разделител: тънка линия на цялата ширина + къс брас акцент отляво.
       // Визуалната система: брасът е за акцент, никога за големи площи.
-      doc.moveTo(ML, 82).lineTo(W - MR, 82).lineWidth(0.6).strokeColor(HAIR).stroke();
-      doc.moveTo(ML, 82).lineTo(ML + 46, 82).lineWidth(1.6).strokeColor(BRASS).stroke();
+      const ruleY = letterhead ? 82 : 28;
+      doc.moveTo(ML, ruleY).lineTo(W - MR, ruleY).lineWidth(0.6).strokeColor(HAIR).stroke();
+      doc.moveTo(ML, ruleY).lineTo(ML + 46, ruleY).lineWidth(1.6).strokeColor(BRASS).stroke();
 
       // Footer — draw in bottom margin area, temporarily disable bottom margin check
       const fy = PH - 32;
@@ -328,7 +343,7 @@ function generateContractPDF(contract, template, issuer, photos = [], opts = {})
       doc.page.margins.bottom = 0;
       doc.moveTo(ML, fy).lineTo(W - MR, fy).lineWidth(0.4).strokeColor(HAIR).stroke();
       doc.font('R').fontSize(7).fillColor(MUTED);
-      doc.text(issuer.name || '', ML, fy + 6, { width: PW / 2, lineBreak: false });
+      if (letterhead) doc.text(issuer.name || '', ML, fy + 6, { width: PW / 2, lineBreak: false });
       doc.text(`с. ${pageNum}`, ML, fy + 6, { width: PW, align: 'right', lineBreak: false });
       doc.page.margins.bottom = savedBottom;
 
@@ -795,7 +810,9 @@ function generateAnnexPDF(annex, contract, issuer) {
     const cno = contract.contract_number || ('Д' + (contract.id || ''));
 
     const ML = 50, MR = 50;
-    const HEADER_H = 100, FOOTER_H = 45;
+    // Анексът следва бланката на договора (виж landlordIsCompany).
+    const letterhead = landlordIsCompany(contract, issuer);
+    const HEADER_H = letterhead ? 100 : 46, FOOTER_H = 45;
 
     const doc = new PDFDocument({
       size: 'A4',
@@ -825,14 +842,14 @@ function generateAnnexPDF(annex, contract, issuer) {
       inHeader = true;
       pageNum++;
       const W = doc.page.width;
-      if (resolvedLogo) { try { doc.image(resolvedLogo, ML, 8, { height: 68, fit: [175, 68] }); } catch(_) {} }
+      if (letterhead && resolvedLogo) { try { doc.image(resolvedLogo, ML, 8, { height: 68, fit: [175, 68] }); } catch(_) {} }
       const infoX = W - MR - 210;
-      [
+      (letterhead ? [
         { text: issuer.name || '', bold: true,  y: 12 },
         issuer.eik     ? { text: `ЕИК: ${issuer.eik}`,  bold: false, y: 24 } : null,
         issuer.address ? { text: issuer.address,         bold: false, y: 35 } : null,
         issuer.iban    ? { text: `IBAN: ${issuer.iban}`, bold: false, y: 57 } : null,
-      ].filter(Boolean).forEach(({ text, bold, y }) => {
+      ] : []).filter(Boolean).forEach(({ text, bold, y }) => {
         doc.save();
         doc.font(bold ? 'B' : 'R').fontSize(bold ? 8 : 7).fillColor(bold ? '#111827' : '#4b5563');
         doc.rect(infoX, y, 210, 12).clip();
@@ -845,7 +862,7 @@ function generateAnnexPDF(annex, contract, issuer) {
       doc.page.margins.bottom = 0;
       doc.moveTo(ML, fy).lineTo(W - MR, fy).lineWidth(0.4).strokeColor(HAIR).stroke();
       doc.font('R').fontSize(7).fillColor(MUTED);
-      doc.text(issuer.name || '', ML, fy + 6, { width: PW / 2, lineBreak: false });
+      if (letterhead) doc.text(issuer.name || '', ML, fy + 6, { width: PW / 2, lineBreak: false });
       doc.text(`с. ${pageNum}`, ML, fy + 6, { width: PW, align: 'right', lineBreak: false });
       doc.page.margins.bottom = saved;
       doc.y = HEADER_H; doc.x = ML;
