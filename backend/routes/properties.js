@@ -9,6 +9,7 @@ const { renovationByProperty } = require('../lib/renovationCosts');
 const { reconcileInvoices } = require('../lib/invoiceReconcile');
 const { detectPrepaid } = require('../lib/prepaidDetect');
 const { keepRentProperties } = require('../lib/rentScope');
+const { withTenantEmail } = require('../lib/tenantEmailFallback');
 
 const DATA_DIR   = process.env.DATA_DIR || path.join(__dirname, '../data');
 const PHOTOS_DIR = path.join(DATA_DIR, 'property_photos');
@@ -135,10 +136,12 @@ module.exports = function(db) {
   // Rent payment status for a given month
   router.get('/rent-status', (req, res) => {
     const month = req.query.month || new Date().toISOString().slice(0, 7);
-    // Имот само с интернет договор (ап.45/46) няма наем — не влиза в справката
-    const props = keepRentProperties(db, db.prepare(
+    // Имот само с интернет договор (ап.45/46) няма наем — не влиза в справката.
+    // Имейлът се допълва от договора, когато по имота липсва — иначе бутонът
+    // за напомняне нямаше на кого да пише.
+    const props = withTenantEmail(db, keepRentProperties(db, db.prepare(
       `SELECT * FROM properties WHERE статус = '✅' AND наемател IS NOT NULL AND наемател != '' ORDER BY адрес`
-    ).all());
+    ).all()));
 
     // Bank-imported payments — aggregate + per-tx detail
     const bankPaid = db.prepare(
