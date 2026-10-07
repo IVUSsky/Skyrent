@@ -109,9 +109,23 @@ function translit(s) {
   });
 }
 
+// Кой е наемодателят — един критерий за договора и за анекса.
+//
+// Не стига `landlord_type === 'дружество'`: колоната е с DEFAULT 'физическо',
+// така че архивираните (качени) договори и всичко отпреди избора се водят
+// физически, без да имат собствено име/ЕГН. За тях данните идват от issuer-а,
+// тоест от дружеството — и договорът излизаше като „<фирма>, ЕГН <ЕИК>“.
+// Затова физическо лице е само това, което има изрично въведено свое име.
+// Анексът използваше тази евристика, а договорът — не, и двата документа за
+// един и същ наемодател се разминаваха.
+function landlordIsCompany(contract, issuer) {
+  return contract.landlord_type === 'дружество'
+    || (!contract.landlord_name && !!issuer.eik);
+}
+
 // Build field map from contract data
 function buildFields(contract, issuer) {
-  const isCompany = contract.landlord_type === 'дружество';
+  const isCompany = landlordIsCompany(contract, issuer);
 
   // Landlord composite blocks — BG and EN depending on type.
   // ВАЖНО (multi-tenant): всичко идва от org issuer (Настройки → Данни на
@@ -184,7 +198,10 @@ function buildFields(contract, issuer) {
     'УСЛОВИЯ':                contract.conditions || '',
     'БЕЛЕЖКИ':                contract.notes || '',
     // ─── Payment method (cash vs bank transfer) ────────────────────
-    'НАЧИН_ПЛАЩАНЕ':          contract.payment_method === 'в брой'
+    // Наемодател-физлице се плаща само в брой: единственият IBAN в системата е
+    // на дружеството, а наем на физическо лице по фирмена сметка е и правно, и
+    // данъчно погрешен. Затова типът на наемодателя бие payment_method.
+    'НАЧИН_ПЛАЩАНЕ':          (!isCompany || contract.payment_method === 'в брой')
                                 ? 'в брой'
                                 : (contract.payment_method === 'карта (Stripe)' ? 'с картово плащане през онлайн портала' : `по банков път на IBAN: ${issuer.iban || ''}`),
     // ─── Срок в месеци ─────────────────────────────────────────────
@@ -857,11 +874,8 @@ function generateAnnexPDF(annex, contract, issuer) {
        .text(`Днес, ${fmtDate(annex.annex_date)}, в гр. София, между долуподписаните страни:`, ML, y, { width: PW });
     y = doc.y + 12;
 
-    // Parties block. Архивираните (качени) договори получават DEFAULT
-    // landlord_type='физическо' и нямат landlord_name → ако няма изрично
-    // въведен наемодател-физлице и issuer-ът е фирма (има ЕИК) → дружество.
-    const isCompany = contract.landlord_type === 'дружество'
-      || (!contract.landlord_name && !!issuer.eik);
+    // Parties block — същият критерий като в договора (виж landlordIsCompany).
+    const isCompany = landlordIsCompany(contract, issuer);
     const landlordLabel = isCompany
       ? `${contract.landlord_name || issuer.name || '...'}, ЕИК ${contract.landlord_egn || issuer.eik || ''}${issuer.mol ? `, представлявано от ${issuer.mol} – Управител` : ''}`
       : `${contract.landlord_name || issuer.name || ''}${contract.landlord_egn ? ', ЕГН ' + contract.landlord_egn : ''}`;
@@ -1267,6 +1281,11 @@ module.exports = function(db) {
         landlord_phone:   fields.landlord_phone   || '',
         landlord_lk:      fields.landlord_lk      || '',
         landlord_lk_date: fields.landlord_lk_date || '',
+        // Наемодател-физлице се плаща в брой — единствената банкова сметка в
+        // системата е на дружеството (виж landlordIsCompany).
+        payment_method:   fields.landlord_type === 'физическо' && fields.landlord_name
+                            ? 'в брой'
+                            : (fields.payment_method || 'банков превод'),
         tenant_name:         fields.tenant_name         || prop?.['наемател'] || '',
         tenant_address:      fields.tenant_address      || '',
         tenant_egn:          fields.tenant_egn          || '',
@@ -1336,11 +1355,11 @@ module.exports = function(db) {
           tenant_name, tenant_address, tenant_egn, tenant_phone, tenant_email, tenant_mol,
           tenant_doc, tenant_doc_number, tenant_doc_valid_until, tenant_doc_date, tenant_doc_country, tenant_dob,
           property_address, property_description, property_area,
-          monthly_rent, currency, deposit, payment_day,
+          monthly_rent, currency, deposit, payment_day, payment_method,
           start_date, end_date, delivery_date, conditions, notes,
           абонат_ток, абонат_вода, абонат_тец, абонат_вход,
           pdf_path, protocol_pdf_path, id_front_path, id_back_path, kind)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       `).run(
         contract.template_id, contract.property_id, contract.contract_number, contract.status,
         contract.landlord_type, contract.landlord_name, contract.landlord_address, contract.landlord_egn,
@@ -1348,7 +1367,7 @@ module.exports = function(db) {
         contract.tenant_name, contract.tenant_address, contract.tenant_egn, contract.tenant_phone, contract.tenant_email, contract.tenant_mol,
         contract.tenant_doc, contract.tenant_doc_number, contract.tenant_doc_valid_until, contract.tenant_doc_date, contract.tenant_doc_country, contract.tenant_dob,
         contract.property_address, contract.property_description, contract.property_area,
-        contract.monthly_rent, contract.currency, contract.deposit, contract.payment_day,
+        contract.monthly_rent, contract.currency, contract.deposit, contract.payment_day, contract.payment_method,
         contract.start_date, contract.end_date, contract.delivery_date, contract.conditions, contract.notes,
         contract.абонат_ток, contract.абонат_вода, contract.абонат_тец, contract.абонат_вход,
         filename, protocolFilename, contract.id_front_path, contract.id_back_path, contract.kind
@@ -1409,6 +1428,11 @@ module.exports = function(db) {
   // Архивните договори (сканът Е pdf_path) не се регенерират — само данните.
   const EDITABLE = ['tenant_name', 'tenant_email', 'tenant_phone', 'tenant_address', 'tenant_egn',
     'tenant_doc', 'tenant_doc_number', 'tenant_doc_date', 'tenant_doc_valid_until', 'tenant_doc_country', 'tenant_dob',
+    // Наемодателят се задаваше само при създаване — заварен договор, сгрешен
+    // откъм страна по договора, можеше да се поправи единствено с пресъздаване
+    // (и загуба на номера). Вече се редактира като всичко друго.
+    'landlord_type', 'landlord_name', 'landlord_address', 'landlord_egn', 'landlord_phone',
+    'landlord_lk', 'landlord_lk_date', 'payment_method',
     'monthly_rent', 'currency', 'deposit', 'payment_day', 'start_date', 'end_date', 'delivery_date',
     'conditions', 'notes'];
   router.put('/:id', async (req, res) => {
@@ -2129,3 +2153,5 @@ module.exports = function(db) {
 
 // Изнесена за тестове и локален преглед на оформлението (както при фактурите).
 module.exports.generateContractPDF = generateContractPDF;
+module.exports.landlordIsCompany = landlordIsCompany;
+module.exports.buildFields = buildFields;

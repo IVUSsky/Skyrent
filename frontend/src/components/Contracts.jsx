@@ -540,6 +540,9 @@ export default function Contracts({ API }) {
       monthly_rent: c.monthly_rent ?? '', currency: c.currency || 'EUR', deposit: c.deposit ?? '',
       payment_day: c.payment_day ?? 5, start_date: c.start_date || '', end_date: c.end_date || '', notes: c.notes || '',
       conditions: c.conditions || '', template_id: c.template_id || '',
+      landlord_type: c.landlord_type || 'физическо', landlord_name: c.landlord_name || '',
+      landlord_egn: c.landlord_egn || '', landlord_address: c.landlord_address || '',
+      landlord_lk: c.landlord_lk || '', landlord_lk_date: c.landlord_lk_date || '',
     })
     setEditModal(c)
   }
@@ -1273,7 +1276,15 @@ export default function Contracts({ API }) {
                     {[['физическо','👤 Физическо лице'],['дружество','🏢 Дружество']].map(([val,lbl]) => (
                       <label key={val} className={`flex items-center gap-2 px-4 py-2 rounded-lg border cursor-pointer text-sm font-medium transition-colors ${newForm.landlord_type===val ? 'bg-blue-50 border-blue-500 text-blue-800' : 'bg-white border-gray-300 text-gray-700 hover:border-blue-300'}`}>
                         <input type="radio" name="landlord_type" value={val} checked={newForm.landlord_type===val}
-                          onChange={e => setNewForm(f=>({...f,landlord_type:e.target.value}))} className="hidden" />
+                          onChange={e => setNewForm(f => ({
+                            ...f,
+                            landlord_type: e.target.value,
+                            // При „дружество“ данните идват от издателя; личните на
+                            // физлицето не бива да остават закачени за договора.
+                            ...(e.target.value === 'дружество'
+                              ? { landlord_name: '', landlord_egn: '', landlord_address: '', landlord_lk: '', landlord_lk_date: '' }
+                              : {}),
+                          }))} className="hidden" />
                         {lbl}
                       </label>
                     ))}
@@ -1281,6 +1292,24 @@ export default function Contracts({ API }) {
                 </div>
                 {newForm.landlord_type === 'физическо' && (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3 p-3 bg-blue-50 rounded-lg">
+                    <div className="md:col-span-2">
+                      <label className="block text-xs font-medium text-gray-600 mb-1">Трите имена</label>
+                      <input type="text" value={newForm.landlord_name} onChange={e=>setNewForm(f=>({...f,landlord_name:e.target.value}))}
+                        placeholder="Иван Иванов Иванов"
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">ЕГН</label>
+                      <input type="text" value={newForm.landlord_egn} onChange={e=>setNewForm(f=>({...f,landlord_egn:e.target.value}))}
+                        placeholder="8001011234"
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">Адрес по лична карта</label>
+                      <input type="text" value={newForm.landlord_address} onChange={e=>setNewForm(f=>({...f,landlord_address:e.target.value}))}
+                        placeholder="гр. София, ж.к. …"
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white" />
+                    </div>
                     <div>
                       <label className="block text-xs font-medium text-gray-600 mb-1">Номер на ЛК</label>
                       <input type="text" value={newForm.landlord_lk} onChange={e=>setNewForm(f=>({...f,landlord_lk:e.target.value}))}
@@ -1293,8 +1322,8 @@ export default function Contracts({ API }) {
                         placeholder="01.01.2020"
                         className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white" />
                     </div>
-                    <div className="md:col-span-2 text-xs text-blue-600">
-                      Останалите данни (ЕГН, адрес, IBAN, телефон) се вземат от Настройки → Данни на издателя
+                    <div className="md:col-span-2 text-xs text-blue-700 bg-blue-100 rounded px-2 py-1.5">
+                      💵 Наемът се плаща <strong>в брой</strong>. Банковата сметка в Настройки е на дружеството и не влиза в този договор.
                     </div>
                   </div>
                 )}
@@ -1896,6 +1925,41 @@ export default function Contracts({ API }) {
                   <div className="text-xs text-gray-400 mt-1">Смяната на бланката генерира PDF-а наново по нея; видът на договора следва бланката (🏠 наем / 🌐 интернет).</div>
                 </div>
               )}
+              <div className="md:col-span-2 border border-gray-200 rounded-lg p-3">
+                <label className="block text-xs font-medium text-gray-600 mb-2">Наемодател — страна по договора</label>
+                <div className="flex gap-3 mb-2">
+                  {[['физическо','👤 Физическо лице'],['дружество','🏢 Дружество']].map(([val,lbl]) => (
+                    <label key={val} className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border cursor-pointer text-sm font-medium ${editForm.landlord_type===val ? 'bg-blue-50 border-blue-500 text-blue-800' : 'bg-white border-gray-300 text-gray-700'}`}>
+                      <input type="radio" name="edit_landlord_type" value={val} checked={editForm.landlord_type===val}
+                        onChange={e => setEditForm(f => ({
+                          ...f,
+                          landlord_type: e.target.value,
+                          ...(e.target.value === 'дружество'
+                            ? { landlord_name: '', landlord_egn: '', landlord_address: '', landlord_lk: '', landlord_lk_date: '' }
+                            : {}),
+                        }))} className="hidden" />
+                      {lbl}
+                    </label>
+                  ))}
+                </div>
+                {editForm.landlord_type === 'физическо' ? (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                    <input value={editForm.landlord_name} onChange={e => setEditForm(f => ({ ...f, landlord_name: e.target.value }))}
+                      placeholder="Трите имена" className="md:col-span-2 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                    <input value={editForm.landlord_egn} onChange={e => setEditForm(f => ({ ...f, landlord_egn: e.target.value }))}
+                      placeholder="ЕГН" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                    <input value={editForm.landlord_address} onChange={e => setEditForm(f => ({ ...f, landlord_address: e.target.value }))}
+                      placeholder="Адрес по лична карта" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                    <input value={editForm.landlord_lk} onChange={e => setEditForm(f => ({ ...f, landlord_lk: e.target.value }))}
+                      placeholder="Номер на ЛК" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                    <input value={editForm.landlord_lk_date} onChange={e => setEditForm(f => ({ ...f, landlord_lk_date: e.target.value }))}
+                      placeholder="Издадена на (01.01.2020)" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                    <div className="md:col-span-2 text-xs text-blue-700">💵 Плащане в брой — банковата сметка е на дружеството.</div>
+                  </div>
+                ) : (
+                  <div className="text-xs text-gray-500">Данните идват от <strong>Настройки → Данни на издателя</strong> (име, ЕИК, адрес, МОЛ, IBAN).</div>
+                )}
+              </div>
               <div className="md:col-span-2">
                 <label className="block text-xs font-medium text-gray-600 mb-1">Наемател</label>
                 <input value={editForm.tenant_name} onChange={e => setEditForm(f => ({ ...f, tenant_name: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-3 py-2" />
