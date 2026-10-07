@@ -245,7 +245,12 @@ export default function Tenants({ API }) {
 
   const props = data?.properties || []
   const paid = props.filter(p => p.is_paid)
-  const unpaid = props.filter(p => !p.is_paid)
+  // Длъжник е само този, чийто падеж е минал. Останалите още не дължат —
+  // Стефан плаща към 15-о, Атанас към 18-о; на 7-о число не са закъснели.
+  // Имот с наем 0 (напр. паркомясто) не влиза никъде.
+  const unpaidAll = props.filter(p => !p.is_paid && !p.no_rent)
+  const unpaid    = unpaidAll.filter(p => p.is_overdue !== false)
+  const upcoming  = unpaidAll.filter(p => p.is_overdue === false)
   const totalExpected = props.reduce((s, p) => s + (p['наем'] || 0), 0)
   // Събран НАЕМ: по имот до размера на наема. Надплатеното (депозит в същия
   // превод, предплащане) се брои отделно — иначе излизаше „Не са платили: −374 €"
@@ -254,6 +259,7 @@ export default function Tenants({ API }) {
   const rentCollected = props.reduce((s, p) => s + Math.min(p.paid_amount || 0, p['наем'] || 0) + ((p.is_paid && !(p.paid_amount > 0)) ? (p['наем'] || 0) : 0), 0)
   const overpaid      = props.reduce((s, p) => s + Math.max((p.paid_amount || 0) - (p['наем'] || 0), 0), 0)
   const unpaidAmount  = unpaid.reduce((s, p) => s + (p['наем'] || 0), 0)
+  const upcomingAmount = upcoming.reduce((s, p) => s + (p['наем'] || 0), 0)
 
   const tableProps = {
     API, month,
@@ -507,9 +513,19 @@ export default function Tenants({ API }) {
       {unpaid.length > 0 && (
         <div className="mb-6">
           <h3 className="text-base font-bold text-red-700 mb-3 flex items-center gap-2">
-            ❌ Не са платили ({unpaid.length})
+            ❌ Закъснели ({unpaid.length}) · {fmt(unpaidAmount)} €
           </h3>
           <TenantTable rows={unpaid} {...tableProps} />
+        </div>
+      )}
+
+      {upcoming.length > 0 && (
+        <div className="mb-6">
+          <h3 className="text-base font-bold text-amber-700 mb-3 flex items-center gap-2">
+            ⏳ Предстои да платят ({upcoming.length}) · {fmt(upcomingAmount)} €
+            <span className="text-xs font-normal text-gray-500">— падежът им още не е минал</span>
+          </h3>
+          <TenantTable rows={upcoming} {...tableProps} />
         </div>
       )}
 
@@ -606,7 +622,9 @@ function TenantTable({
                       ? <span className="inline-block bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs px-2 py-0.5 rounded-full">⏩ Предплатено</span>
                     : prop.is_paid
                       ? <span className="inline-block bg-blue-50 text-blue-700 border border-blue-200 text-xs px-2 py-0.5 rounded-full">🏛️ Банков импорт</span>
-                      : <span className="inline-block bg-red-50 text-red-700 border border-red-200 text-xs px-2 py-0.5 rounded-full">❌ Не е платил</span>
+                      : prop.is_overdue === false
+                        ? <span className="inline-block bg-amber-50 text-amber-700 border border-amber-200 text-xs px-2 py-0.5 rounded-full" title={`Плаща до ${prop.due_day || 5}-то число`}>⏳ до {prop.due_day || 5}-то</span>
+                        : <span className="inline-block bg-red-50 text-red-700 border border-red-200 text-xs px-2 py-0.5 rounded-full">❌ Не е платил</span>
                   }
                 </td>
 
