@@ -10,6 +10,7 @@ const { reconcileInvoices } = require('../lib/invoiceReconcile');
 const { detectPrepaid } = require('../lib/prepaidDetect');
 const { keepRentProperties } = require('../lib/rentScope');
 const { withTenantEmail } = require('../lib/tenantEmailFallback');
+const { isOverdue, dueDayMap } = require('../lib/rentDue');
 
 const DATA_DIR   = process.env.DATA_DIR || path.join(__dirname, '../data');
 const PHOTOS_DIR = path.join(DATA_DIR, 'property_photos');
@@ -207,21 +208,55 @@ module.exports = function(db) {
                 GROUP BY property_id`).all().forEach(r => { startMap[r.property_id] = r.start; });
     const monthsIncl = (s, e) => { if (!s || !e || s > e) return 0; const [ys, ms] = s.split('-').map(Number), [ye, me] = e.split('-').map(Number); return (ye - ys) * 12 + (me - ms) + 1; };
 
+    // Превод в КРАЯ на предходния месец, когато той вече е покрит — това е
+    // плащане за текущия (Витали: 02.09 за септември, 30.09 за октомври).
+    // Същото правило като в диагностиката, за да не си противоречат екраните.
+    const prevMonthForPrepaid = (() => {
+      const [y, m] = month.split('-').map(Number);
+      return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`;
+    })();
+    const prevRentTxs = db.prepare(
+      `SELECT id, property_id, дата, сума, контрагент FROM transactions
+        WHERE категория='наем' AND operation='Кт' AND месец=? AND property_id IS NOT NULL`
+    ).all(prevMonthForPrepaid);
+    const prevPaidStmt2 = db.prepare(
+      `SELECT COALESCE(SUM(CASE WHEN UPPER(COALESCE(currency,'BGN'))='BGN' THEN сума/1.95583 ELSE сума END), 0) AS s
+         FROM transactions
+        WHERE категория='наем' AND operation='Кт' AND property_id=? AND месец=? AND id != ?`
+    );
+    const propMapForPrepaid = Object.fromEntries(props.map(p => [p.id, p]));
+    const prepaidList = detectPrepaid({
+      prevTxs: prevRentTxs, prevMonth: prevMonthForPrepaid, propMap: propMapForPrepaid,
+      isPaidThisMonth: (pid) => !!(bankMap[pid] || manualMap[pid] || invMap[pid]),
+      paidPrevExcluding: (pid, txId) => prevPaidStmt2.get(pid, prevMonthForPrepaid, txId).s,
+    });
+    const prepaidByProp = Object.fromEntries(prepaidList.map(x => [x.property_id, x]));
+    const dueDays = dueDayMap(db);
+
     const result = props.map(p => {
       const bank   = bankMap[p.id];
       const manual = manualMap[p.id];
       const inv    = invMap[p.id];
-      const paid_amount = (bank ? bank.paid_amount : 0) + (manual ? manual.amount : 0) + (inv ? inv.paid_amount : 0);
+      const pre    = prepaidByProp[p.id];
+      const paid_amount = (bank ? bank.paid_amount : 0) + (manual ? manual.amount : 0) + (inv ? inv.paid_amount : 0)
+                        + (pre ? pre.сума : 0);
       const rent = Number(p.наем) || 0;
       const due = rent > 0 ? monthsIncl(startMap[p.id], month) * rent : 0;
-      const prepaid_covered = due > 0 && (cumMap[p.id] || 0) + 0.5 >= due;
+      const prepaid_covered = !!pre || (due > 0 && (cumMap[p.id] || 0) + 0.5 >= due);
+      const is_paid = !!(bank || manual || inv || prepaid_covered);
+      const due_day = dueDays[p.id] || 5;
       return {
         ...p,
         paid_amount,
         tx_count:      bank   ? bank.tx_count      : 0,
         bank_txs:      bankTxMap[p.id] || [],
-        is_paid:       !!(bank || manual || inv || prepaid_covered),
+        is_paid,
         prepaid:       !bank && !manual && !inv && prepaid_covered,
+        prepaid_tx:    pre || null,
+        due_day,
+        // Имот без наем (напр. паркомясто с 0) няма какво да се събира
+        no_rent:       rent <= 0,
+        is_overdue:    !is_paid && rent > 0 && isOverdue(month, due_day),
         manual_payment: manual || null,
         invoice_payment: inv || null, // платена фактура (карта/Stripe или ✓ Платена)
       };
