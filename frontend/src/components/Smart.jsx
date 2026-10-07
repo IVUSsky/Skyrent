@@ -20,7 +20,7 @@ function StatusCard({ label, value, unit, icon, color = 'gray' }) {
   )
 }
 
-function DeviceCard({ device, API, properties, onDelete, onTypeChange }) {
+function DeviceCard({ device, API, properties, onDelete, onTypeChange, onTenantControl }) {
   const [status, setStatus]     = useState(null)
   const [loading, setLoading]   = useState(false)
   const [toggling, setToggling] = useState(false)
@@ -88,6 +88,11 @@ function DeviceCard({ device, API, properties, onDelete, onTypeChange }) {
           <select defaultValue={device.type} onChange={e => onTypeChange(device.id, e.target.value)}
             className="text-xs border border-gray-200 rounded px-1 py-0.5 text-gray-500">
             <option value="breaker">Бушон</option>
+            <option value="ac">Климатик</option>
+            <option value="boiler">Бойлер</option>
+            <option value="socket">Контакт</option>
+            <option value="light">Осветление</option>
+            <option value="water_valve">Спирателен кран</option>
             <option value="lock">Брава</option>
             <option value="router">Рутер</option>
           </select>
@@ -95,6 +100,18 @@ function DeviceCard({ device, API, properties, onDelete, onTypeChange }) {
             className="text-gray-300 hover:text-red-400 text-lg transition-colors">×</button>
         </div>
       </div>
+
+      {/* Достъп за наемателя — бушонът никога не се дава (виж lib/tenantDeviceAccess.js) */}
+      {!['breaker', 'lock', 'router'].includes(device.type) && (
+        <label className="flex items-start gap-2 mb-3 cursor-pointer text-xs">
+          <input type="checkbox" className="mt-0.5" defaultChecked={!!device.tenant_control}
+            onChange={e => onTenantControl && onTenantControl(device.id, e.target.checked)} />
+          <span>
+            <span className="font-medium text-gray-700">Наемателят може да го управлява</span>
+            <span className="block text-gray-400">Показва се в портала → таб „Апартамент". Без отметка само вижда консумацията.</span>
+          </span>
+        </label>
+      )}
 
       {/* Live metrics */}
       {status && !loading && (
@@ -500,6 +517,13 @@ export default function Smart({ API }) {
     }).then(load)
   }
 
+  const changeTenantControl = (id, tenant_control) => {
+    apiFetch(`${API}/api/smart/devices/${id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tenant_control: tenant_control ? 1 : 0 }),
+    }).then(load)
+  }
+
   const deleteDevice = (id) => {
     apiFetch(`${API}/api/smart/devices/${id}`, { method: 'DELETE' }).then(load)
     setConfirmDel(null)
@@ -531,7 +555,7 @@ export default function Smart({ API }) {
           {devices.map(dev =>
             dev.type === 'lock'
               ? <LockCard key={dev.id} device={dev} API={API} properties={properties} onDelete={id => setConfirmDel(id)} />
-              : <DeviceCard key={dev.id} device={dev} API={API} properties={properties} onDelete={id => setConfirmDel(id)} onTypeChange={changeType} />
+              : <DeviceCard key={dev.id} device={dev} API={API} properties={properties} onDelete={id => setConfirmDel(id)} onTypeChange={changeType} onTenantControl={changeTenantControl} />
           )}
         </div>
       )}
