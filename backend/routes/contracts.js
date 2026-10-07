@@ -118,6 +118,15 @@ function translit(s) {
 // Затова физическо лице е само това, което има изрично въведено свое име.
 // Анексът използваше тази евристика, а договорът — не, и двата документа за
 // един и същ наемодател се разминаваха.
+// Видът от указателя на имотите към изказ за договор. В указателя стои „2-стаен“
+// (кратко, за списъка); в договор това трябва да се чете като вид имот.
+function propertyKind(type) {
+  const t = String(type || '').trim();
+  if (!t) return '';
+  if (/^\d+-стаен$/i.test(t)) return `${t} апартамент`;
+  return t.charAt(0).toUpperCase() + t.slice(1);
+}
+
 function landlordIsCompany(contract, issuer) {
   return contract.landlord_type === 'дружество'
     || (!contract.landlord_name && !!issuer.eik);
@@ -1318,7 +1327,9 @@ module.exports = function(db) {
         id_front_path:       fields.id_front_path       || null,
         id_back_path:        fields.id_back_path        || null,
         property_address:     fields.property_address     || prop?.['адрес'] || '',
-        property_description: fields.property_description || '',
+        // Адресът и площта падат на имота — описанието не падаше на нищо и
+        // Чл.1 излизаше без вид на имота.
+        property_description: fields.property_description || propertyKind(prop?.['тип']),
         property_area:        fields.property_area        || prop?.['площ']  || null,
         monthly_rent:  fields.monthly_rent || prop?.['наем'] || 0,
         currency:      fields.currency     || 'EUR',
@@ -1450,6 +1461,8 @@ module.exports = function(db) {
     // (и загуба на номера). Вече се редактира като всичко друго.
     'landlord_type', 'landlord_name', 'landlord_address', 'landlord_egn', 'landlord_phone',
     'landlord_lk', 'landlord_lk_date', 'payment_method',
+    // Същото за имота: Чл.1 се описва от тези три полета.
+    'property_address', 'property_description', 'property_area',
     'monthly_rent', 'currency', 'deposit', 'payment_day', 'start_date', 'end_date', 'delivery_date',
     'conditions', 'notes'];
   router.put('/:id', async (req, res) => {
@@ -2172,3 +2185,4 @@ module.exports = function(db) {
 module.exports.generateContractPDF = generateContractPDF;
 module.exports.landlordIsCompany = landlordIsCompany;
 module.exports.buildFields = buildFields;
+module.exports.propertyKind = propertyKind;

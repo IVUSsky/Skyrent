@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
-const { buildFields } = require('./contracts.js');
+const { buildFields, propertyKind } = require('./contracts.js');
 
 const issuer = {
   name: 'Скай Кепитъл ООД', eik: '207291184', mol: 'Иво Лазаров',
@@ -33,5 +33,25 @@ describe('описание на имота', () => {
   it('без площ не увисва „с обща площ“', () => {
     const f = buildFields({ ...base, property_description: 'Гараж', property_address: 'Мл.1 бл.64', property_area: null }, issuer);
     expect(f['ИМОТ_ПЪЛНО_ОПИСАНИЕ']).toBe('Гараж, Мл.1 бл.64');
+  });
+});
+
+describe('вид на имота от указателя', () => {
+  // Адресът и площта падат на имота, описанието не падаше на нищо — Чл.1
+  // излизаше без вид („, Мл.1 бл.64 ап.142 с обща площ 65 кв.м..“).
+  it('„2-стаен“ се чете като вид имот в договор', () => {
+    expect(propertyKind('2-стаен')).toBe('2-стаен апартамент');
+    expect(propertyKind('1-стаен')).toBe('1-стаен апартамент');
+  });
+
+  it('гаражът и паркомястото остават както са, с главна буква', () => {
+    expect(propertyKind('Гараж')).toBe('Гараж');
+    expect(propertyKind('паркомясто')).toBe('Паркомясто');
+    expect(propertyKind('апартамент')).toBe('Апартамент');
+  });
+
+  it('празен вид не вкарва нищо', () => {
+    expect(propertyKind('')).toBe('');
+    expect(propertyKind(null)).toBe('');
   });
 });
