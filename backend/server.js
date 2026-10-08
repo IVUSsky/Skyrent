@@ -95,6 +95,19 @@ async function main() {
   // Публичен каталог под наем (БЕЗ auth) — само публикувани имоти
   app.use('/api/public', require('./routes/public')(getOrgDb, controlDb));
 
+  // Публични правни страници — искат се при регистрация пред доставчици
+  // (Enable Banking иска публичен Privacy URL). Статичен HTML, без JS.
+  const { privacyHtml, termsHtml } = require('./lib/legalPages');
+  const { getIssuer } = require('./lib/branding');
+  for (const [path, render] of [['/privacy', privacyHtml], ['/terms', termsHtml]]) {
+    app.get(path, (req, res) => {
+      let issuer = {};
+      try { issuer = getIssuer(orgMain); } catch (_) {}
+      res.set('Content-Type', 'text/html; charset=utf-8');
+      res.send(render(issuer));
+    });
+  }
+
   // Protected routes
   const authMiddleware = require('./middleware/auth');
   app.use('/api', authMiddleware);
