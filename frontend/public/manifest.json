@@ -2,7 +2,7 @@
   "name": "Sky Rent",
   "short_name": "Sky Rent",
   "description": "Sky Capital — портал за наематели",
-  "start_url": "/",
+  "start_url": "/?app=1",
   "display": "standalone",
   "orientation": "portrait",
   "background_color": "#1a1a2e",
@@ -30,5 +30,21 @@
     }
   ],
   "categories": ["finance", "business"],
+  "shortcuts": [
+    {
+      "name": "Апартамент",
+      "short_name": "Апартамент",
+      "description": "Уредите в апартамента",
+      "url": "/?app=1&tab=apartment",
+      "icons": [{ "src": "/sky_capital_logo.png", "sizes": "192x192", "type": "image/png" }]
+    },
+    {
+      "name": "Фактури",
+      "short_name": "Фактури",
+      "description": "Моите фактури",
+      "url": "/?app=1&tab=invoices",
+      "icons": [{ "src": "/sky_capital_logo.png", "sizes": "192x192", "type": "image/png" }]
+    }
+  ],
   "screenshots": []
 }
