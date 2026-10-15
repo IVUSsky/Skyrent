@@ -1,5 +1,6 @@
 const express = require('express');
 const { tuyaRequest } = require('../lib/tuyaClient');
+const { listRemotes: listIrRemotes, acCommand: irAcCommand } = require('../lib/tuyaIr');
 
 module.exports = function(db) {
   const router = express.Router();
@@ -20,6 +21,10 @@ module.exports = function(db) {
   // Разрешено ли е НАЕМАТЕЛЯТ да управлява устройството от портала. По
   // подразбиране не — главният предпазител никога (виж lib/tenantDeviceAccess.js).
   try { db.exec('ALTER TABLE smart_devices ADD COLUMN tenant_control INTEGER DEFAULT 0'); } catch(_) {}
+  // Климатиците БЕЗ Wi-Fi се карат през инфраред контролер. Тогава трябват два
+  // идентификатора: tuya_device_id е самият контролер, а ir_remote_id е научената
+  // „дистанционна“ за конкретния климатик (виж lib/tuyaIr.js).
+  try { db.exec('ALTER TABLE smart_devices ADD COLUMN ir_remote_id TEXT'); } catch(_) {}
 
   // ── GET /api/smart/devices — list configured devices ────────
   router.get('/devices', (req, res) => {
@@ -37,11 +42,11 @@ module.exports = function(db) {
   // ── POST /api/smart/devices — add device ────────────────────
   router.post('/devices', (req, res) => {
     try {
-      const { property_id, tuya_device_id, name, type } = req.body;
+      const { property_id, tuya_device_id, name, type, ir_remote_id } = req.body;
       if (!tuya_device_id) return res.status(400).json({ error: 'tuya_device_id required' });
       const r = db.prepare(
-        'INSERT OR REPLACE INTO smart_devices (property_id, tuya_device_id, name, type) VALUES (?,?,?,?)'
-      ).run(property_id || null, tuya_device_id, name || tuya_device_id, type || 'breaker');
+        'INSERT OR REPLACE INTO smart_devices (property_id, tuya_device_id, name, type, ir_remote_id) VALUES (?,?,?,?,?)'
+      ).run(property_id || null, tuya_device_id, name || tuya_device_id, type || 'breaker', ir_remote_id || null);
       res.json({ ok: true, id: r.lastInsertRowid });
     } catch(err) { res.status(500).json({ error: err.message }); }
   });
@@ -49,12 +54,46 @@ module.exports = function(db) {
   // ── PATCH /api/smart/devices/:id ────────────────────────────
   router.patch('/devices/:id', (req, res) => {
     try {
-      const { name, type, property_id, tenant_control } = req.body;
-      db.prepare('UPDATE smart_devices SET name=COALESCE(?,name), type=COALESCE(?,type), property_id=COALESCE(?,property_id), tenant_control=COALESCE(?,tenant_control) WHERE id=?')
+      const { name, type, property_id, tenant_control, ir_remote_id } = req.body;
+      db.prepare(`UPDATE smart_devices SET name=COALESCE(?,name), type=COALESCE(?,type),
+                    property_id=COALESCE(?,property_id), tenant_control=COALESCE(?,tenant_control),
+                    ir_remote_id=COALESCE(?,ir_remote_id)
+                  WHERE id=?`)
         .run(name || null, type || null, property_id || null,
-             tenant_control == null ? null : (tenant_control ? 1 : 0), req.params.id);
+             tenant_control == null ? null : (tenant_control ? 1 : 0),
+             ir_remote_id || null, req.params.id);
       res.json({ ok: true });
     } catch(err) { res.status(500).json({ error: err.message }); }
+  });
+
+  // ── GET /api/smart/devices/:id/ir-remotes ───────────────────
+  // Кои „дистанционни" са научени в този инфраред контролер. Иво въвежда само
+  // номера на контролера, а тук се вижда какво има в него — без да се преписва
+  // втори номер на ръка.
+  router.get('/devices/:id/ir-remotes', async (req, res) => {
+    try {
+      const dev = db.prepare('SELECT * FROM smart_devices WHERE id=?').get(req.params.id);
+      if (!dev) return res.status(404).json({ error: 'Устройството не е намерено' });
+      const remotes = await listIrRemotes(dev.tuya_device_id);
+      res.json({ ok: true, remotes });
+    } catch (err) { res.status(502).json({ error: err.message }); }
+  });
+
+  // ── POST /api/smart/devices/:id/ir-command ──────────────────
+  // Пробна команда от админския изглед: включване, температура, режим.
+  router.post('/devices/:id/ir-command', async (req, res) => {
+    try {
+      const dev = db.prepare('SELECT * FROM smart_devices WHERE id=?').get(req.params.id);
+      if (!dev) return res.status(404).json({ error: 'Устройството не е намерено' });
+      if (!dev.ir_remote_id) return res.status(400).json({ error: 'Няма избрано дистанционно за това устройство' });
+      const r = await irAcCommand(dev.tuya_device_id, dev.ir_remote_id, {
+        power: typeof req.body?.on === 'boolean' ? req.body.on : null,
+        temp: req.body?.temp,
+        mode: req.body?.mode,
+      });
+      if (!r.ok) return res.status(502).json({ error: 'Климатикът не отговори', result: r.result });
+      res.json({ ok: true, sent: r.sent });
+    } catch (err) { res.status(502).json({ error: err.message }); }
   });
 
   // ── DELETE /api/smart/devices/:id ───────────────────────────

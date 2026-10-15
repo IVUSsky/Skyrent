@@ -9,7 +9,8 @@
 // Видове, които НИКОГА не се дават на наемател, дори да са маркирани
 const NEVER_TENANT = new Set(['breaker', 'main', 'lock', 'gate']);
 // Видове, които имат смисъл за наемателя
-const TENANT_TYPES = new Set(['ac', 'climate', 'boiler', 'socket', 'light', 'valve', 'water_valve', 'heater']);
+// `ir_ac` е климатик без Wi-Fi, каран през инфраред контролер (виж lib/tuyaIr.js)
+const TENANT_TYPES = new Set(['ac', 'ir_ac', 'climate', 'boiler', 'socket', 'light', 'valve', 'water_valve', 'heater']);
 
 function deviceType(d) { return String(d?.type || '').trim().toLowerCase(); }
 
@@ -26,15 +27,19 @@ function canTenantControl(device) {
 // propertyId = null → празен списък (наемател без активен договор).
 function devicesForTenant(db, propertyId) {
   if (!propertyId) return [];
+  // SELECT * нарочно: ir_remote_id е добавена с миграция и ако тя още не е
+  // минала, изброяването на колони би счупило целия списък на наемателя.
+  // Изтичане няма — към портала отива само явно избраното по-долу.
   const rows = db.prepare(
-    `SELECT id, property_id, tuya_device_id, name, type, enabled, tenant_control
-       FROM smart_devices WHERE property_id = ? AND enabled = 1 ORDER BY id`
+    'SELECT * FROM smart_devices WHERE property_id = ? AND enabled = 1 ORDER BY id'
   ).all(propertyId);
   return rows.map(d => ({
     id: d.id,
     name: d.name,
     type: deviceType(d),
     controllable: canTenantControl(d),
+    // Климатик през инфраред: порталът показва и температура, не само бутон
+    infrared: deviceType(d) === 'ir_ac' && !!d.ir_remote_id,
     // tuya_device_id нарочно НЕ се връща към наемателя
   }));
 }

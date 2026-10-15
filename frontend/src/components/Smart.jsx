@@ -20,6 +20,101 @@ function StatusCard({ label, value, unit, icon, color = 'gray' }) {
   )
 }
 
+// Климатиците без Wi-Fi се карат през инфраред контролер. В контролера може да
+// има научени няколко „дистанционни" (климатик, телевизор…), затова тук се избира
+// кое точно отговаря на този климатик, и веднага може да се пробва.
+function IrRemotePicker({ device, API }) {
+  const [remotes, setRemotes] = useState(null)
+  const [chosen, setChosen] = useState(device.ir_remote_id || '')
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState(null)
+  const [temp, setTemp] = useState(24)
+
+  const auth = () => ({ Authorization: 'Bearer ' + localStorage.getItem('skyrent_token'), 'Content-Type': 'application/json' })
+
+  const load = async () => {
+    setBusy(true); setMsg(null)
+    try {
+      const r = await fetch(`${API}/api/smart/devices/${device.id}/ir-remotes`, { headers: auth() })
+      const j = await r.json()
+      if (!r.ok) throw new Error(j.error || 'не отговори')
+      setRemotes(j.remotes || [])
+      if (!j.remotes?.length) setMsg('Контролерът още няма научени дистанционни — добави климатика в Smart Life.')
+    } catch (e) { setMsg('Грешка: ' + e.message) } finally { setBusy(false) }
+  }
+
+  const save = async (remote_id) => {
+    setBusy(true); setMsg(null)
+    try {
+      const r = await fetch(`${API}/api/smart/devices/${device.id}`, {
+        method: 'PATCH', headers: auth(), body: JSON.stringify({ ir_remote_id: remote_id }),
+      })
+      if (!r.ok) throw new Error((await r.json()).error || 'не се запази')
+      setChosen(remote_id); setMsg('Запазено.')
+    } catch (e) { setMsg('Грешка: ' + e.message) } finally { setBusy(false) }
+  }
+
+  const probe = async (body, label) => {
+    setBusy(true); setMsg(null)
+    try {
+      const r = await fetch(`${API}/api/smart/devices/${device.id}/ir-command`, {
+        method: 'POST', headers: auth(), body: JSON.stringify(body),
+      })
+      const j = await r.json()
+      if (!r.ok) throw new Error(j.error || 'климатикът не отговори')
+      setMsg(label + ' — изпратено.')
+    } catch (e) { setMsg('Грешка: ' + e.message) } finally { setBusy(false) }
+  }
+
+  return (
+    <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs">
+      <div className="font-semibold text-amber-900 mb-2">📡 Инфраред управление</div>
+      {chosen ? (
+        <div className="text-amber-800 mb-2">Избрано дистанционно: <code className="bg-white px-1 rounded">{chosen}</code></div>
+      ) : (
+        <div className="text-amber-800 mb-2">Още няма избрано дистанционно — без него климатикът не се управлява.</div>
+      )}
+
+      <div className="flex flex-wrap gap-2 items-center">
+        <button onClick={load} disabled={busy}
+          className="px-2 py-1 bg-amber-200 hover:bg-amber-300 rounded disabled:opacity-50">
+          {busy ? 'Чака…' : 'Намери дистанционните'}
+        </button>
+        {chosen && (
+          <>
+            <button onClick={() => probe({ on: true, temp }, 'Включване на ' + temp + '°')} disabled={busy}
+              className="px-2 py-1 bg-white border border-amber-300 rounded hover:bg-amber-100">Пробвай вкл.</button>
+            <button onClick={() => probe({ on: false }, 'Изключване')} disabled={busy}
+              className="px-2 py-1 bg-white border border-amber-300 rounded hover:bg-amber-100">Пробвай изкл.</button>
+            <label className="flex items-center gap-1">
+              <input type="number" min="16" max="30" value={temp}
+                onChange={e => setTemp(Number(e.target.value))}
+                className="w-14 border border-amber-300 rounded px-1 py-0.5" />°C
+            </label>
+          </>
+        )}
+      </div>
+
+      {remotes && remotes.length > 0 && (
+        <div className="mt-2 space-y-1">
+          {remotes.map(r => (
+            <button key={r.remote_id} onClick={() => save(r.remote_id)} disabled={busy}
+              className={`block w-full text-left px-2 py-1 rounded border ${
+                chosen === r.remote_id ? 'bg-amber-200 border-amber-400' : 'bg-white border-amber-200 hover:bg-amber-100'}`}>
+              {r.name}{r.brand ? ' · ' + r.brand : ''} <span className="text-amber-700">({r.remote_id})</span>
+            </button>
+          ))}
+        </div>
+      )}
+      {msg && <div className="mt-2 text-amber-900">{msg}</div>}
+      <div className="mt-2 text-amber-700">
+        Инфраредът е еднопосочен: ако климатикът бъде изключен с истинското дистанционно,
+        тук ще продължи да пише, че работи.
+      </div>
+    </div>
+  )
+}
+
 function DeviceCard({ device, API, properties, onDelete, onTypeChange, onTenantControl }) {
   const [status, setStatus]     = useState(null)
   const [loading, setLoading]   = useState(false)
@@ -88,7 +183,8 @@ function DeviceCard({ device, API, properties, onDelete, onTypeChange, onTenantC
           <select defaultValue={device.type} onChange={e => onTypeChange(device.id, e.target.value)}
             className="text-xs border border-gray-200 rounded px-1 py-0.5 text-gray-500">
             <option value="breaker">Бушон</option>
-            <option value="ac">Климатик</option>
+            <option value="ac">Климатик (Wi-Fi)</option>
+            <option value="ir_ac">Климатик (инфраред)</option>
             <option value="boiler">Бойлер</option>
             <option value="socket">Контакт</option>
             <option value="light">Осветление</option>
@@ -112,6 +208,9 @@ function DeviceCard({ device, API, properties, onDelete, onTypeChange, onTenantC
           </span>
         </label>
       )}
+
+      {/* Климатик без Wi-Fi: избор на „дистанционно" в инфраред контролера */}
+      {device.type === 'ir_ac' && <IrRemotePicker device={device} API={API} />}
 
       {/* Live metrics */}
       {status && !loading && (
@@ -224,7 +323,8 @@ function AddDeviceModal({ API, properties, onClose, onSaved }) {
             <select value={form.type} onChange={e => setForm(f => ({...f, type: e.target.value}))}
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400">
               <option value="breaker">Предпазител / Бушон</option>
-              <option value="ac">Климатик</option>
+              <option value="ac">Климатик (със Wi-Fi)</option>
+              <option value="ir_ac">Климатик (без Wi-Fi, през инфраред)</option>
               <option value="boiler">Бойлер</option>
               <option value="socket">Контакт</option>
               <option value="light">Осветление</option>
