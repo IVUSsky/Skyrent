@@ -224,9 +224,26 @@ function AddDeviceModal({ API, properties, onClose, onSaved }) {
             <select value={form.type} onChange={e => setForm(f => ({...f, type: e.target.value}))}
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400">
               <option value="breaker">Предпазител / Бушон</option>
+              <option value="ac">Климатик</option>
+              <option value="boiler">Бойлер</option>
+              <option value="socket">Контакт</option>
+              <option value="light">Осветление</option>
+              <option value="water_valve">Спирателен кран</option>
               <option value="lock">Смарт брава</option>
               <option value="router">Рутер / Интернет</option>
             </select>
+            {['ac', 'boiler', 'socket', 'light', 'water_valve'].includes(form.type) && (
+              <div className="text-xs text-gray-500 mt-1">
+                Този вид може да се даде на наемателя — отметката „Наемателят може да управлява“
+                се вдига след добавянето.
+              </div>
+            )}
+            {['breaker', 'lock', 'router'].includes(form.type) && (
+              <div className="text-xs text-gray-500 mt-1">
+                Този вид никога не се дава на наемателя — едно натискане би спряло
+                хладилника и рутера.
+              </div>
+            )}
           </div>
         </div>
         <div className="flex gap-3 justify-end mt-5">
