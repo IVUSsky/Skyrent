@@ -23,7 +23,12 @@ const TABS = [
 
 export default function TenantApp({ userName, onLogout, mustChangePassword }) {
   const { lang, t: tr, setLang, langs } = useTenantI18n()
-  const [tab, setTab] = useState('home')
+  // Начален таб от адреса — бързите връзки в инсталираното приложение
+  // (manifest shortcuts) отварят направо „Апартамент“, не началния екран.
+  const [tab, setTab] = useState(() => {
+    const want = new URLSearchParams(window.location.search).get('tab')
+    return TABS.some(t => t.id === want) ? want : 'home'
+  })
   const [me, setMe] = useState(null)
   const [loading, setLoading] = useState(true)
   const [showPwd, setShowPwd] = useState(!!mustChangePassword)
@@ -242,7 +247,8 @@ export default function TenantApp({ userName, onLogout, mustChangePassword }) {
         {tab === 'support'     && <TenantTickets />}
         {tab === 'apartment'   && <Apartment property={property} />}
         {tab === 'consumption' && <Consumption property={property} />}
-        {tab === 'profile'     && <Profile me={me} onChangePassword={() => setShowPwd(true)} />}
+        {tab === 'profile'     && <Profile me={me} onChangePassword={() => setShowPwd(true)}
+                                            installPrompt={installPrompt} onInstall={triggerInstall} isIos={isIos} />}
       </main>
 
       {/* Bottom nav */}
@@ -1314,7 +1320,7 @@ function Consumption({ property }) {
   )
 }
 
-function Profile({ me, onChangePassword }) {
+function Profile({ me, onChangePassword, installPrompt, onInstall, isIos }) {
   const { t: tr } = useTenantI18n()
   if (!me?.user) return null
   return (
@@ -1334,8 +1340,46 @@ function Profile({ me, onChangePassword }) {
         </button>
       </Card>
 
+      <InstallCard installPrompt={installPrompt} onInstall={onInstall} isIos={isIos} />
       <AutopayCard />
     </div>
+  )
+}
+
+// Постоянно място за сваляне на приложението. Банерът горе се показва
+// еднократно и, затвори ли го наемателят, няма откъде да инсталира после —
+// затова тук бутонът стои винаги.
+function InstallCard({ installPrompt, onInstall, isIos }) {
+  const { t: tr } = useTenantI18n()
+  const installed = typeof window !== 'undefined' &&
+    (window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone)
+
+  return (
+    <Card title={`📲 ${tr('pwa.cardTitle')}`}>
+      {installed ? (
+        <div className="text-sm text-slate-600">{tr('pwa.installed')}</div>
+      ) : (
+        <div className="space-y-3">
+          <div className="text-sm text-slate-600">{tr('pwa.cardWhy')}</div>
+          {isIos ? (
+            <div className="text-sm text-slate-700 bg-slate-50 border border-slate-200 rounded-lg p-3">
+              {tr('pwa.iosSteps')}
+            </div>
+          ) : installPrompt ? (
+            <button
+              onClick={onInstall}
+              className="text-sm bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded-lg"
+            >
+              {tr('pwa.installBtn')}
+            </button>
+          ) : (
+            <div className="text-sm text-slate-700 bg-slate-50 border border-slate-200 rounded-lg p-3">
+              {tr('pwa.androidHint')}
+            </div>
+          )}
+        </div>
+      )}
+    </Card>
   )
 }
 

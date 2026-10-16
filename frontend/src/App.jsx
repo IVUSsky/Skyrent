@@ -323,8 +323,17 @@ export default function App() {
   }
 
   if (!authenticated) {
-    return showLogin
-      ? <Login API={API} onLogin={handleLogin} onBack={() => setShowLogin(false)} />
+    // Пуснато от инсталираното приложение (?app=1 от manifest start_url) →
+    // направо вход. Иначе наемателят отваря иконата си и попада на
+    // маркетинговата страница, вместо да го пита за парола.
+    const fromApp = new URLSearchParams(window.location.search).has('app')
+    return (showLogin || fromApp)
+      ? <Login API={API} onLogin={handleLogin} onBack={() => {
+          // В режим „приложение“ адресът носи ?app=1 — махаме го, иначе
+          // „Назад“ връща пак формата за вход и изходът е заключен.
+          if (fromApp) window.history.replaceState(null, '', '/')
+          setShowLogin(false)
+        }} />
       : <LandingPage onEnter={() => setShowLogin(true)} />
   }
 
