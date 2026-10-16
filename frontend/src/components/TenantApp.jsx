@@ -1192,6 +1192,22 @@ function Apartment({ property }) {
     finally { setBusy(null) }
   }
 
+  // Температура на климатик през инфраред. Границите са тези на климатика (16–30)
+  // и се налагат и от бекенда — тук са само за да не праща заявка напразно.
+  const setTemp = async (d, next) => {
+    const t = Math.min(30, Math.max(16, Math.round(next)))
+    if (t === d.status?.temp) return
+    setBusy(d.id); setErr('')
+    try {
+      const r = await apiFetch(`${API}/api/tenant/apartment/devices/${d.id}/control`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ temp: t }),
+      }).then(r => r.json())
+      if (!r.ok) setErr(r.error || tr('apt.err'))
+      await load()
+    } catch (e) { setErr(tr('apt.err')) }
+    finally { setBusy(null) }
+  }
+
   if (loading) return <div className="bg-white rounded-lg p-4 text-sm text-gray-500 text-center">{tr('common.loading')}</div>
   const devices = data?.devices || []
 
@@ -1235,6 +1251,28 @@ function Apartment({ property }) {
               </button>
             )}
           </div>
+          {/* Климатик през инфраред: наемателят може и да зададе температура */}
+          {d.infrared && d.controllable && (
+            <div className="mt-3 bg-slate-50 rounded-lg p-3">
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-xs text-gray-600">
+                  {tr('apt.setTemp')}
+                  {d.status?.temp != null && <span className="ml-1 font-semibold text-slate-800">{d.status.temp}°C</span>}
+                  {d.status?.mode_bg && <span className="ml-1 text-gray-500">· {d.status.mode_bg}</span>}
+                </div>
+                <div className="flex items-center gap-1">
+                  <button onClick={() => setTemp(d, (d.status?.temp ?? 24) - 1)} disabled={busy === d.id}
+                    className="w-9 h-9 rounded-lg bg-white border text-lg font-bold disabled:opacity-50">−</button>
+                  <button onClick={() => setTemp(d, (d.status?.temp ?? 24) + 1)} disabled={busy === d.id}
+                    className="w-9 h-9 rounded-lg bg-white border text-lg font-bold disabled:opacity-50">+</button>
+                </div>
+              </div>
+              {d.status?.last_command_only && (
+                <div className="mt-2 text-[11px] text-gray-400">{tr('apt.irNote')}</div>
+              )}
+            </div>
+          )}
+
           {(d.status?.power_w != null || d.status?.energy_kwh != null) && (
             <div className="mt-3 grid grid-cols-2 gap-3 text-center">
               {d.status?.power_w != null && (

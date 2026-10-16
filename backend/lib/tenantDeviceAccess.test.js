@@ -52,6 +52,28 @@ describe('списък и проверка срещу база', () => {
   it('tuya id-то не изтича към наемателя', () => {
     expect(JSON.stringify(devicesForTenant(db, 26))).not.toMatch(/tuya-/);
   });
+  it('климатик през инфраред е управляем и се отбелязва като такъв', () => {
+    db.exec('ALTER TABLE smart_devices ADD COLUMN ir_remote_id TEXT');
+    db.prepare('INSERT INTO smart_devices (id, property_id, tuya_device_id, name, type, enabled, tenant_control, ir_remote_id) VALUES (?,?,?,?,?,?,?,?)')
+      .run(6, 26, 'tuya-ir-hub', 'Климатик хол (инфраред)', 'ir_ac', 1, 1, 'remote-123');
+    const d = devicesForTenant(db, 26).find(x => x.id === 6);
+    expect(d.controllable).toBe(true);
+    expect(d.infrared).toBe(true);
+    expect(JSON.stringify(d)).not.toMatch(/remote-123|tuya-ir-hub/);   // нито единият номер не изтича
+  });
+
+  it('инфраред без избрано дистанционно не се обявява за инфраред', () => {
+    db.exec('ALTER TABLE smart_devices ADD COLUMN ir_remote_id TEXT');
+    db.prepare('INSERT INTO smart_devices (id, property_id, tuya_device_id, name, type, enabled, tenant_control, ir_remote_id) VALUES (?,?,?,?,?,?,?,?)')
+      .run(7, 26, 'tuya-ir-2', 'Контролер без дистанционно', 'ir_ac', 1, 1, null);
+    expect(devicesForTenant(db, 26).find(x => x.id === 7).infrared).toBe(false);
+  });
+
+  it('списъкът работи и когато миграцията за инфраред още не е минала', () => {
+    expect(() => devicesForTenant(db, 26)).not.toThrow();
+    expect(devicesForTenant(db, 26).every(d => d.infrared === false)).toBe(true);
+  });
+
   it('наемател без договор → празен списък', () => {
     expect(devicesForTenant(db, null)).toEqual([]);
   });

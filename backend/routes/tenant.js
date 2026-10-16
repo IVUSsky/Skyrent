@@ -38,6 +38,7 @@ const ticketUpload = multer({ storage: ticketStorage, limits: { fileSize: 10 * 1
 
 const { devicesForTenant, assertTenantMayControl } = require('../lib/tenantDeviceAccess');
 const { deviceStatus, switchDevice, configured: tuyaConfigured } = require('../lib/tuyaClient');
+const { acStatus: irAcStatus, acCommand: irAcCommand } = require('../lib/tuyaIr');
 
 module.exports = function(db) {
   const router = express.Router();
@@ -604,8 +605,18 @@ module.exports = function(db) {
       const list = devicesForTenant(db, propId);
       const withStatus = [];
       for (const d of list) {
-        const row = db.prepare('SELECT tuya_device_id FROM smart_devices WHERE id=?').get(d.id);
-        const st = await deviceStatus(row.tuya_device_id);
+        const row = db.prepare('SELECT tuya_device_id, ir_remote_id FROM smart_devices WHERE id=?').get(d.id);
+        let st;
+        if (d.infrared) {
+          // Инфраред: Tuya пази последната ИЗПРАТЕНА команда, не реалното
+          // положение на климатика — затова и отбелязваме, че е така.
+          try {
+            const ac = await irAcStatus(row.tuya_device_id, row.ir_remote_id);
+            st = { ...ac, last_command_only: true };
+          } catch (e) { st = { error: e.message }; }
+        } else {
+          st = await deviceStatus(row.tuya_device_id);
+        }
         withStatus.push({ ...d, status: st });
       }
       const totalW = withStatus.reduce((s, d) => s + (d.status?.power_w || 0), 0);
@@ -618,16 +629,35 @@ module.exports = function(db) {
       const propId = tenantPropertyId(req.user.id);
       const chk = assertTenantMayControl(db, propId, Number(req.params.id));
       if (!chk.ok) return res.status(chk.status).json({ error: chk.error });
-      if (typeof req.body?.on !== 'boolean') return res.status(400).json({ error: 'on (true/false) е задължително' });
+      const isIr = String(chk.device.type || '').toLowerCase() === 'ir_ac' && !!chk.device.ir_remote_id;
+      const wantsTemp = req.body?.temp != null && req.body.temp !== '';
+      // При климатик през инфраред може да се смени само температурата, без да
+      // се пипа включването — затова `on` е задължително само за останалите.
+      if (typeof req.body?.on !== 'boolean' && !(isIr && wantsTemp)) {
+        return res.status(400).json({ error: 'on (true/false) е задължително' });
+      }
       if (!tuyaConfigured()) return res.status(503).json({ error: 'Връзката с устройствата не е настроена — пиши на собственика' });
-      const r = await switchDevice(chk.device.tuya_device_id, req.body.on);
+      const r = isIr
+        ? await irAcCommand(chk.device.tuya_device_id, chk.device.ir_remote_id, {
+            power: typeof req.body.on === 'boolean' ? req.body.on : null,
+            temp: wantsTemp ? req.body.temp : null,
+            mode: req.body.mode,
+          })
+        : await switchDevice(chk.device.tuya_device_id, req.body.on);
       // Следа кой е включил какво — за спорове „не съм го пипал"
       try {
         db.prepare(`CREATE TABLE IF NOT EXISTS smart_logs (
           id INTEGER PRIMARY KEY AUTOINCREMENT, device_id INTEGER, action TEXT, value TEXT,
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`).run();
+        // При смяна само на температурата действието НЕ е „off" — иначе логът
+        // щеше да твърди, че наемателят е изключил климатика.
+        const action = typeof req.body.on === 'boolean' ? (req.body.on ? 'on' : 'off') : 'set';
         db.prepare('INSERT INTO smart_logs (device_id, action, value) VALUES (?,?,?)')
-          .run(chk.device.id, req.body.on ? 'on' : 'off', JSON.stringify({ by: 'tenant', user_id: req.user.id }));
+          .run(chk.device.id, action, JSON.stringify({
+            by: 'tenant', user_id: req.user.id,
+            ...(wantsTemp ? { temp: Number(req.body.temp) } : {}),
+            ...(req.body.mode != null ? { mode: req.body.mode } : {}),
+          }));
       } catch (_) {}
       if (!r.ok) return res.status(502).json({ error: 'Устройството не отговори — опитай пак след малко' });
       res.json({ ok: true });
