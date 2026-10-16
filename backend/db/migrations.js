@@ -635,6 +635,13 @@ function runTenantMigrations(db) {
     UNIQUE(property_id)
   )`);
 
+  // D340W няма уеб сървър (портове 80/443 са затворени), затова единият forwarded_port
+  // вече не стига: движението идва по ONVIF (локално 8000), а снимката — от RTSP
+  // потока (локално 554). Два отделни външни порта на рутера.
+  // forwarded_port остава за съвместимост и служи като ONVIF порт, ако onvif_port е празен.
+  try { db.exec("ALTER TABLE cameras ADD COLUMN onvif_port INTEGER"); console.log('Migration: added cameras.onvif_port'); } catch(_) {}
+  try { db.exec("ALTER TABLE cameras ADD COLUMN rtsp_port INTEGER"); console.log('Migration: added cameras.rtsp_port'); } catch(_) {}
+
   // Лог на засечено движение (снимка + час). detected_user_id/confidence остават
   // NULL засега — идентификация по лице (biometric, изисква изрично tenant съгласие
   // по GDPR) е отделна бъдеща стъпка, не е част от тази миграция.

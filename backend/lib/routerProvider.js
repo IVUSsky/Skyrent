@@ -72,9 +72,15 @@ class MockProvider {
     return { ok: true, provider: 'mock', access: allow ? 'enabled' : 'disabled' };
   }
 
-  async setupCameraForward(router, localIp, localPort, externalPort) {
-    console.log(`[router:mock] setupCameraForward host=${router.host} ${externalPort}->${localIp}:${localPort}`);
+  async setupCameraForward(router, localIp, localPort, externalPort, opts = {}) {
+    const scope = (opts.allowedSources || []).length ? ` src=${opts.allowedSources.join(',')}` : '';
+    console.log(`[router:mock] setupCameraForward host=${router.host} ${externalPort}->${localIp}:${localPort}${scope}`);
     return { ok: true, provider: 'mock', message: `Mock OK — ${externalPort} → ${localIp}:${localPort}` };
+  }
+
+  async removeCameraForward(router, externalPort) {
+    console.log(`[router:mock] removeCameraForward host=${router.host} port=${externalPort}`);
+    return { ok: true, provider: 'mock', message: `Mock OK — махнат порт ${externalPort}` };
   }
 }
 
@@ -256,30 +262,64 @@ class MikrotikProvider {
   // рутера (достъпен през router.host отвън, като API-то на самия рутер) →
   // локалния IP:порт на камерата. Идемпотентно (comment-базирана проверка,
   // както skyrent-api-allow/skyrent-flat-cutoff).
-  async setupCameraForward(router, localIp, localPort, externalPort) {
+  // ⚠️ СИГУРНОСТ: отворен порт означава, че камерата е видима от целия интернет, а
+  // Reolink устройствата са честа цел на автоматични сканирания. Затова приемаме
+  // `allowedSources` (CIDR списък) и когато е зададен, правилата важат САМО за тези
+  // адреси. Без него forward-ът е отворен за всички — пазим го като възможност, но
+  // извикващият трябва съзнателно да я избере.
+  async setupCameraForward(router, localIp, localPort, externalPort, opts = {}) {
     const conn = await this._connect(router);
     try {
       const comment = `skyrent-cam-${externalPort}`;
+      const sources = (opts.allowedSources || []).filter(Boolean);
 
       const existingNat = (await conn.write('/ip/firewall/nat/print')).filter(x => x.comment === comment);
       if (!existingNat.length) {
-        await conn.write('/ip/firewall/nat/add', [
-          '=chain=dstnat', '=protocol=tcp', '=dst-port=' + externalPort,
-          '=in-interface-list=WAN', '=action=dst-nat',
-          '=to-addresses=' + localIp, '=to-ports=' + localPort,
-          '=comment=' + comment,
-        ]);
+        for (const src of (sources.length ? sources : [null])) {
+          const params = [
+            '=chain=dstnat', '=protocol=tcp', '=dst-port=' + externalPort,
+            '=in-interface-list=WAN', '=action=dst-nat',
+            '=to-addresses=' + localIp, '=to-ports=' + localPort,
+            '=comment=' + comment,
+          ];
+          if (src) params.push('=src-address=' + src);
+          await conn.write('/ip/firewall/nat/add', params);
+        }
       }
 
       const existingFilter = (await conn.write('/ip/firewall/filter/print')).filter(x => x.comment === comment);
       if (!existingFilter.length) {
-        await conn.write('/ip/firewall/filter/add', [
-          '=chain=forward', '=protocol=tcp', '=dst-port=' + localPort,
-          '=dst-address=' + localIp, '=action=accept', '=comment=' + comment,
-        ]);
+        for (const src of (sources.length ? sources : [null])) {
+          const params = [
+            '=chain=forward', '=protocol=tcp', '=dst-port=' + localPort,
+            '=dst-address=' + localIp, '=action=accept', '=comment=' + comment,
+          ];
+          if (src) params.push('=src-address=' + src);
+          await conn.write('/ip/firewall/filter/add', params);
+        }
       }
 
-      return { ok: true, message: `✓ Порт ${externalPort} → ${localIp}:${localPort}` };
+      const scope = sources.length ? ` (само за ${sources.join(', ')})` : ' (отворен за всички)';
+      return { ok: true, message: `✓ Порт ${externalPort} → ${localIp}:${localPort}${scope}` };
+    } finally {
+      try { conn.close(); } catch (_) {}
+    }
+  }
+
+  // Маха правилата на един форуърд (при изтриване на камера или смяна на портове).
+  async removeCameraForward(router, externalPort) {
+    const conn = await this._connect(router);
+    try {
+      const comment = `skyrent-cam-${externalPort}`;
+      let removed = 0;
+      for (const table of ['/ip/firewall/nat', '/ip/firewall/filter']) {
+        const rows = (await conn.write(`${table}/print`)).filter(x => x.comment === comment);
+        for (const row of rows) {
+          await conn.write(`${table}/remove`, ['=.id=' + row['.id']]);
+          removed++;
+        }
+      }
+      return { ok: true, message: `✓ Махнати ${removed} правила за порт ${externalPort}` };
     } finally {
       try { conn.close(); } catch (_) {}
     }

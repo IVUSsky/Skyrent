@@ -7,7 +7,7 @@ const STATUS_BADGE = {
   unknown: { text: '⚪ Unknown', cls: 'text-gray-500' },
 }
 
-const EMPTY = { property_id: '', router_id: '', name: '', model: 'Reolink D340W', local_ip: '', forwarded_port: '', camera_user: 'admin', camera_pass: '' }
+const EMPTY = { property_id: '', router_id: '', name: '', model: 'Reolink D340W', local_ip: '', onvif_port: '', rtsp_port: '', camera_user: 'admin', camera_pass: '' }
 
 export default function Cameras({ API }) {
   const [cameras, setCameras] = useState([])
@@ -120,8 +120,16 @@ export default function Cameras({ API }) {
                 placeholder="192.168.88.50" className="w-full border rounded px-3 py-1.5 font-mono" />
             </div>
             <div>
-              <label className="text-xs text-gray-500 font-medium">Forwarded порт</label>
-              <input type="number" value={form.forwarded_port} onChange={e => setForm({ ...form, forwarded_port: e.target.value })} className="w-full border rounded px-3 py-1.5" />
+              <label className="text-xs text-gray-500 font-medium">ONVIF порт (движение)</label>
+              <input type="number" value={form.onvif_port} onChange={e => setForm({ ...form, onvif_port: e.target.value })}
+                placeholder="напр. 8001" className="w-full border rounded px-3 py-1.5" />
+              <p className="text-[11px] text-gray-400 mt-0.5">външен порт на рутера → 8000 на камерата</p>
+            </div>
+            <div>
+              <label className="text-xs text-gray-500 font-medium">RTSP порт (снимки)</label>
+              <input type="number" value={form.rtsp_port} onChange={e => setForm({ ...form, rtsp_port: e.target.value })}
+                placeholder="напр. 5541" className="w-full border rounded px-3 py-1.5" />
+              <p className="text-[11px] text-gray-400 mt-0.5">външен порт на рутера → 554 на камерата</p>
             </div>
             <div>
               <label className="text-xs text-gray-500 font-medium">Потребител</label>
@@ -143,7 +151,7 @@ export default function Cameras({ API }) {
       <div className="bg-white rounded-xl shadow border border-gray-100 overflow-x-auto">
         <table className="min-w-full divide-y divide-gray-100 text-sm">
           <thead className="bg-gray-50">
-            <tr>{['Имот', 'Рутер', 'Порт', 'Статус', 'Last seen', 'Действия'].map(h =>
+            <tr>{['Имот', 'Рутер', 'Портове', 'Статус', 'Последно видяна', 'Действия'].map(h =>
               <th key={h} className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">{h}</th>)}</tr>
           </thead>
           <tbody className="divide-y divide-gray-50">
@@ -156,7 +164,9 @@ export default function Cameras({ API }) {
                     <div className="text-xs text-gray-500 truncate">{c.property_address || '—'}</div>
                   </td>
                   <td className="px-3 py-2 text-xs text-gray-500 max-w-[160px] truncate">{c.router_name || '—'}</td>
-                  <td className="px-3 py-2 font-mono text-xs">{c.forwarded_port || '—'}</td>
+                  <td className="px-3 py-2 font-mono text-xs whitespace-nowrap" title="ONVIF / RTSP">
+                    {c.onvif_port || c.forwarded_port || '—'}<span className="text-gray-400"> / </span>{c.rtsp_port || '—'}
+                  </td>
                   <td className="px-3 py-2">
                     <span className={`text-xs ${st.cls}`} title={c.last_error || ''}>{st.text}</span>
                   </td>

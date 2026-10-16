@@ -1,7 +1,7 @@
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
-const { getMdState, testConnection } = require('../lib/reolinkClient');
+const { getMdState, testConnection, disconnect } = require('../lib/reolinkClient');
 const { getRouterProvider } = require('../lib/routerProvider');
 
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '../data');
@@ -32,11 +32,12 @@ module.exports = function(db) {
       const b = req.body;
       if (!b.property_id || !b.router_id) return res.status(400).json({ error: 'property_id и router_id са задължителни' });
       const r = db.prepare(`
-        INSERT INTO cameras (property_id, router_id, name, model, local_ip, forwarded_port, camera_user, camera_pass)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO cameras (property_id, router_id, name, model, local_ip, forwarded_port, onvif_port, rtsp_port, camera_user, camera_pass)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         Number(b.property_id), Number(b.router_id), b.name || '', b.model || 'Reolink D340W',
         b.local_ip || '', b.forwarded_port ? Number(b.forwarded_port) : null,
+        b.onvif_port ? Number(b.onvif_port) : null, b.rtsp_port ? Number(b.rtsp_port) : null,
         b.camera_user || 'admin', b.camera_pass || ''
       );
       res.json({ ok: true, id: r.lastInsertRowid });
@@ -55,7 +56,8 @@ module.exports = function(db) {
       const b = req.body;
       db.prepare(`
         UPDATE cameras SET
-          property_id=?, router_id=?, name=?, model=?, local_ip=?, forwarded_port=?, camera_user=?, camera_pass=?
+          property_id=?, router_id=?, name=?, model=?, local_ip=?, forwarded_port=?,
+          onvif_port=?, rtsp_port=?, camera_user=?, camera_pass=?
         WHERE id=?
       `).run(
         b.property_id !== undefined ? Number(b.property_id) : cur.property_id,
@@ -64,16 +66,25 @@ module.exports = function(db) {
         b.model !== undefined ? b.model : cur.model,
         b.local_ip !== undefined ? b.local_ip : cur.local_ip,
         b.forwarded_port !== undefined ? Number(b.forwarded_port) : cur.forwarded_port,
+        b.onvif_port !== undefined ? Number(b.onvif_port) : cur.onvif_port,
+        b.rtsp_port !== undefined ? Number(b.rtsp_port) : cur.rtsp_port,
         b.camera_user !== undefined ? b.camera_user : cur.camera_user,
         b.camera_pass ? b.camera_pass : cur.camera_pass,
         req.params.id
       );
+      // Адресът/достъпът може да са сменени — вдигаме ONVIF абонамента наново при
+      // следващото четене, иначе кешираната връзка сочи към старото място.
+      disconnect(Number(req.params.id));
       res.json({ ok: true });
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
 
   router.delete('/:id', (req, res) => {
-    try { db.prepare('DELETE FROM cameras WHERE id=?').run(req.params.id); res.json({ ok: true }); }
+    try {
+      disconnect(Number(req.params.id));
+      db.prepare('DELETE FROM cameras WHERE id=?').run(req.params.id);
+      res.json({ ok: true });
+    }
     catch (err) { res.status(500).json({ error: err.message }); }
   });
 
@@ -91,12 +102,29 @@ module.exports = function(db) {
     if (!camera) return res.status(404).json({ ok: false, message: 'Не е намерена' });
     const routerRow = db.prepare('SELECT * FROM routers WHERE id=?').get(camera.router_id);
     if (!routerRow) return res.status(400).json({ ok: false, message: 'Липсва свързан рутер' });
-    if (!camera.local_ip || !camera.forwarded_port) {
-      return res.status(400).json({ ok: false, message: 'Липсват local_ip/forwarded_port за камерата' });
+    const onvifExternal = camera.onvif_port || camera.forwarded_port;
+    if (!camera.local_ip || !onvifExternal) {
+      return res.status(400).json({ ok: false, message: 'Липсват local_ip / ONVIF порт за камерата' });
     }
+    // CAMERA_ALLOWED_SOURCES (CIDR, разделени със запетая) стеснява форуърда само до
+    // адресите, от които Skyrent излиза. Без него камерата е достъпна от целия
+    // интернет — работи, но е по-широко отворено, отколкото е нужно.
+    const allowedSources = (process.env.CAMERA_ALLOWED_SOURCES || '')
+      .split(',').map(s => s.trim()).filter(Boolean);
     try {
-      const result = await getRouterProvider().setupCameraForward(routerRow, camera.local_ip, 80, camera.forwarded_port);
-      res.json(result);
+      const provider = getRouterProvider();
+      const results = [];
+      // ONVIF (движение) — локално 8000
+      results.push(await provider.setupCameraForward(routerRow, camera.local_ip, 8000, onvifExternal, { allowedSources }));
+      // RTSP (снимка от потока) — локално 554
+      if (camera.rtsp_port) {
+        results.push(await provider.setupCameraForward(routerRow, camera.local_ip, 554, camera.rtsp_port, { allowedSources }));
+      }
+      res.json({
+        ok: results.every(r => r.ok),
+        message: results.map(r => r.message).join(' · ') +
+          (camera.rtsp_port ? '' : ' · ⚠️ без RTSP порт няма да има снимки'),
+      });
     } catch (err) {
       res.status(500).json({ ok: false, message: err.message });
     }

@@ -1,5 +1,9 @@
-// Cron-като worker за видео домофоните (Reolink) — на всеки 20 сек пита всяка камера
-// дали е засякла движение; при ново засичане (false→true) сваля снимка и я логва.
+// Cron-като worker за видео домофоните (Reolink) — на всеки 20 сек чете състоянието
+// на движението; при ново засичане (false→true) взема кадър и го логва.
+//
+// Движението идва по ONVIF, а кадърът — от RTSP потока; `reolinkClient` крие това
+// зад същите `getMdState`/`snap`, които този файл ползваше и с CGI. Причината за
+// смяната: D340W няма уеб сървър (виж коментара в lib/reolinkClient.js).
 //
 // Идентификация по лице НЕ е част от този файл — detected_user_id/confidence в
 // camera_events остават NULL засега; biometric разпознаване е отделна бъдеща стъпка,
@@ -19,7 +23,8 @@ const lastMotionState = new Map();
 
 async function reconcileCameras(db, opts = {}) {
   const stats = { checked: 0, events: 0, errors: 0 };
-  const cameras = db.prepare('SELECT * FROM cameras WHERE forwarded_port IS NOT NULL').all();
+  // ONVIF портът носи движението; forwarded_port е старото име на същото нещо.
+  const cameras = db.prepare('SELECT * FROM cameras WHERE onvif_port IS NOT NULL OR forwarded_port IS NOT NULL').all();
 
   for (const camera of cameras) {
     stats.checked++;
