@@ -1,24 +1,14 @@
 import React, { useEffect, useState } from 'react'
 import { setCanonical } from '../lib/seo'
+import { parseVideo } from '../lib/videoEmbed'
 
 // Публична страница на обява под наем — БЕЗ login. Зарежда се при URL ?listing=<org>-<id>.
 // Лек, премиум вид (brass акцент), снимки + цена + детайли + форма за запитване.
 
 const PT_LABEL = { '2-стаен': 'Двустаен', '3-стаен': 'Тристаен', '1-стаен': 'Едностаен' }
 
-// Само YouTube/Vimeo → embed URL. Непознат домейн → null (не вграждаме произволни
-// iframe-ове = защита срещу iframe инжекция).
-function videoEmbed(url) {
-  if (!url) return null
-  try {
-    const u = new URL(url)
-    const h = u.hostname.replace(/^www\.|^m\./, '')
-    if (h === 'youtube.com') { const id = u.searchParams.get('v'); if (id) return `https://www.youtube.com/embed/${encodeURIComponent(id)}` }
-    if (h === 'youtu.be') { const id = u.pathname.slice(1); if (id) return `https://www.youtube.com/embed/${encodeURIComponent(id)}` }
-    if (h === 'vimeo.com') { const id = u.pathname.split('/').filter(Boolean)[0]; if (/^\d+$/.test(id)) return `https://player.vimeo.com/video/${id}` }
-  } catch (_) {}
-  return null
-}
+// Разпознаването на линка живее в lib/videoEmbed.js — ползва се и от формата
+// при въвеждане, за да предупреждава веднага при негоден адрес.
 
 export default function PublicListing({ param, API = '' }) {
   const [m, org, pid] = (() => {
@@ -108,12 +98,22 @@ export default function PublicListing({ param, API = '' }) {
               )}
             </>
           ) : <div style={S.noPhoto}>🏠 Без снимки</div>}
-          {videoEmbed(data.video) && (
-            <div style={{ position: 'relative', paddingTop: '56.25%', background: '#000' }}>
-              <iframe src={videoEmbed(data.video)} title="Видео обиколка" allow="fullscreen; encrypted-media; picture-in-picture" allowFullScreen
-                style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', border: 0 }} />
-            </div>
-          )}
+          {(() => {
+            const v = parseVideo(data.video)
+            if (!v) return null
+            // Вертикалните клипове (Shorts) се ограничават по височина, иначе
+            // заемат цял екран на телефон и обявата изчезва под тях.
+            return (
+              <div style={{
+                position: 'relative', background: '#000',
+                paddingTop: `${v.ratio}%`,
+                ...(v.vertical ? { maxHeight: '70vh', paddingTop: 0, height: '70vh' } : {}),
+              }}>
+                <iframe src={v.src} title="Видео обиколка" allow="fullscreen; encrypted-media; picture-in-picture" allowFullScreen
+                  style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', border: 0 }} />
+              </div>
+            )
+          })()}
         </div>
 
         {/* Details */}

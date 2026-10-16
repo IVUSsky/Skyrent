@@ -1,5 +1,6 @@
 import { apiFetch, authUrl } from '../api'
 import { shrinkAll, describeRejected } from '../lib/shrinkImage'
+import { videoHint } from '../lib/videoEmbed'
 import React, { useState, useEffect, useRef } from 'react'
 import Inventory from './Inventory'
 import UtilityHistoryChart from './UtilityHistoryChart'
@@ -611,7 +612,11 @@ export default function Portfolio({ API, role }) {
                   onBlur={() => pubOn && savePublish(true)}
                   placeholder="🎥 Видео линк (YouTube или Vimeo) — по желание"
                   className="w-full mt-2 border border-amber-200 rounded-lg px-3 py-2 text-sm bg-white" />
-                <div className="text-[11px] text-amber-700 mt-1">Качи видеото в YouTube/Vimeo (може „unlisted") и постави линка — вгражда се в обявата без да тежи на системата.</div>
+                {videoHint(pubVideo)
+                  ? <div className="text-[11px] text-red-600 mt-1">⚠️ {videoHint(pubVideo)}</div>
+                  : pubVideo
+                    ? <div className="text-[11px] text-emerald-700 mt-1">✓ Линкът е разпознат — видеото ще се покаже в обявата.</div>
+                    : <div className="text-[11px] text-amber-700 mt-1">Качи видеото в YouTube/Vimeo (може „unlisted") и постави линка — вгражда се в обявата без да тежи на системата.</div>}
                 {/* Винаги видимо правило — за да не се чудят наемодателите */}
                 <div className="text-xs text-amber-700 mt-2">
                   ⚠️ В каталога се показват само <b>свободни</b> имоти. Ако полето „наемател" е попълнено, обявата се скрива автоматично (отдадените не се рекламират).
