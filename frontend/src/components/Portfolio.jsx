@@ -1,5 +1,6 @@
 import { apiFetch, authUrl } from '../api'
 import { shrinkAll, describeRejected } from '../lib/shrinkImage'
+import { convertHeicFiles } from '../lib/heicConvert'
 import { videoHint } from '../lib/videoEmbed'
 import React, { useState, useEffect, useRef } from 'react'
 import Inventory from './Inventory'
@@ -53,6 +54,7 @@ export default function Portfolio({ API, role }) {
   const filesInputRef = React.useRef()
   const [inquiries, setInquiries] = useState([])
   const [showInquiries, setShowInquiries] = useState(false)
+  const [heicProgress, setHeicProgress] = useState(null)  // преобразуване на HEIC от телефон
   const [replyFor, setReplyFor] = useState(null)      // кое запитване е отворено за отговор
   const [replyText, setReplyText] = useState('')
   const [replySending, setReplySending] = useState(false)
@@ -253,9 +255,18 @@ export default function Portfolio({ API, role }) {
     setPhotoErr('')
     setUploading(true)
 
+    // HEIC → JPEG ПЪРВО. Сървърът не може да разкодира HEVC (кодекът на
+    // телефонните HEIC) — libvips чете контейнера, но не и съдържанието, затова
+    // преобразуването трябва да стане тук. Отнема секунда-две на снимка.
+    let prepared = raw
+    try {
+      prepared = await convertHeicFiles(raw, (done, total) => setHeicProgress({ done, total }))
+    } catch (_) { /* при неуспех пращаме оригиналите — сървърът ще откаже с обяснение */ }
+    setHeicProgress(null)
+
     // Смаляване ПРЕДИ проверката за размер — иначе голяма телефонна снимка
     // отпада, въпреки че след смаляването щеше да мине спокойно.
-    const { ok, message } = describeRejected(await shrinkAll(raw))
+    const { ok, message } = describeRejected(await shrinkAll(prepared))
     if (message) setPhotoErr(message)
     if (!ok.length) { setUploading(false); return }
 
@@ -677,7 +688,11 @@ export default function Portfolio({ API, role }) {
                 onDrop={e => { e.preventDefault(); uploadPhotos(e.dataTransfer.files) }}
               >
                 {uploading
-                  ? <div className="text-blue-600 font-medium">Качва...</div>
+                  ? <div className="text-blue-600 font-medium">
+                      {heicProgress
+                        ? `Преобразува снимка ${heicProgress.done} от ${heicProgress.total}…`
+                        : 'Качва...'}
+                    </div>
                   : <>
                       <div className="text-3xl mb-2">📸</div>
                       <div className="text-sm font-medium text-blue-700">Натиснете или плъзнете снимки тук</div>

@@ -9,6 +9,7 @@
     "start": "serve -s dist -l ${PORT:-3000}"
   },
   "dependencies": {
+    "heic2any": "^0.0.4",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "recharts": "^2.10.3",
