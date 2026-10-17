@@ -53,6 +53,10 @@ export default function Portfolio({ API, role }) {
   const filesInputRef = React.useRef()
   const [inquiries, setInquiries] = useState([])
   const [showInquiries, setShowInquiries] = useState(false)
+  const [replyFor, setReplyFor] = useState(null)      // кое запитване е отворено за отговор
+  const [replyText, setReplyText] = useState('')
+  const [replySending, setReplySending] = useState(false)
+  const [replyMsg, setReplyMsg] = useState(null)
   const [owners, setOwners] = useState([]) // Agency multi_owner; [] ако не е включено
 
   const loadInquiries = () => apiFetch(`${API}/api/properties/inquiries`)
@@ -98,6 +102,32 @@ export default function Portfolio({ API, role }) {
   }
   const deleteInquiry = (inq) => {
     apiFetch(`${API}/api/properties/inquiries/${inq.id}`, { method: 'DELETE' }).then(() => loadInquiries())
+  }
+
+  // Отговор направо от Skyrent. Преди имаше само `mailto:` връзка, която на
+  // телефон често не отваря нищо — запитванията оставаха без отговор.
+  const openReply = (inq) => {
+    setReplyFor(inq)
+    setReplyText(inq.reply_text || '')
+    setReplyMsg(null)
+  }
+  const sendReply = (inq) => {
+    const text = replyText.trim()
+    if (!text) return
+    setReplySending(true); setReplyMsg(null)
+    apiFetch(`${API}/api/properties/inquiries/${inq.id}/reply`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    })
+      .then(async r => {
+        const data = await r.json().catch(() => ({}))
+        if (!r.ok) throw new Error(data.error || 'Неуспешно изпращане')
+        setReplyMsg({ type: 'ok', text: `Изпратено до ${data.to || inq.email}` })
+        loadInquiries()
+        setTimeout(() => { setReplyFor(null); setReplyMsg(null) }, 1500)
+      })
+      .catch(e => setReplyMsg({ type: 'error', text: e.message }))
+      .finally(() => setReplySending(false))
   }
 
   useEffect(() => {
@@ -985,6 +1015,12 @@ export default function Portfolio({ API, role }) {
                             </div>
                           </div>
                           <div className="flex gap-1 shrink-0">
+                            {inq.email && (
+                              <button onClick={() => openReply(inq)}
+                                className="text-xs px-2 py-1 rounded border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100">
+                                ✉️ Отговори
+                              </button>
+                            )}
                             <button onClick={() => toggleInquiry(inq)}
                               className={`text-xs px-2 py-1 rounded border ${inq.handled ? 'bg-white text-gray-600 border-gray-300' : 'bg-green-600 text-white border-green-600 hover:bg-green-700'}`}>
                               {inq.handled ? '↩ Върни' : '✓ Обработено'}
@@ -992,6 +1028,40 @@ export default function Portfolio({ API, role }) {
                             <button onClick={() => deleteInquiry(inq)} className="text-xs px-2 py-1 rounded border border-red-200 bg-red-50 text-red-700 hover:bg-red-100">🗑</button>
                           </div>
                         </div>
+
+                        {/* Вече изпратен отговор — за да се вижда какво е писано, без да се рови в пощата */}
+                        {inq.reply_text && replyFor?.id !== inq.id && (
+                          <div className="mt-2 rounded border border-gray-200 bg-white px-3 py-2">
+                            <div className="text-[11px] text-gray-400 mb-0.5">
+                              Отговорено {(inq.replied_at || '').slice(0, 16).replace('T', ' ')}
+                            </div>
+                            <div className="text-sm text-gray-700 whitespace-pre-wrap">{inq.reply_text}</div>
+                          </div>
+                        )}
+
+                        {replyFor?.id === inq.id && (
+                          <div className="mt-2 rounded border border-blue-200 bg-white p-3">
+                            <div className="text-xs text-gray-500 mb-1">До: <b>{inq.email}</b></div>
+                            <textarea value={replyText} onChange={e => setReplyText(e.target.value)} rows={4}
+                              placeholder="Здравейте, относно запитването Ви за имота…"
+                              className="w-full border rounded px-3 py-2 text-sm" />
+                            {replyMsg && (
+                              <div className={`text-xs mt-1 ${replyMsg.type === 'error' ? 'text-red-600' : 'text-green-700'}`}>
+                                {replyMsg.text}
+                              </div>
+                            )}
+                            <div className="flex gap-2 justify-end mt-2">
+                              <button onClick={() => { setReplyFor(null); setReplyMsg(null) }}
+                                className="text-xs px-3 py-1.5 rounded border border-gray-300 text-gray-600 hover:bg-gray-50">
+                                Откажи
+                              </button>
+                              <button onClick={() => sendReply(inq)} disabled={replySending || !replyText.trim()}
+                                className="text-xs px-3 py-1.5 rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50">
+                                {replySending ? 'Изпраща…' : 'Изпрати'}
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>}

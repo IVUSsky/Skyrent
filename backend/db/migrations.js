@@ -105,6 +105,10 @@ function runTenantMigrations(db) {
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     handled INTEGER DEFAULT 0
   )`); console.log('listing_inquiries table ready'); } catch(_) {}
+  // Отговор на запитване направо от Skyrent (пази се, за да се вижда какво е
+  // писано и кога — дотогава отговорът живееше само в пощата на наемодателя).
+  try { db.exec("ALTER TABLE listing_inquiries ADD COLUMN reply_text TEXT"); console.log('Migration: added listing_inquiries.reply_text'); } catch(_) {}
+  try { db.exec("ALTER TABLE listing_inquiries ADD COLUMN replied_at DATETIME"); console.log('Migration: added listing_inquiries.replied_at'); } catch(_) {}
   // Артикули (редове) от разходни фактури — за търсене „същия латекс" по-късно
   try { db.exec(`CREATE TABLE IF NOT EXISTS expense_invoice_items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
