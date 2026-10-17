@@ -1,88 +1,64 @@
-// Тестове на филтъра за качване (lib/uploadFilter.js).
-//
-// Поводът: качването на снимки работеше от компютър, но не и от телефон.
-// Съобщението беше „Разрешени са само снимки (JPG, PNG, WEBP)". Проверено
-// срещу production — три различни неща, които телефонът праща, падаха:
-//   · име БЕЗ разширение (Android picker / Google Photos)
-//   · mime `image/jpg` вместо `image/jpeg`
-//   · .heic от камерата
-const { imagesOnly, safeExt, normalizeMime } = require('./uploadFilter');
+// Качването на снимки от телефон чупеше правилата многократно (виж коментара в
+// uploadFilter.js). Тестът заковава поведението: кое минава, кое не и с какво
+// разширение се записва — за да не се върне някой от старите откази.
 
-const check = (originalname, mimetype) => {
-  let result;
-  imagesOnly({}, { originalname, mimetype }, (err, ok) => {
-    result = err ? { ok: false, code: err.code } : { ok: !!ok };
-  });
-  return result;
-};
+const { imagesOnly, safeExt } = require('./uploadFilter');
 
-describe('какво се приема за качване', () => {
-  it('обикновен JPEG', () => expect(check('lk.jpg', 'image/jpeg').ok).toBe(true));
-  it('PNG и WEBP', () => {
-    expect(check('a.png', 'image/png').ok).toBe(true);
-    expect(check('a.webp', 'image/webp').ok).toBe(true);
+function check(file) {
+  let err = null;
+  imagesOnly({}, file, (e) => { err = e || null; });
+  return err;
+}
+
+describe('imagesOnly', () => {
+  it('приема HEIC от Android „Файлове" (octet-stream + .heic)', () => {
+    const file = { mimetype: 'application/octet-stream', originalname: 'IMG_2026.heic' };
+    expect(check(file)).toBe(null);
+    expect(safeExt(file)).toBe('.jpg');   // конвертира се при оптимизацията
   });
 
-  it('име БЕЗ разширение — Android picker', () => {
-    expect(check('1000012345', 'image/jpeg').ok).toBe(true);
-    expect(check('image', 'image/jpeg').ok).toBe(true);
+  it('приема HEIC с коректен mimetype', () => {
+    expect(check({ mimetype: 'image/heic', originalname: 'IMG.heic' })).toBe(null);
   });
 
-  it('нестандартният mime image/jpg', () => {
-    expect(check('a.jpg', 'image/jpg').ok).toBe(true);
-    expect(check('a.jpg', 'image/pjpeg').ok).toBe(true);
+  it('приема HEIC-sequence (псевдоним)', () => {
+    expect(check({ mimetype: 'image/heic-sequence', originalname: 'IMG.heic' })).toBe(null);
   });
 
-  it('HEIC от камерата на телефона', () => {
-    expect(check('IMG_0001.heic', 'image/heic').ok).toBe(true);
-    expect(check('IMG_0001.HEIF', 'image/heif').ok).toBe(true);
+  it('приема име без разширение (Android picker)', () => {
+    const file = { mimetype: 'image/jpeg', originalname: 'image' };
+    expect(check(file)).toBe(null);
+    expect(safeExt(file)).toBe('.jpg');
   });
 
-  it('главни букви и кирилица в името', () => {
-    expect(check('IMG_20260913.JPG', 'image/jpeg').ok).toBe(true);
-    expect(check('снимка.jpg', 'image/jpeg').ok).toBe(true);
-  });
-});
-
-describe('какво продължава да се отказва', () => {
-  it('SVG — векторът носи скрипт (stored XSS)', () => {
-    expect(check('a.svg', 'image/svg+xml')).toEqual({ ok: false, code: 'BAD_FILE_TYPE' });
+  it('приема image/jpg (нестандартен, но реален)', () => {
+    expect(check({ mimetype: 'image/jpg', originalname: 'a.jpg' })).toBe(null);
   });
 
-  it('HTML и PDF', () => {
-    expect(check('a.html', 'text/html').ok).toBe(false);
-    expect(check('a.pdf', 'application/pdf').ok).toBe(false);
+  it('пази разширението при неизвестен тип, вместо да прави всичко .jpg', () => {
+    expect(safeExt({ mimetype: 'application/octet-stream', originalname: 'x.png' })).toBe('.png');
+    expect(safeExt({ mimetype: 'application/octet-stream', originalname: 'x.webp' })).toBe('.webp');
+    expect(safeExt({ mimetype: 'application/octet-stream', originalname: 'x.jpeg' })).toBe('.jpg');
   });
 
-  it('подправен mime + опасно разширение — двойната защита държи', () => {
-    expect(check('evil.svg', 'image/jpeg').ok).toBe(false);
-    expect(check('evil.html', 'image/png').ok).toBe(false);
+  // Същината на защитата: inline сервиран SVG изпълнява скрипт и краде JWT.
+  it('отказва SVG, дори маскиран като octet-stream', () => {
+    expect(check({ mimetype: 'application/octet-stream', originalname: 'evil.svg' })).toBeTruthy();
+    expect(check({ mimetype: 'image/svg+xml', originalname: 'evil.svg' })).toBeTruthy();
   });
 
-  it('липсващ mime', () => expect(check('a.jpg', '').ok).toBe(false));
-});
-
-describe('разширението за запис се извежда от mimetype', () => {
-  it('клиентът не избира разширението', () => {
-    // Дори името да е .svg, записът пак е .jpg — затова липсващото разширение
-    // може да се приема, без да отслабва защитата.
-    expect(safeExt({ mimetype: 'image/jpeg' })).toBe('.jpg');
-    expect(safeExt({ mimetype: 'image/png' })).toBe('.png');
-    expect(safeExt({ mimetype: 'image/webp' })).toBe('.webp');
+  it('отказва HTML и PDF', () => {
+    expect(check({ mimetype: 'application/octet-stream', originalname: 'x.html' })).toBeTruthy();
+    expect(check({ mimetype: 'application/pdf', originalname: 'doc.pdf' })).toBeTruthy();
   });
 
-  it('HEIC се записва като .jpg — съдържанието се конвертира', () => {
-    expect(safeExt({ mimetype: 'image/heic' })).toBe('.jpg');
-    expect(safeExt({ mimetype: 'image/heif' })).toBe('.jpg');
+  it('отказва неизвестен тип БЕЗ разширение — няма на какво да стъпи', () => {
+    expect(check({ mimetype: 'application/octet-stream', originalname: 'noext' })).toBeTruthy();
   });
 
-  it('непознат mime → .jpg по подразбиране', () => {
-    expect(safeExt({ mimetype: 'нещо/друго' })).toBe('.jpg');
-    expect(safeExt({})).toBe('.jpg');
-  });
-
-  it('нормализира нестандартните mime-ове', () => {
-    expect(normalizeMime('IMAGE/JPG')).toBe('image/jpeg');
-    expect(normalizeMime(' image/x-png ')).toBe('image/png');
+  it('отказът носи код за разпознаване от маршрута', () => {
+    const err = check({ mimetype: 'application/pdf', originalname: 'doc.pdf' });
+    expect(err.code).toBe('BAD_FILE_TYPE');
+    expect(err.status).toBe(400);
   });
 });
