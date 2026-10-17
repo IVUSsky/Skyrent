@@ -4,6 +4,13 @@ import React, { useState, useEffect, useCallback } from 'react'
 const fmt = n => n != null ? Number(n).toLocaleString('bg-BG', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'
 const fmt1 = n => n != null ? Number(n).toLocaleString('bg-BG', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : '—'
 
+// Имената на видовете — ползват се и при предложението от Smart Life
+const TYPE_LABEL = {
+  breaker: 'Бушон', ac: 'Климатик', ir_ac: 'Климатик (инфраред)', boiler: 'Бойлер',
+  socket: 'Контакт', light: 'Осветление', curtain: 'Щори', water_valve: 'Спирателен кран',
+  lock: 'Брава', router: 'Рутер',
+}
+
 function StatusCard({ label, value, unit, icon, color = 'gray' }) {
   const colors = {
     green:  'bg-green-50 border-green-200 text-green-700',
@@ -279,6 +286,27 @@ function DeviceCard({ device, API, properties, onDelete, onTypeChange, onTenantC
 function AddDeviceModal({ API, properties, onClose, onSaved }) {
   const [form, setForm] = useState({ tuya_device_id: '', name: '', property_id: '', type: 'breaker' })
   const [saving, setSaving] = useState(false)
+  const [found, setFound] = useState(null)      // какво е намерено в Tuya акаунта
+  const [finding, setFinding] = useState(false)
+  const [findErr, setFindErr] = useState(null)
+
+  // Чете устройствата направо от Smart Life, вместо номерът да се преписва на ръка
+  const discover = async () => {
+    setFinding(true); setFindErr(null)
+    try {
+      const r = await apiFetch(`${API}/api/smart/discover`).then(x => x.json())
+      if (!r.ok) throw new Error(r.error || 'Tuya не отговори')
+      setFound(r.devices || [])
+      if (!r.devices?.length) setFindErr('В акаунта няма устройства — добави ги първо в Smart Life.')
+    } catch (e) { setFindErr('Грешка: ' + e.message) } finally { setFinding(false) }
+  }
+
+  const pick = (d) => setForm(f => ({
+    ...f,
+    tuya_device_id: d.tuya_device_id,
+    name: d.name || f.name,
+    type: d.suggested_type || f.type,
+  }))
 
   const save = async () => {
     if (!form.tuya_device_id) return
@@ -297,6 +325,32 @@ function AddDeviceModal({ API, properties, onClose, onSaved }) {
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
         <h3 className="font-bold text-gray-900 text-lg mb-4">Добави смарт устройство</h3>
+
+        {/* Номерът се взема от Smart Life, вместо да се преписва на ръка */}
+        <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+          <button onClick={discover} disabled={finding}
+            className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg disabled:opacity-50">
+            {finding ? 'Търси…' : '🔍 Намери устройствата в Smart Life'}
+          </button>
+          {findErr && <div className="text-xs text-red-600 mt-2">{findErr}</div>}
+          {found && found.length > 0 && (
+            <div className="mt-2 max-h-56 overflow-auto space-y-1">
+              {found.map(d => (
+                <button key={d.tuya_device_id} onClick={() => pick(d)} disabled={d.already_added}
+                  className={`block w-full text-left px-2 py-1.5 rounded border text-xs ${
+                    d.already_added ? 'bg-gray-100 border-gray-200 text-gray-400 cursor-not-allowed'
+                    : form.tuya_device_id === d.tuya_device_id ? 'bg-blue-200 border-blue-400'
+                    : 'bg-white border-blue-200 hover:bg-blue-100'}`}>
+                  <span className="font-medium">{d.name}</span>
+                  {d.online === false && <span className="text-amber-600"> · офлайн</span>}
+                  {d.already_added && <span> · вече е добавено</span>}
+                  {!d.already_added && d.suggested_type && <span className="text-blue-700"> · {TYPE_LABEL[d.suggested_type] || d.suggested_type}</span>}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
         <div className="space-y-3">
           <div>
             <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">Tuya Device ID</label>
