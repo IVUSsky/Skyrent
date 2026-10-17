@@ -661,10 +661,13 @@ export default function Portfolio({ API, role }) {
                 accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
                 onChange={e => { uploadPhotos(e.target.files); e.target.value = '' }} />
 
-              {/* На Android `accept` решава КОЙ избирач се отваря: щом има MIME типове,
-                  системата праща към снимковия (при Иво — Google Снимки, който не
-                  предлага локалната галерия, 17.10.2026). Вход САМО с разширения отива
-                  във файловия мениджър и дава достъп до DCIM. Затова втори, резервен път. */}
+              {/* На Android `accept` решава КОЙ избирач се отваря. Всичко, което прилича
+                  на „снимки" — и MIME типове, и разширения — праща към снимковия избирач;
+                  при Иво той е зает от Google Снимки и локалната галерия е недостъпна
+                  (17.10.2026, пробвани и двата варианта). БЕЗ `accept` системата отваря
+                  файловия мениджър и оттам се стига до DCIM. Затова тук съзнателно няма
+                  ограничение — филтърът е на сървъра (uploadFilter.js: jpg/png/webp),
+                  а грешката се показва в `photoErr`. */}
               <div className="flex justify-center -mt-3 mb-5">
                 <button type="button" disabled={uploading}
                   onClick={() => filesInputRef.current?.click()}
@@ -672,7 +675,7 @@ export default function Portfolio({ API, role }) {
                   📁 Избери от файловете на телефона
                 </button>
               </div>
-              <input ref={filesInputRef} type="file" accept=".jpg,.jpeg,.png,.webp" multiple className="hidden"
+              <input ref={filesInputRef} type="file" multiple className="hidden"
                 onChange={e => { uploadPhotos(e.target.files); e.target.value = '' }} />
 
               {photoErr && (
