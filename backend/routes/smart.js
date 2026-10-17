@@ -1,6 +1,7 @@
 const express = require('express');
 const { tuyaRequest } = require('../lib/tuyaClient');
 const { listRemotes: listIrRemotes, acCommand: irAcCommand } = require('../lib/tuyaIr');
+const { listAllDevices, describeDevices } = require('../lib/tuyaDiscover');
 
 module.exports = function(db) {
   const router = express.Router();
@@ -37,6 +38,19 @@ module.exports = function(db) {
       `).all();
       res.json(rows);
     } catch(err) { res.status(500).json({ error: err.message }); }
+  });
+
+  // ── GET /api/smart/discover ─────────────────────────────────
+  // Какво има в Tuya акаунта. Дотук всяко устройство се добавяше с ръчно
+  // преписан номер от Smart Life; оттук се избира от списък, а видът се
+  // предлага по категорията, която Tuya връща.
+  router.get('/discover', async (req, res) => {
+    try {
+      const known = db.prepare('SELECT tuya_device_id FROM smart_devices').all().map(r => r.tuya_device_id);
+      const raw = await listAllDevices({ max: 200 });
+      const list = describeDevices(raw, known);
+      res.json({ ok: true, count: list.length, devices: list });
+    } catch (err) { res.status(502).json({ error: err.message }); }
   });
 
   // ── POST /api/smart/devices — add device ────────────────────
