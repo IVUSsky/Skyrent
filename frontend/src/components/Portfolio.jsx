@@ -50,6 +50,7 @@ export default function Portfolio({ API, role }) {
   const [uploading, setUploading] = useState(false)
   const [photoErr, setPhotoErr] = useState('')
   const photoInputRef = React.useRef()
+  const filesInputRef = React.useRef()
   const [inquiries, setInquiries] = useState([])
   const [showInquiries, setShowInquiries] = useState(false)
   const [owners, setOwners] = useState([]) // Agency multi_owner; [] ако не е включено
@@ -658,6 +659,20 @@ export default function Portfolio({ API, role }) {
                   който сървърът отхвърля чак след качването */}
               <input ref={photoInputRef} type="file" multiple className="hidden"
                 accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
+                onChange={e => { uploadPhotos(e.target.files); e.target.value = '' }} />
+
+              {/* На Android `accept` решава КОЙ избирач се отваря: щом има MIME типове,
+                  системата праща към снимковия (при Иво — Google Снимки, който не
+                  предлага локалната галерия, 17.10.2026). Вход САМО с разширения отива
+                  във файловия мениджър и дава достъп до DCIM. Затова втори, резервен път. */}
+              <div className="flex justify-center -mt-3 mb-5">
+                <button type="button" disabled={uploading}
+                  onClick={() => filesInputRef.current?.click()}
+                  className="text-xs text-gray-500 hover:text-blue-700 underline underline-offset-2 disabled:opacity-50">
+                  📁 Избери от файловете на телефона
+                </button>
+              </div>
+              <input ref={filesInputRef} type="file" accept=".jpg,.jpeg,.png,.webp" multiple className="hidden"
                 onChange={e => { uploadPhotos(e.target.files); e.target.value = '' }} />
 
               {photoErr && (
