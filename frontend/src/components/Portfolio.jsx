@@ -47,6 +47,7 @@ export default function Portfolio({ API, role }) {
   const [photos, setPhotos] = useState([])
   const [uploading, setUploading] = useState(false)
   const photoInputRef = React.useRef()
+  const filesInputRef = React.useRef()
   const [inquiries, setInquiries] = useState([])
   const [showInquiries, setShowInquiries] = useState(false)
   const [owners, setOwners] = useState([]) // Agency multi_owner; [] ако не е включено
@@ -618,7 +619,21 @@ export default function Portfolio({ API, role }) {
                     </>
                 }
               </div>
+              {/* На телефон Android решава КОЙ избирач да отвори според `accept`:
+                  "image/*" праща към снимковия (Google Снимки / Галерия), а списък с
+                  разширения — към файловия мениджър. Когато снимковият е зает от Google
+                  Снимки и не предлага локалната галерия (реален случай, 17.10.2026),
+                  вторият бутон е единственият път до папката с кадрите (DCIM). */}
+              <div className="flex justify-center -mt-3 mb-5">
+                <button type="button" disabled={uploading}
+                  onClick={() => filesInputRef.current?.click()}
+                  className="text-xs text-gray-500 hover:text-blue-700 underline underline-offset-2 disabled:opacity-50">
+                  📁 Избери от файловете на телефона
+                </button>
+              </div>
               <input ref={photoInputRef} type="file" accept="image/*" multiple className="hidden"
+                onChange={e => uploadPhotos(e.target.files)} />
+              <input ref={filesInputRef} type="file" accept=".jpg,.jpeg,.png,.webp" multiple className="hidden"
                 onChange={e => uploadPhotos(e.target.files)} />
 
               {/* Photo grid */}
