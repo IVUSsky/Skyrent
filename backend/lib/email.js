@@ -40,4 +40,12 @@ function resolveSender(smtp = {}) {
   return process.env.RESEND_FROM_EMAIL || configured || 'info@skycapital.pro';
 }
 
-module.exports = { parseRecipients, EMAIL_RE, resolveSender };
+
+// Екранира текст, който влиза в HTML тялото на писмо. Важно за всичко, писано от
+// външен човек (напр. запитване от каталога) — иначе чужд ъглов знак чупи писмото.
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+module.exports = { parseRecipients, EMAIL_RE, resolveSender, esc };

@@ -6,6 +6,7 @@ const fs      = require('fs');
 const { optimizeMany, isDisplayable } = require('../lib/imageOptimize');
 const { imagesOnly, safeExt } = require('../lib/uploadFilter');
 const { renovationByProperty } = require('../lib/renovationCosts');
+const { parseRecipients, resolveSender, esc } = require('../lib/email');
 const { reconcileInvoices } = require('../lib/invoiceReconcile');
 const { detectPrepaid } = require('../lib/prepaidDetect');
 const { keepRentProperties } = require('../lib/rentScope');
@@ -56,6 +57,57 @@ module.exports = function(db) {
       res.json({ ok: true });
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
+  // Отговор на запитване направо от Skyrent. Дотогава в интерфейса имаше само
+  // `mailto:` връзка, която на телефон често не отваря нищо (няма зададено
+  // пощенско приложение) — тоест запитванията реално оставаха без отговор.
+  router.post('/inquiries/:id/reply', async (req, res) => {
+    try {
+      const inq = db.prepare(`
+        SELECT i.*, p.адрес AS property_address
+        FROM listing_inquiries i LEFT JOIN properties p ON p.id = i.property_id
+        WHERE i.id = ?
+      `).get(req.params.id);
+      if (!inq) return res.status(404).json({ error: 'Запитването не е намерено' });
+
+      const text = String(req.body?.text || '').trim();
+      if (!text) return res.status(400).json({ error: 'Празен отговор' });
+      if (!inq.email) return res.status(400).json({ error: 'Запитването е без имейл — няма къде да се отговори' });
+
+      let to;
+      try { [to] = parseRecipients(inq.email); }
+      catch (e) { return res.status(400).json({ error: e.message }); }
+
+      if (!process.env.RESEND_API_KEY) {
+        return res.status(503).json({ error: 'Имейлът не е настроен на сървъра (липсва RESEND_API_KEY)' });
+      }
+
+      const from = resolveSender();
+      const subject = `Относно Вашето запитване за ${inq.property_address || 'имот под наем'}`;
+      const html = `
+        <p>Здравейте${inq.name ? ', ' + esc(inq.name) : ''},</p>
+        <div style="white-space:pre-wrap">${esc(text)}</div>
+        ${inq.message ? `<hr style="border:none;border-top:1px solid #e5e7eb;margin:18px 0">
+          <p style="color:#6b7280;font-size:13px">Вашето запитване от ${(inq.created_at || '').slice(0, 16).replace('T', ' ')}:</p>
+          <blockquote style="color:#6b7280;font-size:13px;border-left:3px solid #e5e7eb;margin:0;padding-left:12px">${esc(inq.message)}</blockquote>` : ''}`;
+
+      const resp = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ from: `Skyrent <${from}>`, to: [to], subject, html, reply_to: from }),
+      });
+      if (!resp.ok) {
+        const detail = await resp.text().catch(() => '');
+        return res.status(502).json({ error: `Имейлът не е изпратен (${resp.status}) ${detail.slice(0, 200)}` });
+      }
+
+      // Отговореното запитване се смята и за обработено — иначе остава да виси
+      // в списъка с червено, въпреки че работата по него е свършена.
+      db.prepare(`UPDATE listing_inquiries SET reply_text=?, replied_at=datetime('now'), handled=1 WHERE id=?`)
+        .run(text, req.params.id);
+      res.json({ ok: true, to });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
   router.delete('/inquiries/:id', (req, res) => {
     try { db.prepare('DELETE FROM listing_inquiries WHERE id=?').run(req.params.id); res.json({ ok: true }); }
     catch (e) { res.status(500).json({ error: e.message }); }
