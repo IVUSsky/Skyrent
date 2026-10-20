@@ -408,19 +408,49 @@ module.exports = function(db) {
           (p.net_cash_flow + p.principal_paydown_12m + p.appreciation_annual) * 100
         ) / 100;
 
-        // Доходност върху вложеното се смята само когато и двете са налице:
-        // реално течащ наем и заведена цена на придобиване. При pre-construction
-        // наемът е ПЛАНОВ — делението му на капарото дава фалшиви 25–45%.
+        // ВЛОЖЕНИ СРЕДСТВА = собствен капитал, не пълната цена.
+        // net_cash_flow е СЛЕД вноската по кредита, затова знаменателят трябва
+        // да е парите от джоба: цена − дълг. Делението на пълната цена наказва
+        // двойно всеки кредитиран имот и прави ливъриджа да изглежда вреден.
+        p.cost_total = p.invested;              // покупна + ремонт (или капаро при зелено)
+        p.equity_invested = Math.round((p.cost_total - p.allocated_debt) * 100) / 100;
+        p.invested = p.equity_invested;         // „вложени средства" = собственият капитал
+
+        // Доходност се смята само при реално течащ наем И смислен знаменател.
         p.yield_blocked = !p.active
           ? (p.pre_construction ? 'pre_construction' : 'not_active')
-          : (p.invested > 0 ? null : 'no_cost_basis');
+          : p.cost_total <= 0 ? 'no_cost_basis'
+          : p.equity_invested <= 0 ? 'negative_equity'
+          : null;
         const yieldable = p.yield_blocked == null;
         p.total_return = yieldable
-          ? Math.round((p.total_return_annual / p.invested) * 10000) / 10000
+          ? Math.round((p.total_return_annual / p.equity_invested) * 10000) / 10000
           : null;
         p.cash_yield_on_invested = yieldable
-          ? Math.round((p.net_cash_flow / p.invested) * 10000) / 10000
+          ? Math.round((p.net_cash_flow / p.equity_invested) * 10000) / 10000
           : null;
+
+        // Механизъм на изчислението — всяка стъпка, с входа ѝ, за да може
+        // всяко число на екрана да се проследи до суровите данни.
+        p.calc = {
+          rent_gross_monthly: p.rent_monthly_gross,
+          vat_divisor: p.vat_exempt ? 1 : VAT_RATE,
+          rent_net_monthly: Math.round(p.rent_monthly * 100) / 100,
+          rent_annual: p.rent_annual,
+          opex_annual: p.opex_annual_total,
+          noi_annual: p.noi_annual,
+          покупна: Math.round(((p.cost_total - renoTotal({ id: p.id }, renoMap)) || 0) * 100) / 100,
+          ремонт: Math.round(renoTotal({ id: p.id }, renoMap) * 100) / 100,
+          cost_total: p.cost_total,
+          allocated_debt: p.allocated_debt,
+          equity_invested: p.equity_invested,
+          debt_service_annual: p.allocated_debt_service,
+          interest_12m: p.interest_12m,
+          principal_12m: p.principal_paydown_12m,
+          net_cash_flow: p.net_cash_flow,
+          appreciation: p.appreciation_annual,
+          total_return_annual: p.total_return_annual,
+        };
       }
 
       const rankBy = (arr, key, dir = 'desc') => {
@@ -490,14 +520,27 @@ module.exports = function(db) {
       const exrValues = propRows.map(p => p.expense_ratio).filter(v => v != null);
 
       // --- Вложени средства и обща доходност на ниво портфейл ---
-      const totalInvested = propRows.reduce((s, p) => s + (p.invested || 0), 0);
-      const investedBuilt = propRows.filter(p => !p.pre_construction)
-        .reduce((s, p) => s + (p.invested || 0), 0);
+      // На ниво портфейл отрицателните капитали по отделни имоти се компенсират
+      // коректно (дългът е един и същ пул), затова сумираме цена и дълг поотделно.
+      const costTotalAll = propRows.reduce((s, p) => s + (p.cost_total || 0), 0);
       const investedPreCon = propRows.filter(p => p.pre_construction)
-        .reduce((s, p) => s + (p.invested || 0), 0);
+        .reduce((s, p) => s + (p.cost_total || 0), 0);
       const portfolioAppreciation = portfolioAssetBase * apprPct;
       const portfolioNetCf = portfolioNoi - portfolioDebtServiceTotal;
       const portfolioTotalReturnAnnual = portfolioNetCf + portfolioPrincipal12m + portfolioAppreciation;
+
+      // Доходността на портфейла се смята САМО върху имотите с валиден
+      // знаменател (заведена цена и положителен собствен капитал). Иначе
+      // числителят включва кеша на имоти, чийто капитал липсва от знаменателя,
+      // и процентът излиза фалшиво висок.
+      const covered = propRows.filter(p => p.yield_blocked == null);
+      const coveredInvested = covered.reduce((s, p) => s + p.equity_invested, 0);
+      const coveredCf = covered.reduce((s, p) => s + p.net_cash_flow, 0);
+      const coveredTotalReturn = covered.reduce((s, p) => s + p.total_return_annual, 0);
+      const coveredRent = covered.reduce((s, p) => s + p.rent_annual, 0);
+      const activeRent = propRows.filter(p => p.active).reduce((s, p) => s + p.rent_annual, 0);
+      const totalInvested = coveredInvested;
+      const investedBuilt = coveredInvested;
 
       // --- Лихвен стрес-тест: всички кредити са с ПЛАВАЩА лихва ---
       // Преоценяваме всеки кредит при по-висока лихва за същия остатъчен срок.
@@ -583,12 +626,21 @@ module.exports = function(db) {
         appreciation_pct: Math.round(apprPct * 10000) / 10000,
         appreciation_annual: Math.round(portfolioAppreciation * 100) / 100,
         total_return_annual: Math.round(portfolioTotalReturnAnnual * 100) / 100,
-        total_return: totalInvested > 0
-          ? Math.round((portfolioTotalReturnAnnual / totalInvested) * 10000) / 10000
+        // Процентите са само върху покритите имоти — виж coverage по-долу.
+        total_return: coveredInvested > 0
+          ? Math.round((coveredTotalReturn / coveredInvested) * 10000) / 10000
           : null,
-        cash_yield_on_invested: totalInvested > 0
-          ? Math.round((portfolioNetCf / totalInvested) * 10000) / 10000
+        cash_yield_on_invested: coveredInvested > 0
+          ? Math.round((coveredCf / coveredInvested) * 10000) / 10000
           : null,
+        coverage: {
+          properties: covered.length,
+          properties_active: propRows.filter(p => p.active).length,
+          invested: Math.round(coveredInvested * 100) / 100,
+          net_cash_flow: Math.round(coveredCf * 100) / 100,
+          total_return_annual: Math.round(coveredTotalReturn * 100) / 100,
+          rent_share: activeRent > 0 ? Math.round((coveredRent / activeRent) * 10000) / 10000 : null,
+        },
         // Активни имоти без заведена покупна цена — доходността им не може да
         // се смята и те изкривяват всяка класация, ако се подминат мълчаливо.
         missing_cost_basis: propRows.filter(p => p.yield_blocked === 'no_cost_basis').length,
@@ -596,6 +648,10 @@ module.exports = function(db) {
           propRows.filter(p => p.yield_blocked === 'no_cost_basis')
             .reduce((s, p) => s + p.rent_annual, 0) * 100
         ) / 100,
+        // Дългът надвишава заведената цена — или cash-out рефинансиране, или
+        // покупната цена е занижена. И в двата случая доходността е безсмислена.
+        negative_equity_count: propRows.filter(p => p.yield_blocked === 'negative_equity').length,
+        cost_total_all: Math.round(costTotalAll * 100) / 100,
         // --- ДДС режим ---
         weighted_rate: Math.round(weightedRate * 100) / 100,
         vat_liable_count: propRows.filter(p => !p.vat_exempt && p.rent_monthly_gross > 0).length,

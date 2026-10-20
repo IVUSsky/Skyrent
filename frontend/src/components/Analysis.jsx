@@ -41,6 +41,75 @@ function GaugeMeter({ value, label, low, high, invert = false, unit = '' }) {
   )
 }
 
+// Механизмът на изчислението, стъпка по стъпка — всяко число на екрана трябва
+// да може да се проследи до суровите данни, иначе не му се вярва.
+function CalcBreakdown({ c, p }) {
+  const e = (n, d = 0) => fmt(n, d)
+  const Row = ({ label, value, muted, bold, note }) => (
+    <div className={`flex justify-between gap-4 py-1 ${bold ? 'font-bold border-t border-gray-300 mt-1 pt-1.5' : ''}`}>
+      <span className={muted ? 'text-gray-500' : 'text-gray-700'}>{label}</span>
+      <span className={`text-right whitespace-nowrap ${muted ? 'text-gray-500' : 'text-gray-800'}`}>
+        {value}{note && <span className="text-xs text-gray-400 ml-1">{note}</span>}
+      </span>
+    </div>
+  )
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 text-sm">
+      <div>
+        <div className="text-xs font-bold text-gray-500 uppercase mb-1">1 · Приход</div>
+        <Row label="Наем, както го плаща наемателят" value={`${e(c.rent_gross_monthly)} €/мес`} />
+        <Row
+          label={c.vat_divisor === 1 ? 'Без ДДС (освободен)' : 'Делено на 1.20 (с ДДС)'}
+          value={`${e(c.rent_net_monthly)} €/мес`}
+          muted
+        />
+        <Row label="× 12 месеца" value={`${e(c.rent_annual)} €/год`} muted />
+        <Row label="− оперативни разходи" value={`−${e(c.opex_annual)} €`} muted />
+        <Row label="NOI" value={`${e(c.noi_annual)} €/год`} bold />
+      </div>
+
+      <div>
+        <div className="text-xs font-bold text-gray-500 uppercase mb-1">2 · Вложен капитал</div>
+        <Row label="Покупна цена" value={`${e(c.покупна)} €`} />
+        <Row label="+ ремонт" value={`${e(c.ремонт)} €`} />
+        <Row label="Цена на придобиване" value={`${e(c.cost_total)} €`} muted />
+        <Row label="− дял от кредита" value={`−${e(c.allocated_debt)} €`} muted />
+        <Row label="Вложени средства" value={`${e(c.equity_invested)} €`} bold />
+        <p className="text-xs text-gray-400 mt-1.5 leading-snug">
+          Кешът е след вноската, затова знаменателят е собственият капитал, не цялата цена.
+        </p>
+      </div>
+
+      <div>
+        <div className="text-xs font-bold text-gray-500 uppercase mb-1">3 · Възвръщаемост</div>
+        <Row label="NOI" value={`${e(c.noi_annual)} €`} muted />
+        <Row
+          label="− вноска по кредита"
+          value={`−${e(c.debt_service_annual)} €`}
+          muted
+          note={`лихва ${e(c.interest_12m)} + главница ${e(c.principal_12m)}`}
+        />
+        <Row label="Кеш поток" value={`${e(c.net_cash_flow)} €/год`} bold />
+        <Row
+          label="Кеш доходност"
+          value={p.cash_yield_on_invested != null
+            ? `${(p.cash_yield_on_invested * 100).toFixed(2)} %`
+            : '—'}
+          muted
+          note={`${e(c.net_cash_flow)} ÷ ${e(c.equity_invested)}`}
+        />
+        <div className="mt-2 pt-1.5 border-t border-gray-300">
+          <Row label="+ погасена главница" value={`${e(c.principal_12m)} €`} muted />
+          <Row label="+ поскъпване" value={`${e(c.appreciation)} €`} muted />
+          <Row label="Обща доходност" value={p.total_return != null
+            ? `${(p.total_return * 100).toFixed(2)} %`
+            : '—'} bold />
+        </div>
+      </div>
+    </div>
+  )
+}
+
 const INSIGHTS = [
   {
     icon: '🔶',
@@ -76,6 +145,7 @@ export default function Analysis({ API }) {
   const [expenseSummary, setExpenseSummary] = useState(null)
   const [pf, setPf] = useState(null)
   const [pfProps, setPfProps] = useState([])
+  const [openCalc, setOpenCalc] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
@@ -467,12 +537,22 @@ export default function Analysis({ API }) {
             )}
           </p>
 
+          {pf.coverage && pf.coverage.properties < pf.coverage.properties_active && (
+            <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">
+              ⚠️ Процентите по-долу са само за <strong>{pf.coverage.properties} от {pf.coverage.properties_active}</strong> активни
+              имота ({pf.coverage.rent_share != null ? (pf.coverage.rent_share * 100).toFixed(0) : '—'}% от наема).
+              Изключени: {pf.missing_cost_basis} без заведена покупна цена
+              {pf.negative_equity_count > 0 && <>, {pf.negative_equity_count} с дълг над заведената цена</>}.
+              Докато не се попълнят, портфейлната доходност не е меродавна.
+            </div>
+          )}
+
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
             <div className="bg-white border border-gray-200 rounded-xl p-4">
               <div className="text-xs font-semibold text-gray-500 mb-1">Вложени средства</div>
               <div className="text-2xl font-bold text-gray-800">{fmt(pf.total_invested)} €</div>
               <div className="text-xs text-gray-500 mt-1">
-                завършени {fmt(pf.invested_built)} €
+                цена {fmt(pf.cost_total_all)} € − дял от кредитите
                 {pf.invested_pre_construction > 0 && <> · на зелено {fmt(pf.invested_pre_construction)} €</>}
               </div>
             </div>
@@ -574,6 +654,7 @@ export default function Analysis({ API }) {
           {pfProps.length > 0 && (() => {
             const BLOCKED = {
               no_cost_basis: 'няма заведена покупна цена',
+              negative_equity: 'дългът надвишава заведената цена',
               pre_construction: 'на зелено — наемът е планов',
               not_active: 'неактивен',
             }
@@ -610,23 +691,37 @@ export default function Analysis({ API }) {
                     </thead>
                     <tbody>
                       {ranked.map(p => (
-                        <tr key={p.id} className="border-b border-gray-100 hover:bg-gray-50">
-                          <td className="py-2 pr-3">
-                            <span className="text-gray-400 text-xs mr-1">#{p.id}</span>
-                            {p['адрес']}
-                          </td>
-                          <td className="py-2 pr-3 text-right">{fmt(p.invested)} €</td>
-                          <td className="py-2 pr-3 text-right text-gray-600">{fmt(p.rent_monthly)} €</td>
-                          <td className={`py-2 pr-3 text-right ${p.net_cash_flow < 0 ? 'text-red-600 font-semibold' : ''}`}>
-                            {fmt(p.net_cash_flow)} €
-                          </td>
-                          <td className={`py-2 pr-3 text-right font-bold ${yieldColor(p.cash_yield_on_invested)}`}>
-                            {(p.cash_yield_on_invested * 100).toFixed(2)}%
-                          </td>
-                          <td className="py-2 text-right font-semibold text-emerald-700">
-                            {p.total_return != null ? (p.total_return * 100).toFixed(2) + '%' : '—'}
-                          </td>
-                        </tr>
+                        <React.Fragment key={p.id}>
+                          <tr
+                            className="border-b border-gray-100 hover:bg-gray-50 cursor-pointer"
+                            onClick={() => setOpenCalc(openCalc === p.id ? null : p.id)}
+                          >
+                            <td className="py-2 pr-3">
+                              <span className="text-gray-400 text-xs mr-1">
+                                {openCalc === p.id ? '▾' : '▸'} #{p.id}
+                              </span>
+                              {p['адрес']}
+                            </td>
+                            <td className="py-2 pr-3 text-right">{fmt(p.invested)} €</td>
+                            <td className="py-2 pr-3 text-right text-gray-600">{fmt(p.rent_monthly)} €</td>
+                            <td className={`py-2 pr-3 text-right ${p.net_cash_flow < 0 ? 'text-red-600 font-semibold' : ''}`}>
+                              {fmt(p.net_cash_flow)} €
+                            </td>
+                            <td className={`py-2 pr-3 text-right font-bold ${yieldColor(p.cash_yield_on_invested)}`}>
+                              {(p.cash_yield_on_invested * 100).toFixed(2)}%
+                            </td>
+                            <td className="py-2 text-right font-semibold text-emerald-700">
+                              {p.total_return != null ? (p.total_return * 100).toFixed(2) + '%' : '—'}
+                            </td>
+                          </tr>
+                          {openCalc === p.id && p.calc && (
+                            <tr className="bg-gray-50 border-b border-gray-200">
+                              <td colSpan={6} className="py-3 px-4">
+                                <CalcBreakdown c={p.calc} p={p} />
+                              </td>
+                            </tr>
+                          )}
+                        </React.Fragment>
                       ))}
                     </tbody>
                   </table>
