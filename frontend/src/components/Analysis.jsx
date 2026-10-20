@@ -74,6 +74,7 @@ export default function Analysis({ API }) {
   const [loans, setLoans] = useState([])
   const [metrics, setMetrics] = useState(null)
   const [expenseSummary, setExpenseSummary] = useState(null)
+  const [pf, setPf] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
@@ -83,12 +84,14 @@ export default function Analysis({ API }) {
       apiFetch(`${API}/api/metrics`).then(r => r.json()),
       apiFetch(`${API}/api/loans`).then(r => r.json()).catch(() => []),
       apiFetch(`${API}/api/expenses/summary`).then(r => r.json()).catch(() => null),
+      apiFetch(`${API}/api/metrics/portfolio`).then(r => r.json()).catch(() => null),
     ])
-      .then(([p, m, l, es]) => {
+      .then(([p, m, l, es, pfm]) => {
         setProperties(p)
         setMetrics(m)
         setLoans(l)
         setExpenseSummary(es)
+        setPf(pfm && pfm.portfolio ? pfm.portfolio : null)
         setLoading(false)
       })
       .catch(e => { setError(e.message); setLoading(false) })
@@ -443,6 +446,127 @@ export default function Analysis({ API }) {
           <p className="text-xs text-gray-400 mt-2">
             * Имоти без покупна цена или наем са изключени. Разходите са апроксимирани на 10% от наема — за точен резултат въведи реалните разходи.
           </p>
+        </div>
+      )}
+
+      {/* Възвръщаемост — вложени средства, обща доходност, лихвен стрес-тест.
+          Данните идват от /api/metrics/portfolio (нетни наеми, без ДДС). */}
+      {pf && (
+        <div className="mb-8">
+          <h3 className="text-lg font-bold text-gray-700 mb-1">Възвръщаемост</h3>
+          <p className="text-xs text-gray-500 mb-3">
+            Всички суми са <strong>нетни</strong> — наемите на облагаемите имоти са разделени на 1.20.
+            {pf.vat_liable_count > 0 && (
+              <> Третирани като облагаеми: <strong>{pf.vat_liable_count}</strong> имота
+              {pf.vat_exempt_count > 0 && <> · освободени (брой / физическо лице): <strong>{pf.vat_exempt_count}</strong></>}.
+              {pf.rent_monthly_gross > 0 && (
+                <> Брутно {fmt(pf.rent_monthly_gross)} € → нето {fmt(pf.rent_monthly)} €/мес.</>
+              )}</>
+            )}
+          </p>
+
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+            <div className="bg-white border border-gray-200 rounded-xl p-4">
+              <div className="text-xs font-semibold text-gray-500 mb-1">Вложени средства</div>
+              <div className="text-2xl font-bold text-gray-800">{fmt(pf.total_invested)} €</div>
+              <div className="text-xs text-gray-500 mt-1">
+                завършени {fmt(pf.invested_built)} €
+                {pf.invested_pre_construction > 0 && <> · на зелено {fmt(pf.invested_pre_construction)} €</>}
+              </div>
+            </div>
+            <div className="bg-white border border-gray-200 rounded-xl p-4">
+              <div className="text-xs font-semibold text-gray-500 mb-1">Кеш доходност</div>
+              <div className="text-2xl font-bold text-gray-800">
+                {pf.cash_yield_on_invested != null ? (pf.cash_yield_on_invested * 100).toFixed(2) : '—'}%
+              </div>
+              <div className="text-xs text-gray-500 mt-1">{fmt(pf.net_cash_flow_annual)} €/год в джоба</div>
+            </div>
+            <div className="bg-white border border-gray-200 rounded-xl p-4">
+              <div className="text-xs font-semibold text-gray-500 mb-1">Погасена главница</div>
+              <div className="text-2xl font-bold text-gray-800">{fmt(pf.principal_paydown_12m)} €</div>
+              <div className="text-xs text-gray-500 mt-1">не е разход — маха дълг</div>
+            </div>
+            <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4">
+              <div className="text-xs font-semibold text-emerald-700 mb-1">ОБЩА ДОХОДНОСТ</div>
+              <div className="text-2xl font-bold text-emerald-800">
+                {pf.total_return != null ? (pf.total_return * 100).toFixed(2) : '—'}%
+              </div>
+              <div className="text-xs text-emerald-700 mt-1">{fmt(pf.total_return_annual)} €/год</div>
+            </div>
+          </div>
+
+          <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 mb-4 text-sm">
+            <div className="font-semibold text-gray-700 mb-2">Как се получава общата доходност</div>
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-gray-700">
+              <span>кеш поток <strong>{fmt(pf.net_cash_flow_annual)} €</strong></span>
+              <span className="text-gray-400">+</span>
+              <span>главница <strong>{fmt(pf.principal_paydown_12m)} €</strong></span>
+              <span className="text-gray-400">+</span>
+              <span>поскъпване <strong>{fmt(pf.appreciation_annual)} €</strong>
+                <span className="text-gray-400"> ({(pf.appreciation_pct * 100).toFixed(1)}%)</span></span>
+              <span className="text-gray-400">=</span>
+              <span className="font-bold">{fmt(pf.total_return_annual)} €</span>
+              <span className="text-gray-400">÷ вложени {fmt(pf.total_invested)} € =</span>
+              <span className="font-bold text-emerald-700">
+                {pf.total_return != null ? (pf.total_return * 100).toFixed(2) : '—'}%
+              </span>
+            </div>
+            <p className="text-xs text-gray-500 mt-2">
+              Поскъпването е допускане, не реализирана печалба. Смени го от Настройки → <code>appreciation_pct</code>;
+              при 0 остават само кешът и главницата.
+            </p>
+          </div>
+
+          {/* Лихвен стрес-тест */}
+          {pf.rate_stress && pf.rate_stress.length > 0 && (
+            <div className="bg-white border border-gray-200 rounded-xl p-4">
+              <div className="font-semibold text-gray-700 mb-1">
+                Лихвен стрес-тест <span className="text-xs font-normal text-gray-500">
+                  (всички кредити са с плаваща лихва · среднопретеглена {pf.weighted_rate}%)
+                </span>
+              </div>
+              <p className="text-xs text-gray-500 mb-3">
+                Всеки кредит е преоценен при по-висока лихва за същия остатъчен срок.
+              </p>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-gray-500 border-b border-gray-200">
+                      <th className="py-2 pr-4 font-semibold">Лихва</th>
+                      <th className="py-2 pr-4 font-semibold text-right">Обслужване/год</th>
+                      <th className="py-2 pr-4 font-semibold text-right">Лихва/год</th>
+                      <th className="py-2 pr-4 font-semibold text-right">DSCR</th>
+                      <th className="py-2 font-semibold text-right">Кеш поток/год</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pf.rate_stress.map(s => {
+                      const bad = s.dscr != null && s.dscr < 1
+                      const warn = s.dscr != null && s.dscr >= 1 && s.dscr < 1.25
+                      return (
+                        <tr key={s.delta_bps} className={`border-b border-gray-100 ${s.delta_bps === 0 ? 'bg-blue-50' : ''}`}>
+                          <td className="py-2 pr-4 font-medium">
+                            {s.avg_rate}%
+                            {s.delta_bps === 0
+                              ? <span className="text-xs text-blue-600 ml-1">сега</span>
+                              : <span className="text-xs text-gray-400 ml-1">+{s.delta_bps} бп</span>}
+                          </td>
+                          <td className="py-2 pr-4 text-right">{fmt(s.debt_service_annual)} €</td>
+                          <td className="py-2 pr-4 text-right text-gray-500">{fmt(s.interest_annual)} €</td>
+                          <td className={`py-2 pr-4 text-right font-bold ${
+                            bad ? 'text-red-700' : warn ? 'text-orange-500' : 'text-green-700'
+                          }`}>{s.dscr != null ? s.dscr.toFixed(2) : '—'}</td>
+                          <td className={`py-2 text-right ${
+                            s.net_cash_flow_annual < 0 ? 'text-red-700 font-bold' : ''
+                          }`}>{fmt(s.net_cash_flow_annual)} €</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

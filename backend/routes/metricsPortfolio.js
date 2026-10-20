@@ -22,6 +22,35 @@ const RENT_INCOME_CATEGORIES = new Set([
   'наем', 'наем_фактуриран', 'rent',
 ]);
 
+// properties.наем се въвежда както го плаща наемателят. За облагаемите имоти
+// това е сума С ДДС → приходът на дружеството е ÷1.20. vat_exempt=1 означава,
+// че сумата вече е крайна: плащане в брой или наем, облаган върху физическо лице.
+// Без това всички доходности излизат завишени с ~17%.
+const VAT_RATE = 1.20;
+const netRent = (p) => {
+  const gross = p['наем'] || 0;
+  return p.vat_exempt ? gross : gross / VAT_RATE;
+};
+
+// Оставащи месеци, изведени от остатък/вноска/лихва. При гратисен или усвояван
+// кредит вноската още не е анюитетна и резултатът е завишен — затова таванът.
+const remainingMonths = (balance, payment, annualPct) => {
+  const r = (annualPct || 0) / 100 / 12;
+  if (!balance || !payment) return 0;
+  if (r <= 0) return Math.ceil(balance / payment);
+  const ratio = (balance * r) / payment;
+  if (ratio >= 1) return 600; // вноската не покрива лихвата → гратисен период
+  return Math.min(600, Math.round(-Math.log(1 - ratio) / Math.log(1 + r)));
+};
+
+// Анюитетна вноска при зададена лихва и брой месеци.
+const annuity = (balance, annualPct, months) => {
+  const r = (annualPct || 0) / 100 / 12;
+  if (!months) return 0;
+  if (r <= 0) return balance / months;
+  return (balance * r) / (1 - Math.pow(1 + r, -months));
+};
+
 // Personal scope категории — никога не са business opex.
 // (defensive — Skyrent има scope='personal' и 'business', но някои стари записи нямат)
 const PERSONAL_ONLY_CATEGORIES = new Set([
@@ -145,6 +174,11 @@ module.exports = function(db) {
       const properties = db.prepare('SELECT * FROM properties').all();
       const loans = db.prepare('SELECT * FROM loans').all();
 
+      // Допускане за годишно поскъпване в „обща доходност". Настройва се от
+      // Настройки → appreciation_pct. 0 = чисто кешова гледна точка.
+      const apprRow = db.prepare("SELECT value FROM settings WHERE key='appreciation_pct'").get();
+      const apprPct = (apprRow && !isNaN(parseFloat(apprRow.value)) ? parseFloat(apprRow.value) : 3) / 100;
+
       // OPEX source #1: expense_invoices — само BUSINESS scope (или NULL legacy)
       const expensesRows = db.prepare(`
         SELECT property_id, amount, currency, expense_category, месец, scope
@@ -213,14 +247,25 @@ module.exports = function(db) {
 
       const renoMap = renovationByProperty(db);
       const propRows = properties.map(p => {
-        const rentMonthly = p['наем'] || 0;
+        const rentGross = p['наем'] || 0;
+        const rentMonthly = netRent(p);
         const rentAnnual = rentMonthly * 12;
         const assetVal = (p.market_val != null && p.market_val > 0)
           ? p.market_val
           : (p['покупна'] || 0) + renoTotal(p, renoMap);
         const costBasis = (p['покупна'] || 0) + renoTotal(p, renoMap);
         const stage = p.lifecycle_stage || (p['статус'] === '✅' ? 'active' : 'inactive');
+        // Вложени средства: при pre-construction реално платеното е капарото,
+        // не договорната цена (покупна), която още не е дължима изцяло.
+        const preCon = stage === 'pre_construction' || (p.purchase_balance_due || 0) > 0;
+        const invested = preCon
+          ? (p.purchase_paid_amount || 0) + renoTotal(p, renoMap)
+          : costBasis;
         return {
+          vat_exempt: p.vat_exempt ? 1 : 0,
+          rent_monthly_gross: Math.round(rentGross * 100) / 100,
+          invested: Math.round(invested * 100) / 100,
+          pre_construction: preCon,
           id: p.id,
           адрес: p['адрес'],
           район: p['район'],
@@ -354,6 +399,20 @@ module.exports = function(db) {
         p.levered_yield = equityCost > 0
           ? Math.round((leveredCf / equityCost) * 10000) / 10000
           : null;
+
+        // Обща доходност = кеш поток + погасена главница + поскъпване, върху
+        // реално вложеното. Главницата не е разход — тя маха дълг, затова влиза
+        // в числителя. Поскъпването е допускане (виж appreciation_pct).
+        p.appreciation_annual = Math.round(p.asset_val * apprPct * 100) / 100;
+        p.total_return_annual = Math.round(
+          (p.net_cash_flow + p.principal_paydown_12m + p.appreciation_annual) * 100
+        ) / 100;
+        p.total_return = p.invested > 0
+          ? Math.round((p.total_return_annual / p.invested) * 10000) / 10000
+          : null;
+        p.cash_yield_on_invested = p.invested > 0
+          ? Math.round((p.net_cash_flow / p.invested) * 10000) / 10000
+          : null;
       }
 
       const rankBy = (arr, key, dir = 'desc') => {
@@ -422,6 +481,47 @@ module.exports = function(db) {
       const capRateValues = propRows.map(p => p.cap_rate).filter(v => v != null);
       const exrValues = propRows.map(p => p.expense_ratio).filter(v => v != null);
 
+      // --- Вложени средства и обща доходност на ниво портфейл ---
+      const totalInvested = propRows.reduce((s, p) => s + (p.invested || 0), 0);
+      const investedBuilt = propRows.filter(p => !p.pre_construction)
+        .reduce((s, p) => s + (p.invested || 0), 0);
+      const investedPreCon = propRows.filter(p => p.pre_construction)
+        .reduce((s, p) => s + (p.invested || 0), 0);
+      const portfolioAppreciation = portfolioAssetBase * apprPct;
+      const portfolioNetCf = portfolioNoi - portfolioDebtServiceTotal;
+      const portfolioTotalReturnAnnual = portfolioNetCf + portfolioPrincipal12m + portfolioAppreciation;
+
+      // --- Лихвен стрес-тест: всички кредити са с ПЛАВАЩА лихва ---
+      // Преоценяваме всеки кредит при по-висока лихва за същия остатъчен срок.
+      let balSum = 0;
+      let rateWeighted = 0;
+      for (const l of loans) {
+        const bal = toEur(calcCurrentBalance(l['остатък'], l['вноска'], l['лихва'], l['balance_date']), l.currency);
+        balSum += bal;
+        rateWeighted += bal * (l['лихва'] || 0);
+      }
+      const weightedRate = balSum > 0 ? rateWeighted / balSum : 0;
+
+      const rateStress = [0, 0.5, 1, 1.5, 2, 2.5, 3].map(delta => {
+        let service = 0;
+        let interest = 0;
+        for (const l of loans) {
+          const bal = calcCurrentBalance(l['остатък'], l['вноска'], l['лихва'], l['balance_date']);
+          const n = remainingMonths(bal, l['вноска'], l['лихва']);
+          const rate = (l['лихва'] || 0) + delta;
+          service += toEur(annuity(bal, rate, n), l.currency) * 12;
+          interest += toEur(bal * rate / 100, l.currency);
+        }
+        return {
+          delta_bps: Math.round(delta * 100),
+          avg_rate: Math.round((weightedRate + delta) * 100) / 100,
+          debt_service_annual: Math.round(service * 100) / 100,
+          interest_annual: Math.round(interest * 100) / 100,
+          dscr: service > 0 ? Math.round((portfolioNoi / service) * 10000) / 10000 : null,
+          net_cash_flow_annual: Math.round((portfolioNoi - service) * 100) / 100,
+        };
+      });
+
       const portfolio = {
         properties_total: propRows.length,
         properties_active: activeProps.length,
@@ -467,6 +567,29 @@ module.exports = function(db) {
         principal_share_12m: portfolioDebtServiceTotal > 0
           ? Math.round((portfolioPrincipal12m / portfolioDebtServiceTotal) * 10000) / 10000
           : null,
+        // --- Вложени средства ---
+        total_invested: Math.round(totalInvested * 100) / 100,
+        invested_built: Math.round(investedBuilt * 100) / 100,
+        invested_pre_construction: Math.round(investedPreCon * 100) / 100,
+        // --- Обща доходност (кеш + главница + поскъпване) / вложено ---
+        appreciation_pct: Math.round(apprPct * 10000) / 10000,
+        appreciation_annual: Math.round(portfolioAppreciation * 100) / 100,
+        total_return_annual: Math.round(portfolioTotalReturnAnnual * 100) / 100,
+        total_return: totalInvested > 0
+          ? Math.round((portfolioTotalReturnAnnual / totalInvested) * 10000) / 10000
+          : null,
+        cash_yield_on_invested: totalInvested > 0
+          ? Math.round((portfolioNetCf / totalInvested) * 10000) / 10000
+          : null,
+        // --- ДДС режим ---
+        weighted_rate: Math.round(weightedRate * 100) / 100,
+        vat_liable_count: propRows.filter(p => !p.vat_exempt && p.rent_monthly_gross > 0).length,
+        vat_exempt_count: propRows.filter(p => p.vat_exempt && p.rent_monthly_gross > 0).length,
+        rent_monthly_gross: Math.round(
+          propRows.reduce((s, p) => s + (p.active ? p.rent_monthly_gross : 0), 0) * 100
+        ) / 100,
+        // --- Лихвен стрес-тест (всички кредити са плаващи) ---
+        rate_stress: rateStress,
         concentration: {
           top5_rent_share: Math.round(top5Share * 10000) / 10000,
           top1_rent_share: Math.round(top1Share * 10000) / 10000,

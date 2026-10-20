@@ -431,14 +431,14 @@ export default function Invoices({ API, role }) {
                       <span className="text-blue-600 text-xs ml-2">→ {rec.name}{rec.eik ? ` (ЕИК: ${rec.eik})` : ''}</span>
                     )}
                   </div>
-                  {prop.invoice_enabled && (
-                    <label className="text-xs flex items-center gap-1 cursor-pointer select-none" title="Освободена доставка по чл. 45 ЗДДС (напр. наем на жилище за физическо лице)">
-                      <input type="checkbox" checked={!!prop.vat_exempt}
-                        onChange={e => toggleVatExempt(prop.id, e.target.checked)}
-                        className="w-3 h-3 accent-green-600 cursor-pointer" />
-                      <span className="text-gray-600">Без ДДС</span>
-                    </label>
-                  )}
+                  {/* Показва се и без фактуриране — полето управлява и нетния наем
+                      в Анализ → Възвръщаемост, не само ДДС-то по фактурата. */}
+                  <label className="text-xs flex items-center gap-1 cursor-pointer select-none" title="Отметни, когато наемът НЕ е с ДДС: освободена доставка по чл. 45 ЗДДС (жилище на физическо лице), плащане в брой или наем, облаган върху физическо лице. Влияе и на доходността в Анализ — без отметка сумата се смята с ДДС и се дели на 1.20.">
+                    <input type="checkbox" checked={!!prop.vat_exempt}
+                      onChange={e => toggleVatExempt(prop.id, e.target.checked)}
+                      className="w-3 h-3 accent-green-600 cursor-pointer" />
+                    <span className="text-gray-600">Без ДДС</span>
+                  </label>
                   <label className="text-xs flex items-center gap-1 cursor-pointer select-none" title="Ако е изключено, наемателят няма да вижда бутона 'Плати с карта' в портала и autopay се пропуска за този имот">
                     <input type="checkbox" checked={prop.stripe_enabled !== 0}
                       onChange={e => toggleStripeEnabled(prop.id, e.target.checked)}
