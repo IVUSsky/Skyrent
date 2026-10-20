@@ -699,6 +699,11 @@ module.exports = function(db) {
         if (!v) return null;
         return /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : fallback;
       };
+      // Заведената сума е с ДДС, което е възстановено → не е вложен капитал.
+      const cost_vat_recovered = body.cost_vat_recovered !== undefined
+        ? (body.cost_vat_recovered ? 1 : 0) : (current.cost_vat_recovered ? 1 : 0);
+      const reno_vat_recovered = body.reno_vat_recovered !== undefined
+        ? (body.reno_vat_recovered ? 1 : 0) : (current.reno_vat_recovered ? 1 : 0);
       const purchase_paid_amount = numOrNull(body.purchase_paid_amount, current.purchase_paid_amount);
       const purchase_balance_due = numOrNull(body.purchase_balance_due, current.purchase_balance_due);
       const purchase_balance_due_date = dateOrNull(body.purchase_balance_due_date, current.purchase_balance_due_date);
@@ -711,9 +716,10 @@ module.exports = function(db) {
             абонат_ток=?, абонат_вода=?, абонат_тец=?, абонат_вход=?, абонат_газ=?, owner_id=?,
             cost_basis_kind=?, lifecycle_stage=?, lifecycle_eta_date=?,
             purchase_paid_amount=?, purchase_balance_due=?, purchase_balance_due_date=?,
+            cost_vat_recovered=?, reno_vat_recovered=?,
             updated_at=CURRENT_TIMESTAMP
         WHERE id=?
-      `).run(адрес, район, наем, наемател, статус, market_val, тип, площ, покупна, ремонт, email, телефон, invoice_enabled, invoice_recipient, vat_exempt, stripe_enabled, абонат_ток, абонат_вода, абонат_тец, абонат_вход, абонат_газ, owner_id, cost_basis_kind, lifecycle_stage, lifecycle_eta_date, purchase_paid_amount, purchase_balance_due, purchase_balance_due_date, id);
+      `).run(адрес, район, наем, наемател, статус, market_val, тип, площ, покупна, ремонт, email, телефон, invoice_enabled, invoice_recipient, vat_exempt, stripe_enabled, абонат_ток, абонат_вода, абонат_тец, абонат_вход, абонат_газ, owner_id, cost_basis_kind, lifecycle_stage, lifecycle_eta_date, purchase_paid_amount, purchase_balance_due, purchase_balance_due_date, cost_vat_recovered, reno_vat_recovered, id);
 
       const updated = db.prepare('SELECT * FROM properties WHERE id = ?').get(id);
       console.log('Saved тип:', updated.тип, '| покупна:', updated.покупна, '| ремонт:', updated.ремонт);

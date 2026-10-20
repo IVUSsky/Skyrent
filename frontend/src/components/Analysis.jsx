@@ -107,8 +107,21 @@ function CalcBreakdown({ c, p }) {
           </>
         ) : (
           <>
-            <Row label="Покупна цена" value={`${e(c.покупна)} €`} />
-            <Row label="+ ремонт" value={`${e(c.ремонт)} €`} />
+            {c.cost_vat_recovered ? (
+              <>
+                <Row label="Покупна цена с ДДС" value={`${e(c.покупна_raw)} €`} muted />
+                <Row label="− възстановено ДДС" value={`−${e(c.покупна_raw - c.покупна)} €`} muted />
+                <Row label="Покупна цена нето" value={`${e(c.покупна)} €`} />
+              </>
+            ) : (
+              <Row label="Покупна цена" value={`${e(c.покупна)} €`} />
+            )}
+            {c.reno_vat_recovered ? (
+              <Row label="+ ремонт нето" value={`${e(c.ремонт)} €`}
+                note={`от ${e(c.ремонт_raw)} с ДДС`} />
+            ) : (
+              <Row label="+ ремонт" value={`${e(c.ремонт)} €`} />
+            )}
             <Row label="Цена на придобиване" value={`${e(c.cost_recorded)} €`} muted />
             <Row label="− дял от кредита" value={`−${e(c.allocated_debt)} €`} muted />
             <Row label="Вложени средства" value={`${e(c.equity_invested)} €`} bold />

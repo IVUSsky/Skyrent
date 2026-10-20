@@ -257,19 +257,30 @@ module.exports = function(db) {
         const rentGross = p['наем'] || 0;
         const rentMonthly = netRent(p);
         const rentAnnual = rentMonthly * 12;
+        // Възстановено ДДС не е вложен капитал — то се е върнало в сметката.
+        // Ново строителство от регистриран продавач се купува с ДДС и Иво си го
+        // приспада; старите препродажби по чл. 45 ЗДДС нямат ДДС за връщане.
+        const purchaseDiv = p.cost_vat_recovered ? VAT_RATE : 1;
+        const renoDiv = p.reno_vat_recovered ? VAT_RATE : 1;
+        const purchaseNet = (p['покупна'] || 0) / purchaseDiv;
+        const renoNet = renoTotal(p, renoMap) / renoDiv;
+        const costBasis = purchaseNet + renoNet;
         const assetVal = (p.market_val != null && p.market_val > 0)
           ? p.market_val
-          : (p['покупна'] || 0) + renoTotal(p, renoMap);
-        const costBasis = (p['покупна'] || 0) + renoTotal(p, renoMap);
+          : costBasis;
         const stage = p.lifecycle_stage || (p['статус'] === '✅' ? 'active' : 'inactive');
         // Вложени средства: при pre-construction реално платеното е капарото,
         // не договорната цена (покупна), която още не е дължима изцяло.
         const preCon = stage === 'pre_construction' || (p.purchase_balance_due || 0) > 0;
         const invested = preCon
-          ? (p.purchase_paid_amount || 0) + renoTotal(p, renoMap)
+          ? (p.purchase_paid_amount || 0) / purchaseDiv + renoNet
           : costBasis;
         return {
           vat_exempt: p.vat_exempt ? 1 : 0,
+          cost_vat_recovered: p.cost_vat_recovered ? 1 : 0,
+          reno_vat_recovered: p.reno_vat_recovered ? 1 : 0,
+          покупна_raw: Math.round((p['покупна'] || 0) * 100) / 100,
+          ремонт_raw: Math.round(renoTotal(p, renoMap) * 100) / 100,
           cost_basis_kind: COST_BASIS_KINDS.has(p.cost_basis_kind)
             ? p.cost_basis_kind
             : 'total',
@@ -469,8 +480,12 @@ module.exports = function(db) {
           rent_annual: p.rent_annual,
           opex_annual: p.opex_annual_total,
           noi_annual: p.noi_annual,
-          покупна: Math.round((p.invested - renoTotal({ id: p.id }, renoMap)) * 100) / 100,
-          ремонт: Math.round(renoTotal({ id: p.id }, renoMap) * 100) / 100,
+          покупна: Math.round((p.invested - renoTotal({ id: p.id }, renoMap) / (p.reno_vat_recovered ? VAT_RATE : 1)) * 100) / 100,
+          ремонт: Math.round((renoTotal({ id: p.id }, renoMap) / (p.reno_vat_recovered ? VAT_RATE : 1)) * 100) / 100,
+          покупна_raw: p['покупна_raw'],
+          ремонт_raw: p['ремонт_raw'],
+          cost_vat_recovered: p.cost_vat_recovered,
+          reno_vat_recovered: p.reno_vat_recovered,
           cost_recorded: p.invested,
           cost_basis_kind: p.cost_basis_kind,
           allocated_debt: p.allocated_debt,
