@@ -66,6 +66,12 @@ function runTenantMigrations(db) {
     console.log('Migration: added properties.cost_basis_kind');
   } catch(_) {}
   db.exec("UPDATE properties SET cost_basis_kind = 'total' WHERE cost_basis_kind IS NULL OR cost_basis_kind = ''");
+  // Заведената сума е с ДДС, което е възстановено → не е вложен капитал.
+  // Важи за ново строителство от регистриран продавач; старите препродажби по
+  // чл. 45 ЗДДС нямат ДДС. Ремонтът се води отделно — фактурите му носят ДДС и
+  // при имот, купен без него.
+  try { db.exec("ALTER TABLE properties ADD COLUMN cost_vat_recovered INTEGER DEFAULT 0"); console.log('Migration: added properties.cost_vat_recovered'); } catch(_) {}
+  try { db.exec("ALTER TABLE properties ADD COLUMN reno_vat_recovered INTEGER DEFAULT 0"); console.log('Migration: added properties.reno_vat_recovered'); } catch(_) {}
   try { db.exec("ALTER TABLE properties ADD COLUMN stripe_enabled INTEGER DEFAULT 1"); console.log('Migration: added properties.stripe_enabled'); } catch(_) {}
   db.exec("UPDATE properties SET stripe_enabled = 1 WHERE stripe_enabled IS NULL");
 

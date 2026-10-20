@@ -11,6 +11,8 @@ CREATE TABLE IF NOT EXISTS properties (
   ремонт REAL DEFAULT 0,
   market_val REAL,
   cost_basis_kind TEXT DEFAULT 'total',
+  cost_vat_recovered INTEGER DEFAULT 0,
+  reno_vat_recovered INTEGER DEFAULT 0,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );

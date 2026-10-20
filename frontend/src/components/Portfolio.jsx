@@ -155,6 +155,8 @@ export default function Portfolio({ API, role }) {
       покупна: prop['покупна'] || 0,
       ремонт: prop['ремонт'] || 0,
       cost_basis_kind: prop.cost_basis_kind || 'total',
+      cost_vat_recovered: !!prop.cost_vat_recovered,
+      reno_vat_recovered: !!prop.reno_vat_recovered,
       lifecycle_stage: prop.lifecycle_stage || 'active',
       lifecycle_eta_date: prop.lifecycle_eta_date || '',
       purchase_paid_amount: prop.purchase_paid_amount ?? '',
@@ -217,6 +219,8 @@ export default function Portfolio({ API, role }) {
         покупна: editForm.покупна !== '' ? Number(editForm.покупна) : null,
         ремонт: editForm.ремонт !== '' ? Number(editForm.ремонт) : null,
         cost_basis_kind: editForm.cost_basis_kind || 'total',
+        cost_vat_recovered: editForm.cost_vat_recovered ? 1 : 0,
+        reno_vat_recovered: editForm.reno_vat_recovered ? 1 : 0,
         lifecycle_stage: editForm.lifecycle_stage || 'active',
         lifecycle_eta_date: editForm.lifecycle_eta_date || null,
         purchase_paid_amount: editForm.purchase_paid_amount !== '' ? Number(editForm.purchase_paid_amount) : null,
@@ -882,6 +886,26 @@ export default function Portfolio({ API, role }) {
                   Определя знаменателя на доходността в Анализ. При „пълна цена" дялът
                   от кредита се вади; при „собствено участие" — не.
                 </p>
+                <label className="flex items-start gap-2 mt-3 cursor-pointer">
+                  <input type="checkbox" className="mt-0.5"
+                    checked={!!editForm.cost_vat_recovered}
+                    onChange={e => setEditForm(f => ({ ...f, cost_vat_recovered: e.target.checked }))} />
+                  <span className="text-sm text-gray-700">
+                    Покупната цена е с ДДС и съм го възстановил
+                    <span className="block text-xs text-gray-500">
+                      Ново строителство от регистриран продавач. Връщането не е вложен
+                      капитал — базата става цена ÷ 1.20.
+                    </span>
+                  </span>
+                </label>
+                <label className="flex items-start gap-2 mt-2 cursor-pointer">
+                  <input type="checkbox" className="mt-0.5"
+                    checked={!!editForm.reno_vat_recovered}
+                    onChange={e => setEditForm(f => ({ ...f, reno_vat_recovered: e.target.checked }))} />
+                  <span className="text-sm text-gray-700">
+                    Ремонтът е с ДДС и съм го възстановил
+                  </span>
+                </label>
               </div>
               )}
               {!broker && (
