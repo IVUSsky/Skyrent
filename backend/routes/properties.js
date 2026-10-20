@@ -680,15 +680,40 @@ module.exports = function(db) {
         ? body.cost_basis_kind
         : (current.cost_basis_kind || 'total');
 
+      // Етап и разсрочено плащане. Досега се задаваха само от миграция (20/80 от
+      // пазарната стойност) и нямаше как да се поправят — при имот на зелено
+      // това разминава „предстоящи плащания" с договора.
+      const LIFECYCLE_STAGES = ['pre_construction', 'construction', 'furnishing', 'active', 'inactive'];
+      const lifecycle_stage = body.lifecycle_stage !== undefined
+        && LIFECYCLE_STAGES.includes(body.lifecycle_stage)
+        ? body.lifecycle_stage
+        : current.lifecycle_stage;
+      const numOrNull = (v, fallback) => {
+        if (v === undefined) return fallback;
+        if (v === null || v === '') return null;
+        const n = Number(v);
+        return Number.isFinite(n) ? n : fallback;
+      };
+      const dateOrNull = (v, fallback) => {
+        if (v === undefined) return fallback;
+        if (!v) return null;
+        return /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : fallback;
+      };
+      const purchase_paid_amount = numOrNull(body.purchase_paid_amount, current.purchase_paid_amount);
+      const purchase_balance_due = numOrNull(body.purchase_balance_due, current.purchase_balance_due);
+      const purchase_balance_due_date = dateOrNull(body.purchase_balance_due_date, current.purchase_balance_due_date);
+      const lifecycle_eta_date = dateOrNull(body.lifecycle_eta_date, current.lifecycle_eta_date);
+
       db.prepare(`
         UPDATE properties
         SET адрес=?, район=?, наем=?, наемател=?, статус=?, market_val=?, тип=?, площ=?, покупна=?, ремонт=?,
             email=?, телефон=?, invoice_enabled=?, invoice_recipient=?, vat_exempt=?, stripe_enabled=?,
             абонат_ток=?, абонат_вода=?, абонат_тец=?, абонат_вход=?, абонат_газ=?, owner_id=?,
-            cost_basis_kind=?,
+            cost_basis_kind=?, lifecycle_stage=?, lifecycle_eta_date=?,
+            purchase_paid_amount=?, purchase_balance_due=?, purchase_balance_due_date=?,
             updated_at=CURRENT_TIMESTAMP
         WHERE id=?
-      `).run(адрес, район, наем, наемател, статус, market_val, тип, площ, покупна, ремонт, email, телефон, invoice_enabled, invoice_recipient, vat_exempt, stripe_enabled, абонат_ток, абонат_вода, абонат_тец, абонат_вход, абонат_газ, owner_id, cost_basis_kind, id);
+      `).run(адрес, район, наем, наемател, статус, market_val, тип, площ, покупна, ремонт, email, телефон, invoice_enabled, invoice_recipient, vat_exempt, stripe_enabled, абонат_ток, абонат_вода, абонат_тец, абонат_вход, абонат_газ, owner_id, cost_basis_kind, lifecycle_stage, lifecycle_eta_date, purchase_paid_amount, purchase_balance_due, purchase_balance_due_date, id);
 
       const updated = db.prepare('SELECT * FROM properties WHERE id = ?').get(id);
       console.log('Saved тип:', updated.тип, '| покупна:', updated.покупна, '| ремонт:', updated.ремонт);

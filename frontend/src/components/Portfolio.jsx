@@ -155,6 +155,11 @@ export default function Portfolio({ API, role }) {
       покупна: prop['покупна'] || 0,
       ремонт: prop['ремонт'] || 0,
       cost_basis_kind: prop.cost_basis_kind || 'total',
+      lifecycle_stage: prop.lifecycle_stage || 'active',
+      lifecycle_eta_date: prop.lifecycle_eta_date || '',
+      purchase_paid_amount: prop.purchase_paid_amount ?? '',
+      purchase_balance_due: prop.purchase_balance_due ?? '',
+      purchase_balance_due_date: prop.purchase_balance_due_date || '',
       owner_id: prop['owner_id'] || '',
       абонат_ток:  prop['абонат_ток']  || '',
       абонат_вода: prop['абонат_вода'] || '',
@@ -212,6 +217,11 @@ export default function Portfolio({ API, role }) {
         покупна: editForm.покупна !== '' ? Number(editForm.покупна) : null,
         ремонт: editForm.ремонт !== '' ? Number(editForm.ремонт) : null,
         cost_basis_kind: editForm.cost_basis_kind || 'total',
+        lifecycle_stage: editForm.lifecycle_stage || 'active',
+        lifecycle_eta_date: editForm.lifecycle_eta_date || null,
+        purchase_paid_amount: editForm.purchase_paid_amount !== '' ? Number(editForm.purchase_paid_amount) : null,
+        purchase_balance_due: editForm.purchase_balance_due !== '' ? Number(editForm.purchase_balance_due) : null,
+        purchase_balance_due_date: editForm.purchase_balance_due_date || null,
         абонат_ток:  editForm.абонат_ток  || null,
         абонат_вода: editForm.абонат_вода || null,
         абонат_тец:  editForm.абонат_тец  || null,
@@ -872,6 +882,57 @@ export default function Portfolio({ API, role }) {
                   Определя знаменателя на доходността в Анализ. При „пълна цена" дялът
                   от кредита се вади; при „собствено участие" — не.
                 </p>
+              </div>
+              )}
+              {!broker && (
+              <div className="border border-gray-200 rounded-lg p-3 space-y-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Етап</label>
+                  <select
+                    value={editForm.lifecycle_stage || 'active'}
+                    onChange={e => setEditForm(f => ({ ...f, lifecycle_stage: e.target.value }))}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="pre_construction">На зелено</option>
+                    <option value="construction">В строеж</option>
+                    <option value="furnishing">Обзавеждане</option>
+                    <option value="active">Отдава се</option>
+                    <option value="inactive">Неактивен</option>
+                  </select>
+                </div>
+                {['pre_construction', 'construction'].includes(editForm.lifecycle_stage) && (
+                  <>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Платено (EUR €)</label>
+                        <input type="number" min="0" step="0.01"
+                          value={editForm.purchase_paid_amount}
+                          onChange={e => setEditForm(f => ({ ...f, purchase_paid_amount: e.target.value }))}
+                          className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Остава (EUR €)</label>
+                        <input type="number" min="0" step="0.01"
+                          value={editForm.purchase_balance_due}
+                          onChange={e => setEditForm(f => ({ ...f, purchase_balance_due: e.target.value }))}
+                          className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Дата на нотариалния акт</label>
+                      <input type="date"
+                        value={editForm.purchase_balance_due_date}
+                        onChange={e => setEditForm(f => ({
+                          ...f, purchase_balance_due_date: e.target.value, lifecycle_eta_date: e.target.value,
+                        }))}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                      <p className="text-xs text-gray-500 mt-1">
+                        „Остава" влиза в предстоящите плащания в Анализ — въведи го по договора,
+                        не по оценка.
+                      </p>
+                    </div>
+                  </>
+                )}
               </div>
               )}
               <div>
