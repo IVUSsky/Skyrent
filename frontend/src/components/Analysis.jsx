@@ -75,6 +75,7 @@ export default function Analysis({ API }) {
   const [metrics, setMetrics] = useState(null)
   const [expenseSummary, setExpenseSummary] = useState(null)
   const [pf, setPf] = useState(null)
+  const [pfProps, setPfProps] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
@@ -92,6 +93,7 @@ export default function Analysis({ API }) {
         setLoans(l)
         setExpenseSummary(es)
         setPf(pfm && pfm.portfolio ? pfm.portfolio : null)
+        setPfProps(pfm && pfm.by_property ? pfm.by_property : [])
         setLoading(false)
       })
       .catch(e => { setError(e.message); setLoading(false) })
@@ -567,6 +569,98 @@ export default function Analysis({ API }) {
               </div>
             </div>
           )}
+
+          {/* Доходност върху вложеното — по имот */}
+          {pfProps.length > 0 && (() => {
+            const BLOCKED = {
+              no_cost_basis: 'няма заведена покупна цена',
+              pre_construction: 'на зелено — наемът е планов',
+              not_active: 'неактивен',
+            }
+            const ranked = pfProps
+              .filter(p => p.cash_yield_on_invested != null)
+              .sort((a, b) => b.cash_yield_on_invested - a.cash_yield_on_invested)
+            const blocked = pfProps
+              .filter(p => p.cash_yield_on_invested == null && (p.invested > 0 || p.rent_monthly > 0))
+              .sort((a, b) => (b.invested || 0) - (a.invested || 0))
+            const yieldColor = (y) => y >= 0.10 ? 'text-green-700'
+              : y >= 0.07 ? 'text-green-600'
+              : y >= 0.05 ? 'text-yellow-600'
+              : y >= 0.03 ? 'text-orange-500'
+              : y >= 0 ? 'text-red-500' : 'text-red-700'
+
+            return (
+              <div className="bg-white border border-gray-200 rounded-xl p-4 mt-4">
+                <div className="font-semibold text-gray-700 mb-1">Доходност върху вложеното — по имот</div>
+                <p className="text-xs text-gray-500 mb-3">
+                  Кеш доходността е нетният поток след вноската, върху реално вложеното.
+                  Общата добавя погасената главница и поскъпването.
+                </p>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-left text-gray-500 border-b border-gray-200">
+                        <th className="py-2 pr-3 font-semibold">Имот</th>
+                        <th className="py-2 pr-3 font-semibold text-right">Вложено</th>
+                        <th className="py-2 pr-3 font-semibold text-right">Наем нето/мес</th>
+                        <th className="py-2 pr-3 font-semibold text-right">Кеш поток/год</th>
+                        <th className="py-2 pr-3 font-semibold text-right">Кеш дох.</th>
+                        <th className="py-2 font-semibold text-right">Обща дох.</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {ranked.map(p => (
+                        <tr key={p.id} className="border-b border-gray-100 hover:bg-gray-50">
+                          <td className="py-2 pr-3">
+                            <span className="text-gray-400 text-xs mr-1">#{p.id}</span>
+                            {p['адрес']}
+                          </td>
+                          <td className="py-2 pr-3 text-right">{fmt(p.invested)} €</td>
+                          <td className="py-2 pr-3 text-right text-gray-600">{fmt(p.rent_monthly)} €</td>
+                          <td className={`py-2 pr-3 text-right ${p.net_cash_flow < 0 ? 'text-red-600 font-semibold' : ''}`}>
+                            {fmt(p.net_cash_flow)} €
+                          </td>
+                          <td className={`py-2 pr-3 text-right font-bold ${yieldColor(p.cash_yield_on_invested)}`}>
+                            {(p.cash_yield_on_invested * 100).toFixed(2)}%
+                          </td>
+                          <td className="py-2 text-right font-semibold text-emerald-700">
+                            {p.total_return != null ? (p.total_return * 100).toFixed(2) + '%' : '—'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {blocked.length > 0 && (
+                  <div className="mt-4 border-t border-gray-200 pt-3">
+                    <div className="text-sm font-semibold text-gray-600 mb-2">
+                      Без изчислима доходност — {blocked.length} имота
+                    </div>
+                    <div className="space-y-1">
+                      {blocked.map(p => (
+                        <div key={p.id} className="flex justify-between items-baseline text-xs text-gray-600 gap-3">
+                          <span className="truncate">
+                            <span className="text-gray-400 mr-1">#{p.id}</span>{p['адрес']}
+                          </span>
+                          <span className="flex-shrink-0 text-gray-400">
+                            наем {fmt(p.rent_monthly)} € · {BLOCKED[p.yield_blocked] || '—'}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                    {pf.missing_cost_basis > 0 && (
+                      <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-3">
+                        ⚠️ {pf.missing_cost_basis} активни имота нямат заведена покупна цена
+                        ({fmt(pf.missing_cost_basis_rent)} € годишен наем). Въведи я в Портфолио,
+                        за да влязат в класацията и в общата доходност.
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )
+          })()}
         </div>
       )}
 

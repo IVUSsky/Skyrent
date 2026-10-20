@@ -407,10 +407,18 @@ module.exports = function(db) {
         p.total_return_annual = Math.round(
           (p.net_cash_flow + p.principal_paydown_12m + p.appreciation_annual) * 100
         ) / 100;
-        p.total_return = p.invested > 0
+
+        // Доходност върху вложеното се смята само когато и двете са налице:
+        // реално течащ наем и заведена цена на придобиване. При pre-construction
+        // наемът е ПЛАНОВ — делението му на капарото дава фалшиви 25–45%.
+        p.yield_blocked = !p.active
+          ? (p.pre_construction ? 'pre_construction' : 'not_active')
+          : (p.invested > 0 ? null : 'no_cost_basis');
+        const yieldable = p.yield_blocked == null;
+        p.total_return = yieldable
           ? Math.round((p.total_return_annual / p.invested) * 10000) / 10000
           : null;
-        p.cash_yield_on_invested = p.invested > 0
+        p.cash_yield_on_invested = yieldable
           ? Math.round((p.net_cash_flow / p.invested) * 10000) / 10000
           : null;
       }
@@ -581,6 +589,13 @@ module.exports = function(db) {
         cash_yield_on_invested: totalInvested > 0
           ? Math.round((portfolioNetCf / totalInvested) * 10000) / 10000
           : null,
+        // Активни имоти без заведена покупна цена — доходността им не може да
+        // се смята и те изкривяват всяка класация, ако се подминат мълчаливо.
+        missing_cost_basis: propRows.filter(p => p.yield_blocked === 'no_cost_basis').length,
+        missing_cost_basis_rent: Math.round(
+          propRows.filter(p => p.yield_blocked === 'no_cost_basis')
+            .reduce((s, p) => s + p.rent_annual, 0) * 100
+        ) / 100,
         // --- ДДС режим ---
         weighted_rate: Math.round(weightedRate * 100) / 100,
         vat_liable_count: propRows.filter(p => !p.vat_exempt && p.rent_monthly_gross > 0).length,
