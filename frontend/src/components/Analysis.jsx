@@ -41,6 +41,115 @@ function GaugeMeter({ value, label, low, high, invert = false, unit = '' }) {
   )
 }
 
+// Механизмът на изчислението, стъпка по стъпка — всяко число на екрана трябва
+// да може да се проследи до суровите данни, иначе не му се вярва.
+function CalcBreakdown({ c, p }) {
+  const e = (n, d = 0) => fmt(n, d)
+  const Row = ({ label, value, muted, bold, note }) => (
+    <div className={`flex justify-between gap-4 py-1 ${bold ? 'font-bold border-t border-gray-300 mt-1 pt-1.5' : ''}`}>
+      <span className={muted ? 'text-gray-500' : 'text-gray-700'}>{label}</span>
+      <span className={`text-right whitespace-nowrap ${muted ? 'text-gray-500' : 'text-gray-800'}`}>
+        {value}{note && <span className="text-xs text-gray-400 ml-1">{note}</span>}
+      </span>
+    </div>
+  )
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 text-sm">
+      <div>
+        <div className="text-xs font-bold text-gray-500 uppercase mb-1">1 · Приход</div>
+        <Row label="Наем, както го плаща наемателят" value={`${e(c.rent_gross_monthly)} €/мес`} />
+        <Row
+          label={c.vat_divisor === 1 ? 'Без ДДС (освободен)' : 'Делено на 1.20 (с ДДС)'}
+          value={`${e(c.rent_net_monthly)} €/мес`}
+          muted
+        />
+        <Row label="× 12 месеца" value={`${e(c.rent_annual)} €/год`} muted />
+        <Row label="− оперативни разходи" value={`−${e(c.opex_annual)} €`} muted />
+        <Row label="NOI" value={`${e(c.noi_annual)} €/год`} bold />
+      </div>
+
+      <div>
+        <div className="text-xs font-bold text-gray-500 uppercase mb-1">
+          2 · {c.basis_kind === 'market' ? 'База за доходност' : 'Вложен капитал'}
+        </div>
+        {c.basis_kind === 'market' ? (
+          <>
+            {c.cost_basis_kind === 'market' ? (
+              <Row label="Вложен капитал" value="0 €" muted note="наследен" />
+            ) : (
+              <>
+                <Row label="Пълна цена" value={`${e(c.покупна)} €`} muted />
+                <Row label="+ ремонт" value={`${e(c.ремонт)} €`} muted />
+                <Row label="− дял от кредита" value={`−${e(c.allocated_debt)} €`} muted />
+                <Row label="Собствен капитал" value={`${e(c.equity_invested)} €`} muted />
+              </>
+            )}
+            <Row label="Пазарна стойност" value={`${e(c.asset_val)} €`} />
+            <Row label="База за доходност" value={`${e(c.yield_basis)} €`} bold />
+            <p className="text-xs text-gray-400 mt-1.5 leading-snug">
+              {c.equity_negative
+                ? 'Дългът надхвърля цената — в имота няма собствен капитал, затова се мери срещу пазарната стойност. Обикновено значи, че носи дял от кредит, обезпечен и с други имоти.'
+                : 'Няма вложени пари, затова се мери срещу пазарната стойност — колко струва да го държиш, вместо да го продадеш и вложиш парите другаде.'}
+            </p>
+          </>
+        ) : c.cost_basis_kind === 'equity' ? (
+          <>
+            <Row label="Собствено участие" value={`${e(c.покупна)} €`} />
+            <Row label="+ ремонт" value={`${e(c.ремонт)} €`} />
+            <Row label="Вложени средства" value={`${e(c.equity_invested)} €`} bold />
+            {c.allocated_debt > 0 && (
+              <Row label="Дял от кредита (справка)" value={`${e(c.allocated_debt)} €`} muted />
+            )}
+            <p className="text-xs text-gray-400 mt-1.5 leading-snug">
+              Заведената сума е собственото участие — капаро, ремонт, брокер и
+              такси. Дългът не се вади, защото вече не е вътре.
+            </p>
+          </>
+        ) : (
+          <>
+            <Row label="Покупна цена" value={`${e(c.покупна)} €`} />
+            <Row label="+ ремонт" value={`${e(c.ремонт)} €`} />
+            <Row label="Цена на придобиване" value={`${e(c.cost_recorded)} €`} muted />
+            <Row label="− дял от кредита" value={`−${e(c.allocated_debt)} €`} muted />
+            <Row label="Вложени средства" value={`${e(c.equity_invested)} €`} bold />
+            <p className="text-xs text-gray-400 mt-1.5 leading-snug">
+              Заведената сума е пълната цена, затова поетият дълг се вади — от
+              джоба са излезли само останалите пари.
+            </p>
+          </>
+        )}
+      </div>
+
+      <div>
+        <div className="text-xs font-bold text-gray-500 uppercase mb-1">3 · Възвръщаемост</div>
+        <Row label="NOI" value={`${e(c.noi_annual)} €`} muted />
+        <Row
+          label="− вноска по кредита"
+          value={`−${e(c.debt_service_annual)} €`}
+          muted
+          note={`лихва ${e(c.interest_12m)} + главница ${e(c.principal_12m)}`}
+        />
+        <Row label="Кеш поток" value={`${e(c.net_cash_flow)} €/год`} bold />
+        <Row
+          label="Кеш доходност"
+          value={p.cash_yield_on_invested != null
+            ? `${(p.cash_yield_on_invested * 100).toFixed(2)} %`
+            : '—'}
+          muted
+          note={`${e(c.net_cash_flow)} ÷ ${e(c.equity_invested)}`}
+        />
+        <div className="mt-2 pt-1.5 border-t border-gray-300">
+          <Row label="+ погасена главница" value={`${e(c.principal_12m)} €`} muted />
+          <Row label="+ поскъпване" value={`${e(c.appreciation)} €`} muted />
+          <Row label="Обща доходност" value={p.total_return != null
+            ? `${(p.total_return * 100).toFixed(2)} %`
+            : '—'} bold />
+        </div>
+      </div>
+    </div>
+  )
+}
+
 const INSIGHTS = [
   {
     icon: '🔶',
@@ -74,6 +183,9 @@ export default function Analysis({ API }) {
   const [loans, setLoans] = useState([])
   const [metrics, setMetrics] = useState(null)
   const [expenseSummary, setExpenseSummary] = useState(null)
+  const [pf, setPf] = useState(null)
+  const [pfProps, setPfProps] = useState([])
+  const [openCalc, setOpenCalc] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
@@ -83,12 +195,15 @@ export default function Analysis({ API }) {
       apiFetch(`${API}/api/metrics`).then(r => r.json()),
       apiFetch(`${API}/api/loans`).then(r => r.json()).catch(() => []),
       apiFetch(`${API}/api/expenses/summary`).then(r => r.json()).catch(() => null),
+      apiFetch(`${API}/api/metrics/portfolio`).then(r => r.json()).catch(() => null),
     ])
-      .then(([p, m, l, es]) => {
+      .then(([p, m, l, es, pfm]) => {
         setProperties(p)
         setMetrics(m)
         setLoans(l)
         setExpenseSummary(es)
+        setPf(pfm && pfm.portfolio ? pfm.portfolio : null)
+        setPfProps(pfm && pfm.by_property ? pfm.by_property : [])
         setLoading(false)
       })
       .catch(e => { setError(e.message); setLoading(false) })
@@ -443,6 +558,287 @@ export default function Analysis({ API }) {
           <p className="text-xs text-gray-400 mt-2">
             * Имоти без покупна цена или наем са изключени. Разходите са апроксимирани на 10% от наема — за точен резултат въведи реалните разходи.
           </p>
+        </div>
+      )}
+
+      {/* Възвръщаемост — вложени средства, обща доходност, лихвен стрес-тест.
+          Данните идват от /api/metrics/portfolio (нетни наеми, без ДДС). */}
+      {pf && (
+        <div className="mb-8">
+          <h3 className="text-lg font-bold text-gray-700 mb-1">Възвръщаемост</h3>
+          <p className="text-xs text-gray-500 mb-3">
+            Всички суми са <strong>нетни</strong> — наемите на облагаемите имоти са разделени на 1.20.
+            {pf.vat_liable_count > 0 && (
+              <> Третирани като облагаеми: <strong>{pf.vat_liable_count}</strong> имота
+              {pf.vat_exempt_count > 0 && <> · освободени (брой / физическо лице): <strong>{pf.vat_exempt_count}</strong></>}.
+              {pf.rent_monthly_gross > 0 && (
+                <> Брутно {fmt(pf.rent_monthly_gross)} € → нето {fmt(pf.rent_monthly)} €/мес.</>
+              )}</>
+            )}
+          </p>
+
+          {pf.coverage && pf.coverage.properties < pf.coverage.properties_active && (
+            <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">
+              ⚠️ Процентите по-долу са само за <strong>{pf.coverage.properties} от {pf.coverage.properties_active}</strong> активни
+              имота ({pf.coverage.rent_share != null ? (pf.coverage.rent_share * 100).toFixed(0) : '—'}% от наема).
+              Изключени: {pf.missing_cost_basis} без заведена покупна цена
+              {pf.negative_equity_count > 0 && <>, {pf.negative_equity_count} с дълг над заведената цена</>}.
+              Докато не се попълнят, портфейлната доходност не е меродавна.
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+            <div className="bg-white border border-gray-200 rounded-xl p-4">
+              <div className="text-xs font-semibold text-gray-500 mb-1">Вложени средства</div>
+              <div className="text-2xl font-bold text-gray-800">{fmt(pf.total_invested)} €</div>
+              <div className="text-xs text-gray-500 mt-1">
+                цена {fmt(pf.cost_total_all)} € − дял от кредитите
+                {pf.invested_pre_construction > 0 && <> · на зелено {fmt(pf.invested_pre_construction)} €</>}
+              </div>
+            </div>
+            <div className="bg-white border border-gray-200 rounded-xl p-4">
+              <div className="text-xs font-semibold text-gray-500 mb-1">Кеш доходност</div>
+              <div className="text-2xl font-bold text-gray-800">
+                {pf.cash_yield_on_invested != null ? (pf.cash_yield_on_invested * 100).toFixed(2) : '—'}%
+              </div>
+              <div className="text-xs text-gray-500 mt-1">{fmt(pf.net_cash_flow_annual)} €/год в джоба</div>
+            </div>
+            <div className="bg-white border border-gray-200 rounded-xl p-4">
+              <div className="text-xs font-semibold text-gray-500 mb-1">Погасена главница</div>
+              <div className="text-2xl font-bold text-gray-800">{fmt(pf.principal_paydown_12m)} €</div>
+              <div className="text-xs text-gray-500 mt-1">не е разход — маха дълг</div>
+            </div>
+            <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4">
+              <div className="text-xs font-semibold text-emerald-700 mb-1">ОБЩА ДОХОДНОСТ</div>
+              <div className="text-2xl font-bold text-emerald-800">
+                {pf.total_return != null ? (pf.total_return * 100).toFixed(2) : '—'}%
+              </div>
+              <div className="text-xs text-emerald-700 mt-1">{fmt(pf.total_return_annual)} €/год</div>
+            </div>
+          </div>
+
+          <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 mb-4 text-sm">
+            <div className="font-semibold text-gray-700 mb-2">Как се получава общата доходност</div>
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-gray-700">
+              <span>кеш поток <strong>{fmt(pf.net_cash_flow_annual)} €</strong></span>
+              <span className="text-gray-400">+</span>
+              <span>главница <strong>{fmt(pf.principal_paydown_12m)} €</strong></span>
+              <span className="text-gray-400">+</span>
+              <span>поскъпване <strong>{fmt(pf.appreciation_annual)} €</strong>
+                <span className="text-gray-400"> ({(pf.appreciation_pct * 100).toFixed(1)}%)</span></span>
+              <span className="text-gray-400">=</span>
+              <span className="font-bold">{fmt(pf.total_return_annual)} €</span>
+              <span className="text-gray-400">÷ вложени {fmt(pf.total_invested)} € =</span>
+              <span className="font-bold text-emerald-700">
+                {pf.total_return != null ? (pf.total_return * 100).toFixed(2) : '—'}%
+              </span>
+            </div>
+            <p className="text-xs text-gray-500 mt-2">
+              Поскъпването е допускане, не реализирана печалба. Смени го от Настройки → <code>appreciation_pct</code>;
+              при 0 остават само кешът и главницата.
+            </p>
+          </div>
+
+          {/* Лихвен стрес-тест */}
+          {pf.rate_stress && pf.rate_stress.length > 0 && (
+            <div className="bg-white border border-gray-200 rounded-xl p-4">
+              <div className="font-semibold text-gray-700 mb-1">
+                Лихвен стрес-тест <span className="text-xs font-normal text-gray-500">
+                  (всички кредити са с плаваща лихва · среднопретеглена {pf.weighted_rate}%)
+                </span>
+              </div>
+              <p className="text-xs text-gray-500 mb-3">
+                Всеки кредит е преоценен при по-висока лихва за същия остатъчен срок.
+              </p>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-gray-500 border-b border-gray-200">
+                      <th className="py-2 pr-4 font-semibold">Лихва</th>
+                      <th className="py-2 pr-4 font-semibold text-right">Обслужване/год</th>
+                      <th className="py-2 pr-4 font-semibold text-right">Лихва/год</th>
+                      <th className="py-2 pr-4 font-semibold text-right">DSCR</th>
+                      <th className="py-2 font-semibold text-right">Кеш поток/год</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pf.rate_stress.map(s => {
+                      const bad = s.dscr != null && s.dscr < 1
+                      const warn = s.dscr != null && s.dscr >= 1 && s.dscr < 1.25
+                      return (
+                        <tr key={s.delta_bps} className={`border-b border-gray-100 ${s.delta_bps === 0 ? 'bg-blue-50' : ''}`}>
+                          <td className="py-2 pr-4 font-medium">
+                            {s.avg_rate}%
+                            {s.delta_bps === 0
+                              ? <span className="text-xs text-blue-600 ml-1">сега</span>
+                              : <span className="text-xs text-gray-400 ml-1">+{s.delta_bps} бп</span>}
+                          </td>
+                          <td className="py-2 pr-4 text-right">{fmt(s.debt_service_annual)} €</td>
+                          <td className="py-2 pr-4 text-right text-gray-500">{fmt(s.interest_annual)} €</td>
+                          <td className={`py-2 pr-4 text-right font-bold ${
+                            bad ? 'text-red-700' : warn ? 'text-orange-500' : 'text-green-700'
+                          }`}>{s.dscr != null ? s.dscr.toFixed(2) : '—'}</td>
+                          <td className={`py-2 text-right ${
+                            s.net_cash_flow_annual < 0 ? 'text-red-700 font-bold' : ''
+                          }`}>{fmt(s.net_cash_flow_annual)} €</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* Доходност върху вложеното — по имот */}
+          {pfProps.length > 0 && (() => {
+            const BLOCKED = {
+              no_basis: 'няма нито вложено, нито пазарна оценка',
+              pre_construction: 'на зелено — наемът е планов',
+              not_active: 'неактивен',
+            }
+            const ranked = pfProps
+              .filter(p => p.cash_yield_on_invested != null)
+              .sort((a, b) => b.cash_yield_on_invested - a.cash_yield_on_invested)
+            const blocked = pfProps
+              .filter(p => p.cash_yield_on_invested == null && (p.invested > 0 || p.rent_monthly > 0))
+              .sort((a, b) => (b.invested || 0) - (a.invested || 0))
+            const yieldColor = (y) => y >= 0.10 ? 'text-green-700'
+              : y >= 0.07 ? 'text-green-600'
+              : y >= 0.05 ? 'text-yellow-600'
+              : y >= 0.03 ? 'text-orange-500'
+              : y >= 0 ? 'text-red-500' : 'text-red-700'
+
+            return (
+              <div className="bg-white border border-gray-200 rounded-xl p-4 mt-4">
+                <div className="font-semibold text-gray-700 mb-1">Доходност върху вложеното — по имот</div>
+                <p className="text-xs text-gray-500 mb-3">
+                  Кеш доходността е нетният поток след вноската, върху базата.
+                  Общата добавя погасената главница и поскъпването. Кликни ред, за да видиш сметката.
+                  {pf.inherited && pf.inherited.count > 0 && (
+                    <> За наследените имоти базата е <strong>пазарната стойност</strong> — вложен капитал няма.</>
+                  )}
+                </p>
+                {pf.inherited && pf.inherited.count > 0 && (
+                  <div className="text-xs bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 mb-3 flex flex-wrap gap-x-4 gap-y-1">
+                    <span className="font-semibold text-gray-700">
+                      Наследени: {pf.inherited.count} имота
+                    </span>
+                    <span className="text-gray-600">пазарна стойност {fmt(pf.inherited.market_value)} €</span>
+                    <span className="text-gray-600">кеш поток {fmt(pf.inherited.net_cash_flow)} €/год</span>
+                    <span className="font-semibold text-gray-700">
+                      {pf.inherited.market_value > 0
+                        ? (pf.inherited.net_cash_flow / pf.inherited.market_value * 100).toFixed(2)
+                        : '—'}% върху пазарната
+                    </span>
+                  </div>
+                )}
+                {pf.no_equity && pf.no_equity.count > 0 && (
+                  <div className="text-xs bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3 text-amber-900">
+                    <strong>{pf.no_equity.count} имота са с дълг над цената</strong> — носят дял
+                    от кредит, обезпечен и с други имоти. Нямат собствен капитал, затова базата им
+                    е пазарната стойност ({fmt(pf.no_equity.market_value)} €).
+                  </div>
+                )}
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-left text-gray-500 border-b border-gray-200">
+                        <th className="py-2 pr-3 font-semibold">Имот</th>
+                        <th className="py-2 pr-3 font-semibold text-right">База</th>
+                        <th className="py-2 pr-3 font-semibold text-right">Наем нето/мес</th>
+                        <th className="py-2 pr-3 font-semibold text-right">Кеш поток/год</th>
+                        <th className="py-2 pr-3 font-semibold text-right">Кеш дох.</th>
+                        <th className="py-2 font-semibold text-right">Обща дох.</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {ranked.map(p => (
+                        <React.Fragment key={p.id}>
+                          <tr
+                            className="border-b border-gray-100 hover:bg-gray-50 cursor-pointer"
+                            onClick={() => setOpenCalc(openCalc === p.id ? null : p.id)}
+                          >
+                            <td className="py-2 pr-3">
+                              <span className="text-gray-400 text-xs mr-1">
+                                {openCalc === p.id ? '▾' : '▸'} #{p.id}
+                              </span>
+                              {p['адрес']}
+                            </td>
+                            <td className="py-2 pr-3 text-right">
+                              {fmt(p.yield_basis)} €
+                              {p.basis_kind === 'market' && (
+                                <span
+                                  className="ml-1 text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-1 py-0.5 align-middle"
+                                  title={p.calc?.equity_negative
+                                    ? 'Дългът надхвърля цената — няма собствен капитал в имота'
+                                    : 'Няма заведена цена — мери се срещу пазарната стойност'}
+                                >
+                                  {p.calc?.equity_negative ? 'дълг > цена' : 'пазарна'}
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-2 pr-3 text-right text-gray-600">{fmt(p.rent_monthly)} €</td>
+                            <td className={`py-2 pr-3 text-right ${p.net_cash_flow < 0 ? 'text-red-600 font-semibold' : ''}`}>
+                              {fmt(p.net_cash_flow)} €
+                            </td>
+                            <td className={`py-2 pr-3 text-right font-bold ${yieldColor(p.cash_yield_on_invested)}`}>
+                              {(p.cash_yield_on_invested * 100).toFixed(2)}%
+                              {p.calc?.equity_extracted && (
+                                <span
+                                  className="ml-1 text-[10px] font-normal text-sky-700 bg-sky-50 border border-sky-200 rounded px-1 py-0.5 align-middle"
+                                  title="Кредитът е изял почти целия вложен капитал. Процентът е върху остатъка и не е сравним с имот, в който парите още стоят."
+                                >
+                                  изтеглен
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-2 text-right font-semibold text-emerald-700">
+                              {p.total_return != null ? (p.total_return * 100).toFixed(2) + '%' : '—'}
+                            </td>
+                          </tr>
+                          {openCalc === p.id && p.calc && (
+                            <tr className="bg-gray-50 border-b border-gray-200">
+                              <td colSpan={6} className="py-3 px-4">
+                                <CalcBreakdown c={p.calc} p={p} />
+                              </td>
+                            </tr>
+                          )}
+                        </React.Fragment>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {blocked.length > 0 && (
+                  <div className="mt-4 border-t border-gray-200 pt-3">
+                    <div className="text-sm font-semibold text-gray-600 mb-2">
+                      Без изчислима доходност — {blocked.length} имота
+                    </div>
+                    <div className="space-y-1">
+                      {blocked.map(p => (
+                        <div key={p.id} className="flex justify-between items-baseline text-xs text-gray-600 gap-3">
+                          <span className="truncate">
+                            <span className="text-gray-400 mr-1">#{p.id}</span>{p['адрес']}
+                          </span>
+                          <span className="flex-shrink-0 text-gray-400">
+                            наем {fmt(p.rent_monthly)} € · {BLOCKED[p.yield_blocked] || '—'}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                    {pf.missing_cost_basis > 0 && (
+                      <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-3">
+                        ⚠️ {pf.missing_cost_basis} активни имота нямат заведена покупна цена
+                        ({fmt(pf.missing_cost_basis_rent)} € годишен наем). Въведи я в Портфолио,
+                        за да влязат в класацията и в общата доходност.
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )
+          })()}
         </div>
       )}
 

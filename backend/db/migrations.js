@@ -53,6 +53,19 @@ function runTenantMigrations(db) {
   try { db.exec("ALTER TABLE properties ADD COLUMN invoice_enabled INTEGER DEFAULT 0"); console.log('Migration: added invoice_enabled'); } catch(_) {}
   try { db.exec("ALTER TABLE properties ADD COLUMN invoice_recipient TEXT"); console.log('Migration: added invoice_recipient'); } catch(_) {}
   try { db.exec("ALTER TABLE properties ADD COLUMN vat_exempt INTEGER DEFAULT 0"); console.log('Migration: added properties.vat_exempt'); } catch(_) {}
+  // Какво означава properties.покупна за този имот — определя знаменателя на доходността.
+  //   'total'  (по подразбиране) — пълна цена на придобиване; собственият капитал е цена − дълг
+  //   'equity' — вече е собственото участие (капаро + ремонт + такси); дългът НЕ се вади
+  //   'market' — няма заведена цена (наследен); базата е пазарната стойност
+  // Новите редове тръгват от 'total' — цена се въвежда цена. Вече заведените
+  // се фиксират на 'equity', защото досега метриките ги третираха така; смяната
+  // става съзнателно, заедно със сверка на самите цени, а не при деплой.
+  try {
+    db.exec("ALTER TABLE properties ADD COLUMN cost_basis_kind TEXT DEFAULT 'total'");
+    db.exec("UPDATE properties SET cost_basis_kind = 'equity'");
+    console.log('Migration: added properties.cost_basis_kind');
+  } catch(_) {}
+  db.exec("UPDATE properties SET cost_basis_kind = 'total' WHERE cost_basis_kind IS NULL OR cost_basis_kind = ''");
   try { db.exec("ALTER TABLE properties ADD COLUMN stripe_enabled INTEGER DEFAULT 1"); console.log('Migration: added properties.stripe_enabled'); } catch(_) {}
   db.exec("UPDATE properties SET stripe_enabled = 1 WHERE stripe_enabled IS NULL");
 

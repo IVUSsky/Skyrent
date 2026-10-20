@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS properties (
   покупна REAL DEFAULT 0,
   ремонт REAL DEFAULT 0,
   market_val REAL,
+  cost_basis_kind TEXT DEFAULT 'total',
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );

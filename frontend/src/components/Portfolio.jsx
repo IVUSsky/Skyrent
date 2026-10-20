@@ -154,6 +154,7 @@ export default function Portfolio({ API, role }) {
       площ: prop['площ'] || '',
       покупна: prop['покупна'] || 0,
       ремонт: prop['ремонт'] || 0,
+      cost_basis_kind: prop.cost_basis_kind || 'total',
       owner_id: prop['owner_id'] || '',
       абонат_ток:  prop['абонат_ток']  || '',
       абонат_вода: prop['абонат_вода'] || '',
@@ -210,6 +211,7 @@ export default function Portfolio({ API, role }) {
         площ: editForm.площ !== '' ? Number(editForm.площ) : null,
         покупна: editForm.покупна !== '' ? Number(editForm.покупна) : null,
         ремонт: editForm.ремонт !== '' ? Number(editForm.ремонт) : null,
+        cost_basis_kind: editForm.cost_basis_kind || 'total',
         абонат_ток:  editForm.абонат_ток  || null,
         абонат_вода: editForm.абонат_вода || null,
         абонат_тец:  editForm.абонат_тец  || null,
@@ -850,6 +852,26 @@ export default function Portfolio({ API, role }) {
                   step="1"
                   placeholder="Оставете празно за използване на покупна цена"
                 />
+              </div>
+              )}
+              {!broker && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Какво значи покупната цена
+                </label>
+                <select
+                  value={editForm.cost_basis_kind || 'total'}
+                  onChange={e => setEditForm(f => ({ ...f, cost_basis_kind: e.target.value }))}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="total">Пълна цена на придобиване</option>
+                  <option value="equity">Само собственото участие</option>
+                  <option value="market">Няма цена — наследен имот</option>
+                </select>
+                <p className="text-xs text-gray-500 mt-1">
+                  Определя знаменателя на доходността в Анализ. При „пълна цена" дялът
+                  от кредита се вади; при „собствено участие" — не.
+                </p>
               </div>
               )}
               <div>
