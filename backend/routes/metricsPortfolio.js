@@ -408,26 +408,31 @@ module.exports = function(db) {
           (p.net_cash_flow + p.principal_paydown_12m + p.appreciation_annual) * 100
         ) / 100;
 
-        // ВЛОЖЕНИ СРЕДСТВА = собствен капитал, не пълната цена.
-        // net_cash_flow е СЛЕД вноската по кредита, затова знаменателят трябва
-        // да е парите от джоба: цена − дълг. Делението на пълната цена наказва
-        // двойно всеки кредитиран имот и прави ливъриджа да изглежда вреден.
-        p.cost_total = p.invested;              // покупна + ремонт (или капаро при зелено)
-        p.equity_invested = Math.round((p.cost_total - p.allocated_debt) * 100) / 100;
-        p.invested = p.equity_invested;         // „вложени средства" = собственият капитал
+        // ⚠️ properties.покупна съдържа СОБСТВЕНОТО УЧАСТИЕ (капаро + брокер +
+        // такси), НЕ пълната цена на придобиване — потвърдено от собственика
+        // 20.10.2026 за всички кредитирани имоти. Затова дългът НЕ се вади:
+        // заведената сума вече е парите от джоба.
+        p.equity_invested = p.invested;
 
-        // Доходност се смята само при реално течащ наем И смислен знаменател.
+        // Имот без вложен капитал (наследен или придобит без плащане) се мери
+        // срещу пазарната стойност — алтернативната цена на това да го държиш,
+        // вместо да го продадеш и вложиш парите другаде.
+        p.basis_kind = p.equity_invested > 0 ? 'invested'
+          : (p.asset_val > 0 ? 'market' : null);
+        const basis = p.basis_kind === 'invested' ? p.equity_invested
+          : p.basis_kind === 'market' ? p.asset_val
+          : 0;
+        p.yield_basis = Math.round(basis * 100) / 100;
+
         p.yield_blocked = !p.active
           ? (p.pre_construction ? 'pre_construction' : 'not_active')
-          : p.cost_total <= 0 ? 'no_cost_basis'
-          : p.equity_invested <= 0 ? 'negative_equity'
-          : null;
+          : basis > 0 ? null : 'no_basis';
         const yieldable = p.yield_blocked == null;
         p.total_return = yieldable
-          ? Math.round((p.total_return_annual / p.equity_invested) * 10000) / 10000
+          ? Math.round((p.total_return_annual / basis) * 10000) / 10000
           : null;
         p.cash_yield_on_invested = yieldable
-          ? Math.round((p.net_cash_flow / p.equity_invested) * 10000) / 10000
+          ? Math.round((p.net_cash_flow / basis) * 10000) / 10000
           : null;
 
         // Механизъм на изчислението — всяка стъпка, с входа ѝ, за да може
@@ -439,11 +444,13 @@ module.exports = function(db) {
           rent_annual: p.rent_annual,
           opex_annual: p.opex_annual_total,
           noi_annual: p.noi_annual,
-          покупна: Math.round(((p.cost_total - renoTotal({ id: p.id }, renoMap)) || 0) * 100) / 100,
+          покупна: Math.round(((p.equity_invested - renoTotal({ id: p.id }, renoMap)) || 0) * 100) / 100,
           ремонт: Math.round(renoTotal({ id: p.id }, renoMap) * 100) / 100,
-          cost_total: p.cost_total,
           allocated_debt: p.allocated_debt,
           equity_invested: p.equity_invested,
+          basis_kind: p.basis_kind,
+          yield_basis: p.yield_basis,
+          asset_val: p.asset_val,
           debt_service_annual: p.allocated_debt_service,
           interest_12m: p.interest_12m,
           principal_12m: p.principal_paydown_12m,
@@ -522,9 +529,10 @@ module.exports = function(db) {
       // --- Вложени средства и обща доходност на ниво портфейл ---
       // На ниво портфейл отрицателните капитали по отделни имоти се компенсират
       // коректно (дългът е един и същ пул), затова сумираме цена и дълг поотделно.
-      const costTotalAll = propRows.reduce((s, p) => s + (p.cost_total || 0), 0);
+      const costTotalAll = propRows.reduce((s, p) => s + (p.equity_invested || 0), 0);
       const investedPreCon = propRows.filter(p => p.pre_construction)
-        .reduce((s, p) => s + (p.cost_total || 0), 0);
+        .reduce((s, p) => s + (p.equity_invested || 0), 0);
+      const inheritedRows = propRows.filter(p => p.active && p.basis_kind === 'market');
       const portfolioAppreciation = portfolioAssetBase * apprPct;
       const portfolioNetCf = portfolioNoi - portfolioDebtServiceTotal;
       const portfolioTotalReturnAnnual = portfolioNetCf + portfolioPrincipal12m + portfolioAppreciation;
@@ -533,7 +541,10 @@ module.exports = function(db) {
       // знаменател (заведена цена и положителен собствен капитал). Иначе
       // числителят включва кеша на имоти, чийто капитал липсва от знаменателя,
       // и процентът излиза фалшиво висок.
-      const covered = propRows.filter(p => p.yield_blocked == null);
+      // Процентът на портфейла се смята само върху имотите с реално вложен
+      // капитал. Наследените имат пазарна база — събирането на двете в едно
+      // число смесва „колко изкарвам от вложеното" с „колко струва да държа".
+      const covered = propRows.filter(p => p.yield_blocked == null && p.basis_kind === 'invested');
       const coveredInvested = covered.reduce((s, p) => s + p.equity_invested, 0);
       const coveredCf = covered.reduce((s, p) => s + p.net_cash_flow, 0);
       const coveredTotalReturn = covered.reduce((s, p) => s + p.total_return_annual, 0);
@@ -643,15 +654,21 @@ module.exports = function(db) {
         },
         // Активни имоти без заведена покупна цена — доходността им не може да
         // се смята и те изкривяват всяка класация, ако се подминат мълчаливо.
-        missing_cost_basis: propRows.filter(p => p.yield_blocked === 'no_cost_basis').length,
+        missing_cost_basis: propRows.filter(p => p.yield_blocked === 'no_basis').length,
         missing_cost_basis_rent: Math.round(
-          propRows.filter(p => p.yield_blocked === 'no_cost_basis')
+          propRows.filter(p => p.yield_blocked === 'no_basis')
             .reduce((s, p) => s + p.rent_annual, 0) * 100
         ) / 100,
-        // Дългът надвишава заведената цена — или cash-out рефинансиране, или
-        // покупната цена е занижена. И в двата случая доходността е безсмислена.
-        negative_equity_count: propRows.filter(p => p.yield_blocked === 'negative_equity').length,
+        negative_equity_count: 0,
         cost_total_all: Math.round(costTotalAll * 100) / 100,
+        // Имоти без вложен капитал (наследени) — мерят се срещу пазарната
+        // стойност и се показват отделно, за да не разреждат доходността.
+        inherited: {
+          count: inheritedRows.length,
+          market_value: Math.round(inheritedRows.reduce((s, p) => s + p.asset_val, 0) * 100) / 100,
+          net_cash_flow: Math.round(inheritedRows.reduce((s, p) => s + p.net_cash_flow, 0) * 100) / 100,
+          rent_annual: Math.round(inheritedRows.reduce((s, p) => s + p.rent_annual, 0) * 100) / 100,
+        },
         // --- ДДС режим ---
         weighted_rate: Math.round(weightedRate * 100) / 100,
         vat_liable_count: propRows.filter(p => !p.vat_exempt && p.rent_monthly_gross > 0).length,

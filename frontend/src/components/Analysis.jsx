@@ -69,15 +69,33 @@ function CalcBreakdown({ c, p }) {
       </div>
 
       <div>
-        <div className="text-xs font-bold text-gray-500 uppercase mb-1">2 · Вложен капитал</div>
-        <Row label="Покупна цена" value={`${e(c.покупна)} €`} />
-        <Row label="+ ремонт" value={`${e(c.ремонт)} €`} />
-        <Row label="Цена на придобиване" value={`${e(c.cost_total)} €`} muted />
-        <Row label="− дял от кредита" value={`−${e(c.allocated_debt)} €`} muted />
-        <Row label="Вложени средства" value={`${e(c.equity_invested)} €`} bold />
-        <p className="text-xs text-gray-400 mt-1.5 leading-snug">
-          Кешът е след вноската, затова знаменателят е собственият капитал, не цялата цена.
-        </p>
+        <div className="text-xs font-bold text-gray-500 uppercase mb-1">
+          2 · {c.basis_kind === 'market' ? 'База за доходност' : 'Вложен капитал'}
+        </div>
+        {c.basis_kind === 'market' ? (
+          <>
+            <Row label="Вложен капитал" value="0 €" muted note="наследен" />
+            <Row label="Пазарна стойност" value={`${e(c.asset_val)} €`} />
+            <Row label="База за доходност" value={`${e(c.yield_basis)} €`} bold />
+            <p className="text-xs text-gray-400 mt-1.5 leading-snug">
+              Няма вложени пари, затова се мери срещу пазарната стойност — колко
+              струва да го държиш, вместо да го продадеш и вложиш парите другаде.
+            </p>
+          </>
+        ) : (
+          <>
+            <Row label="Собствено участие" value={`${e(c.покупна)} €`} />
+            <Row label="+ ремонт" value={`${e(c.ремонт)} €`} />
+            <Row label="Вложени средства" value={`${e(c.equity_invested)} €`} bold />
+            {c.allocated_debt > 0 && (
+              <Row label="Дял от кредита (справка)" value={`${e(c.allocated_debt)} €`} muted />
+            )}
+            <p className="text-xs text-gray-400 mt-1.5 leading-snug">
+              „Покупна" носи собственото участие — капаро, ремонт, брокер и такси.
+              Дългът не се вади, защото вече не е вътре.
+            </p>
+          </>
+        )}
       </div>
 
       <div>
@@ -653,8 +671,7 @@ export default function Analysis({ API }) {
           {/* Доходност върху вложеното — по имот */}
           {pfProps.length > 0 && (() => {
             const BLOCKED = {
-              no_cost_basis: 'няма заведена покупна цена',
-              negative_equity: 'дългът надвишава заведената цена',
+              no_basis: 'няма нито вложено, нито пазарна оценка',
               pre_construction: 'на зелено — наемът е планов',
               not_active: 'неактивен',
             }
@@ -674,15 +691,32 @@ export default function Analysis({ API }) {
               <div className="bg-white border border-gray-200 rounded-xl p-4 mt-4">
                 <div className="font-semibold text-gray-700 mb-1">Доходност върху вложеното — по имот</div>
                 <p className="text-xs text-gray-500 mb-3">
-                  Кеш доходността е нетният поток след вноската, върху реално вложеното.
-                  Общата добавя погасената главница и поскъпването.
+                  Кеш доходността е нетният поток след вноската, върху базата.
+                  Общата добавя погасената главница и поскъпването. Кликни ред, за да видиш сметката.
+                  {pf.inherited && pf.inherited.count > 0 && (
+                    <> За наследените имоти базата е <strong>пазарната стойност</strong> — вложен капитал няма.</>
+                  )}
                 </p>
+                {pf.inherited && pf.inherited.count > 0 && (
+                  <div className="text-xs bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 mb-3 flex flex-wrap gap-x-4 gap-y-1">
+                    <span className="font-semibold text-gray-700">
+                      Наследени: {pf.inherited.count} имота
+                    </span>
+                    <span className="text-gray-600">пазарна стойност {fmt(pf.inherited.market_value)} €</span>
+                    <span className="text-gray-600">кеш поток {fmt(pf.inherited.net_cash_flow)} €/год</span>
+                    <span className="font-semibold text-gray-700">
+                      {pf.inherited.market_value > 0
+                        ? (pf.inherited.net_cash_flow / pf.inherited.market_value * 100).toFixed(2)
+                        : '—'}% върху пазарната
+                    </span>
+                  </div>
+                )}
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="text-left text-gray-500 border-b border-gray-200">
                         <th className="py-2 pr-3 font-semibold">Имот</th>
-                        <th className="py-2 pr-3 font-semibold text-right">Вложено</th>
+                        <th className="py-2 pr-3 font-semibold text-right">База</th>
                         <th className="py-2 pr-3 font-semibold text-right">Наем нето/мес</th>
                         <th className="py-2 pr-3 font-semibold text-right">Кеш поток/год</th>
                         <th className="py-2 pr-3 font-semibold text-right">Кеш дох.</th>
@@ -702,7 +736,14 @@ export default function Analysis({ API }) {
                               </span>
                               {p['адрес']}
                             </td>
-                            <td className="py-2 pr-3 text-right">{fmt(p.invested)} €</td>
+                            <td className="py-2 pr-3 text-right">
+                              {fmt(p.yield_basis)} €
+                              {p.basis_kind === 'market' && (
+                                <span className="ml-1 text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-1 py-0.5 align-middle">
+                                  пазарна
+                                </span>
+                              )}
+                            </td>
                             <td className="py-2 pr-3 text-right text-gray-600">{fmt(p.rent_monthly)} €</td>
                             <td className={`py-2 pr-3 text-right ${p.net_cash_flow < 0 ? 'text-red-600 font-semibold' : ''}`}>
                               {fmt(p.net_cash_flow)} €
