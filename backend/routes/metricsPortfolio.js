@@ -32,6 +32,13 @@ const netRent = (p) => {
   return p.vat_exempt ? gross : gross / VAT_RATE;
 };
 
+// Какво означава properties.покупна за конкретния имот. Без това знаменателят
+// на доходността е различно нещо за различните имоти и класацията е безсмислена.
+//   'total'  — пълна цена на придобиване → собствен капитал = цена + ремонт − дълг
+//   'equity' — вече е собственото участие → дългът НЕ се вади втори път
+//   'market' — няма заведена цена (наследен) → базата е пазарната стойност
+const COST_BASIS_KINDS = new Set(['total', 'equity', 'market']);
+
 // Оставащи месеци, изведени от остатък/вноска/лихва. При гратисен или усвояван
 // кредит вноската още не е анюитетна и резултатът е завишен — затова таванът.
 const remainingMonths = (balance, payment, annualPct) => {
@@ -263,6 +270,9 @@ module.exports = function(db) {
           : costBasis;
         return {
           vat_exempt: p.vat_exempt ? 1 : 0,
+          cost_basis_kind: COST_BASIS_KINDS.has(p.cost_basis_kind)
+            ? p.cost_basis_kind
+            : 'total',
           rent_monthly_gross: Math.round(rentGross * 100) / 100,
           invested: Math.round(invested * 100) / 100,
           pre_construction: preCon,
@@ -408,15 +418,30 @@ module.exports = function(db) {
           (p.net_cash_flow + p.principal_paydown_12m + p.appreciation_annual) * 100
         ) / 100;
 
-        // ⚠️ properties.покупна съдържа СОБСТВЕНОТО УЧАСТИЕ (капаро + брокер +
-        // такси), НЕ пълната цена на придобиване — потвърдено от собственика
-        // 20.10.2026 за всички кредитирани имоти. Затова дългът НЕ се вади:
-        // заведената сума вече е парите от джоба.
-        p.equity_invested = p.invested;
+        // Собствен капитал = парите от джоба. Какво значи заведената сума се
+        // определя от cost_basis_kind — различните имоти са въвеждани различно.
+        if (p.cost_basis_kind === 'market') {
+          p.equity_invested = 0;
+        } else if (p.cost_basis_kind === 'equity') {
+          // Сумата вече е собственото участие → дългът НЕ се вади втори път.
+          p.equity_invested = p.invested;
+        } else {
+          // Пълна цена → парите от джоба са цената минус поетия дълг.
+          p.equity_invested = Math.round((p.invested - p.allocated_debt) * 100) / 100;
+        }
+        // Дългът надхвърля цената → в имота няма собствен капитал. Случва се при
+        // кръстосано обезпечение, където имотът носи чужд дял от общ кредит.
+        p.equity_negative = p.cost_basis_kind === 'total' && p.invested > 0
+          && p.equity_invested <= 0;
+        // Рефинансиран имот: дългът е изял почти целия вложен капитал. Кеш
+        // доходността върху остатъка клони към безкрайност и не е сравнима с
+        // тази на имот, в който парите още стоят. Числото остава, но се маркира.
+        p.equity_extracted = p.equity_invested > 0 && p.asset_val > 0
+          && p.equity_invested < p.asset_val * 0.10;
 
-        // Имот без вложен капитал (наследен или придобит без плащане) се мери
-        // срещу пазарната стойност — алтернативната цена на това да го държиш,
-        // вместо да го продадеш и вложиш парите другаде.
+        // Имот без вложен капитал (наследен или изцяло задлъжнял) се мери срещу
+        // пазарната стойност — алтернативната цена на това да го държиш, вместо
+        // да го продадеш и вложиш парите другаде.
         p.basis_kind = p.equity_invested > 0 ? 'invested'
           : (p.asset_val > 0 ? 'market' : null);
         const basis = p.basis_kind === 'invested' ? p.equity_invested
@@ -444,10 +469,14 @@ module.exports = function(db) {
           rent_annual: p.rent_annual,
           opex_annual: p.opex_annual_total,
           noi_annual: p.noi_annual,
-          покупна: Math.round(((p.equity_invested - renoTotal({ id: p.id }, renoMap)) || 0) * 100) / 100,
+          покупна: Math.round((p.invested - renoTotal({ id: p.id }, renoMap)) * 100) / 100,
           ремонт: Math.round(renoTotal({ id: p.id }, renoMap) * 100) / 100,
+          cost_recorded: p.invested,
+          cost_basis_kind: p.cost_basis_kind,
           allocated_debt: p.allocated_debt,
           equity_invested: p.equity_invested,
+          equity_negative: p.equity_negative,
+          equity_extracted: p.equity_extracted,
           basis_kind: p.basis_kind,
           yield_basis: p.yield_basis,
           asset_val: p.asset_val,
@@ -532,7 +561,11 @@ module.exports = function(db) {
       const costTotalAll = propRows.reduce((s, p) => s + (p.equity_invested || 0), 0);
       const investedPreCon = propRows.filter(p => p.pre_construction)
         .reduce((s, p) => s + (p.equity_invested || 0), 0);
-      const inheritedRows = propRows.filter(p => p.active && p.basis_kind === 'market');
+      // Мерени срещу пазарна стойност по две различни причини — не ги смесваме.
+      const inheritedRows = propRows.filter(p => p.active && p.basis_kind === 'market'
+        && p.cost_basis_kind === 'market');
+      const noEquityRows = propRows.filter(p => p.active && p.basis_kind === 'market'
+        && p.cost_basis_kind !== 'market');
       const portfolioAppreciation = portfolioAssetBase * apprPct;
       const portfolioNetCf = portfolioNoi - portfolioDebtServiceTotal;
       const portfolioTotalReturnAnnual = portfolioNetCf + portfolioPrincipal12m + portfolioAppreciation;
@@ -659,7 +692,7 @@ module.exports = function(db) {
           propRows.filter(p => p.yield_blocked === 'no_basis')
             .reduce((s, p) => s + p.rent_annual, 0) * 100
         ) / 100,
-        negative_equity_count: 0,
+        negative_equity_count: noEquityRows.length,
         cost_total_all: Math.round(costTotalAll * 100) / 100,
         // Имоти без вложен капитал (наследени) — мерят се срещу пазарната
         // стойност и се показват отделно, за да не разреждат доходността.
@@ -669,6 +702,16 @@ module.exports = function(db) {
           net_cash_flow: Math.round(inheritedRows.reduce((s, p) => s + p.net_cash_flow, 0) * 100) / 100,
           rent_annual: Math.round(inheritedRows.reduce((s, p) => s + p.rent_annual, 0) * 100) / 100,
         },
+        // Купени, но дългът е надхвърлил цената — също се мерят срещу пазара,
+        // но по съвсем друга причина от наследените.
+        no_equity: {
+          count: noEquityRows.length,
+          market_value: Math.round(noEquityRows.reduce((s, p) => s + p.asset_val, 0) * 100) / 100,
+          net_cash_flow: Math.round(noEquityRows.reduce((s, p) => s + p.net_cash_flow, 0) * 100) / 100,
+          ids: noEquityRows.map(p => p.id),
+        },
+        // Рефинансирани — капиталът е изтеглен, процентът им не е сравним.
+        equity_extracted_ids: propRows.filter(p => p.active && p.equity_extracted).map(p => p.id),
         // --- ДДС режим ---
         weighted_rate: Math.round(weightedRate * 100) / 100,
         vat_liable_count: propRows.filter(p => !p.vat_exempt && p.rent_monthly_gross > 0).length,

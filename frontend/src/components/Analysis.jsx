@@ -74,15 +74,25 @@ function CalcBreakdown({ c, p }) {
         </div>
         {c.basis_kind === 'market' ? (
           <>
-            <Row label="Вложен капитал" value="0 €" muted note="наследен" />
+            {c.cost_basis_kind === 'market' ? (
+              <Row label="Вложен капитал" value="0 €" muted note="наследен" />
+            ) : (
+              <>
+                <Row label="Пълна цена" value={`${e(c.покупна)} €`} muted />
+                <Row label="+ ремонт" value={`${e(c.ремонт)} €`} muted />
+                <Row label="− дял от кредита" value={`−${e(c.allocated_debt)} €`} muted />
+                <Row label="Собствен капитал" value={`${e(c.equity_invested)} €`} muted />
+              </>
+            )}
             <Row label="Пазарна стойност" value={`${e(c.asset_val)} €`} />
             <Row label="База за доходност" value={`${e(c.yield_basis)} €`} bold />
             <p className="text-xs text-gray-400 mt-1.5 leading-snug">
-              Няма вложени пари, затова се мери срещу пазарната стойност — колко
-              струва да го държиш, вместо да го продадеш и вложиш парите другаде.
+              {c.equity_negative
+                ? 'Дългът надхвърля цената — в имота няма собствен капитал, затова се мери срещу пазарната стойност. Обикновено значи, че носи дял от кредит, обезпечен и с други имоти.'
+                : 'Няма вложени пари, затова се мери срещу пазарната стойност — колко струва да го държиш, вместо да го продадеш и вложиш парите другаде.'}
             </p>
           </>
-        ) : (
+        ) : c.cost_basis_kind === 'equity' ? (
           <>
             <Row label="Собствено участие" value={`${e(c.покупна)} €`} />
             <Row label="+ ремонт" value={`${e(c.ремонт)} €`} />
@@ -91,8 +101,20 @@ function CalcBreakdown({ c, p }) {
               <Row label="Дял от кредита (справка)" value={`${e(c.allocated_debt)} €`} muted />
             )}
             <p className="text-xs text-gray-400 mt-1.5 leading-snug">
-              „Покупна" носи собственото участие — капаро, ремонт, брокер и такси.
-              Дългът не се вади, защото вече не е вътре.
+              Заведената сума е собственото участие — капаро, ремонт, брокер и
+              такси. Дългът не се вади, защото вече не е вътре.
+            </p>
+          </>
+        ) : (
+          <>
+            <Row label="Покупна цена" value={`${e(c.покупна)} €`} />
+            <Row label="+ ремонт" value={`${e(c.ремонт)} €`} />
+            <Row label="Цена на придобиване" value={`${e(c.cost_recorded)} €`} muted />
+            <Row label="− дял от кредита" value={`−${e(c.allocated_debt)} €`} muted />
+            <Row label="Вложени средства" value={`${e(c.equity_invested)} €`} bold />
+            <p className="text-xs text-gray-400 mt-1.5 leading-snug">
+              Заведената сума е пълната цена, затова поетият дълг се вади — от
+              джоба са излезли само останалите пари.
             </p>
           </>
         )}
@@ -711,6 +733,13 @@ export default function Analysis({ API }) {
                     </span>
                   </div>
                 )}
+                {pf.no_equity && pf.no_equity.count > 0 && (
+                  <div className="text-xs bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3 text-amber-900">
+                    <strong>{pf.no_equity.count} имота са с дълг над цената</strong> — носят дял
+                    от кредит, обезпечен и с други имоти. Нямат собствен капитал, затова базата им
+                    е пазарната стойност ({fmt(pf.no_equity.market_value)} €).
+                  </div>
+                )}
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
@@ -739,8 +768,13 @@ export default function Analysis({ API }) {
                             <td className="py-2 pr-3 text-right">
                               {fmt(p.yield_basis)} €
                               {p.basis_kind === 'market' && (
-                                <span className="ml-1 text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-1 py-0.5 align-middle">
-                                  пазарна
+                                <span
+                                  className="ml-1 text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-1 py-0.5 align-middle"
+                                  title={p.calc?.equity_negative
+                                    ? 'Дългът надхвърля цената — няма собствен капитал в имота'
+                                    : 'Няма заведена цена — мери се срещу пазарната стойност'}
+                                >
+                                  {p.calc?.equity_negative ? 'дълг > цена' : 'пазарна'}
                                 </span>
                               )}
                             </td>
@@ -750,6 +784,14 @@ export default function Analysis({ API }) {
                             </td>
                             <td className={`py-2 pr-3 text-right font-bold ${yieldColor(p.cash_yield_on_invested)}`}>
                               {(p.cash_yield_on_invested * 100).toFixed(2)}%
+                              {p.calc?.equity_extracted && (
+                                <span
+                                  className="ml-1 text-[10px] font-normal text-sky-700 bg-sky-50 border border-sky-200 rounded px-1 py-0.5 align-middle"
+                                  title="Кредитът е изял почти целия вложен капитал. Процентът е върху остатъка и не е сравним с имот, в който парите още стоят."
+                                >
+                                  изтеглен
+                                </span>
+                              )}
                             </td>
                             <td className="py-2 text-right font-semibold text-emerald-700">
                               {p.total_return != null ? (p.total_return * 100).toFixed(2) + '%' : '—'}

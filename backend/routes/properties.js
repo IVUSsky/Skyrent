@@ -674,15 +674,21 @@ module.exports = function(db) {
       const абонат_вход = body.абонат_вход !== undefined ? body.абонат_вход : current.абонат_вход;
       const абонат_газ  = body.абонат_газ  !== undefined ? body.абонат_газ  : current.абонат_газ;
       const owner_id   = body.owner_id   !== undefined ? (body.owner_id ? Number(body.owner_id) : null) : current.owner_id;
+      // Какво означава „покупна" за този имот — вж. metricsPortfolio.COST_BASIS_KINDS.
+      const cost_basis_kind = body.cost_basis_kind !== undefined
+        && ['total', 'equity', 'market'].includes(body.cost_basis_kind)
+        ? body.cost_basis_kind
+        : (current.cost_basis_kind || 'total');
 
       db.prepare(`
         UPDATE properties
         SET адрес=?, район=?, наем=?, наемател=?, статус=?, market_val=?, тип=?, площ=?, покупна=?, ремонт=?,
             email=?, телефон=?, invoice_enabled=?, invoice_recipient=?, vat_exempt=?, stripe_enabled=?,
             абонат_ток=?, абонат_вода=?, абонат_тец=?, абонат_вход=?, абонат_газ=?, owner_id=?,
+            cost_basis_kind=?,
             updated_at=CURRENT_TIMESTAMP
         WHERE id=?
-      `).run(адрес, район, наем, наемател, статус, market_val, тип, площ, покупна, ремонт, email, телефон, invoice_enabled, invoice_recipient, vat_exempt, stripe_enabled, абонат_ток, абонат_вода, абонат_тец, абонат_вход, абонат_газ, owner_id, id);
+      `).run(адрес, район, наем, наемател, статус, market_val, тип, площ, покупна, ремонт, email, телефон, invoice_enabled, invoice_recipient, vat_exempt, stripe_enabled, абонат_ток, абонат_вода, абонат_тец, абонат_вход, абонат_газ, owner_id, cost_basis_kind, id);
 
       const updated = db.prepare('SELECT * FROM properties WHERE id = ?').get(id);
       console.log('Saved тип:', updated.тип, '| покупна:', updated.покупна, '| ремонт:', updated.ремонт);
