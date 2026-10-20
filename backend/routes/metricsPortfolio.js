@@ -281,6 +281,11 @@ module.exports = function(db) {
           reno_vat_recovered: p.reno_vat_recovered ? 1 : 0,
           покупна_raw: Math.round((p['покупна'] || 0) * 100) / 100,
           ремонт_raw: Math.round(renoTotal(p, renoMap) * 100) / 100,
+          // Нето сумите, сметнати веднъж тук. По-рано разбивката ги пресмяташе
+          // наново с renoTotal({ id }), което изпуска колоната „ремонт" — така
+          // „Покупна цена" показваше цена + ремонт, а „ремонт" само фактурите.
+          покупна_net: Math.round(purchaseNet * 100) / 100,
+          ремонт_net: Math.round(renoNet * 100) / 100,
           cost_basis_kind: COST_BASIS_KINDS.has(p.cost_basis_kind)
             ? p.cost_basis_kind
             : 'total',
@@ -480,8 +485,11 @@ module.exports = function(db) {
           rent_annual: p.rent_annual,
           opex_annual: p.opex_annual_total,
           noi_annual: p.noi_annual,
-          покупна: Math.round((p.invested - renoTotal({ id: p.id }, renoMap) / (p.reno_vat_recovered ? VAT_RATE : 1)) * 100) / 100,
-          ремонт: Math.round((renoTotal({ id: p.id }, renoMap) / (p.reno_vat_recovered ? VAT_RATE : 1)) * 100) / 100,
+          // При pre-construction „покупна" е платеното досега, не цялата цена.
+          покупна: p.pre_construction
+            ? Math.round((p.invested - p['ремонт_net']) * 100) / 100
+            : p['покупна_net'],
+          ремонт: p['ремонт_net'],
           покупна_raw: p['покупна_raw'],
           ремонт_raw: p['ремонт_raw'],
           cost_vat_recovered: p.cost_vat_recovered,
