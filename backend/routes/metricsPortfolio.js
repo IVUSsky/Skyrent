@@ -1,6 +1,7 @@
 const express = require('express');
 const { renovationByProperty, renoTotal } = require('../lib/renovationCosts');
 const { acquisitionCost, acquisitionPct } = require('../lib/acquisitionCost');
+const { allocateCommonOpex, opexWeight } = require('../lib/opexAllocation');
 
 const BGN_RATE = 1.95583;
 const toEur = (amount, currency) => {
@@ -331,10 +332,12 @@ module.exports = function(db) {
         };
       });
 
-      const rentTotal = propRows.reduce((s, p) => s + p.rent_annual, 0);
+      // Общите разходи падат само върху жилищата. Гаражите, паркоместата,
+      // мазетата и складовете нямат какво да генерира счетоводство и поддръжка.
+      const allocatedCommon = allocateCommonOpex(propRows, opexCommon);
       for (const p of propRows) {
-        const share = rentTotal > 0 ? p.rent_annual / rentTotal : 0;
-        p.opex_annual_allocated = Math.round(opexCommon * share * 100) / 100;
+        p.opex_weight = opexWeight(p);
+        p.opex_annual_allocated = allocatedCommon.get(p.id) || 0;
         p.opex_annual_total = Math.round((p.opex_annual_direct + p.opex_annual_allocated) * 100) / 100;
         p.opex_ratio = p.rent_annual > 0
           ? Math.round((p.opex_annual_total / p.rent_annual) * 10000) / 10000
@@ -499,6 +502,9 @@ module.exports = function(db) {
           rent_net_monthly: Math.round(p.rent_monthly * 100) / 100,
           rent_annual: p.rent_annual,
           opex_annual: p.opex_annual_total,
+          opex_annual_direct: p.opex_annual_direct,
+          opex_annual_allocated: p.opex_annual_allocated,
+          opex_weight: p.opex_weight,
           noi_annual: p.noi_annual,
           // При pre-construction „покупна" е платеното досега, не цялата цена.
           покупна: p.pre_construction
