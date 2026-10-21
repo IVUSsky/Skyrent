@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS properties (
   cost_vat_recovered INTEGER DEFAULT 0,
   reno_vat_recovered INTEGER DEFAULT 0,
   acquisition_costs REAL,
+  opex_share REAL,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );

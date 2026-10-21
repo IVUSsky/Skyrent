@@ -158,6 +158,7 @@ export default function Portfolio({ API, role }) {
       cost_vat_recovered: !!prop.cost_vat_recovered,
       reno_vat_recovered: !!prop.reno_vat_recovered,
       acquisition_costs: prop.acquisition_costs ?? '',
+      opex_share: prop.opex_share ?? '',
       lifecycle_stage: prop.lifecycle_stage || 'active',
       lifecycle_eta_date: prop.lifecycle_eta_date || '',
       purchase_paid_amount: prop.purchase_paid_amount ?? '',
@@ -223,6 +224,7 @@ export default function Portfolio({ API, role }) {
         cost_vat_recovered: editForm.cost_vat_recovered ? 1 : 0,
         reno_vat_recovered: editForm.reno_vat_recovered ? 1 : 0,
         acquisition_costs: editForm.acquisition_costs !== '' ? Number(editForm.acquisition_costs) : null,
+        opex_share: editForm.opex_share !== '' ? Number(editForm.opex_share) : null,
         lifecycle_stage: editForm.lifecycle_stage || 'active',
         lifecycle_eta_date: editForm.lifecycle_eta_date || null,
         purchase_paid_amount: editForm.purchase_paid_amount !== '' ? Number(editForm.purchase_paid_amount) : null,
@@ -921,6 +923,21 @@ export default function Portfolio({ API, role }) {
                     МДТ, нотариална такса, вписване, брокерска комисионна. По договор
                     не са в цената, но са излезли пари. Празно поле значи, че се
                     смятат по процента от Настройки.
+                  </p>
+                </div>
+                <div className="mt-3">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Дял от общите разходи
+                  </label>
+                  <input type="number" step="0.05" min="0"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                    placeholder="по подразбиране — според типа"
+                    value={editForm.opex_share ?? ''}
+                    onChange={e => setEditForm(f => ({ ...f, opex_share: e.target.value }))} />
+                  <p className="text-xs text-gray-500 mt-1">
+                    Счетоводство, такси и поддръжка се делят по дял от наема. Празно
+                    поле значи, че тежестта идва от типа: гараж, паркомясто, мазе и
+                    склад носят 0, останалите — 1.
                   </p>
                 </div>
               </div>

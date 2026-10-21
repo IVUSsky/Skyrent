@@ -64,7 +64,19 @@ function CalcBreakdown({ c, p }) {
           muted
         />
         <Row label="× 12 месеца" value={`${e(c.rent_annual)} €/год`} muted />
-        <Row label="− оперативни разходи" value={`−${e(c.opex_annual)} €`} muted />
+        {c.opex_annual_direct > 0 && (
+          <Row label="− преки разходи" value={`−${e(c.opex_annual_direct)} €`} muted />
+        )}
+        {c.opex_weight === 0 ? (
+          <Row label="− дял от общите" value="0 €" muted
+            note="прилежащ обект — не носи общи разходи" />
+        ) : c.opex_annual_allocated > 0 && (
+          <Row label="− дял от общите" value={`−${e(c.opex_annual_allocated)} €`} muted
+            note="счетоводство, такси и поддръжка, по дял от наема" />
+        )}
+        {c.opex_annual_direct > 0 && c.opex_annual_allocated > 0 && (
+          <Row label="Оперативни разходи" value={`−${e(c.opex_annual)} €`} muted />
+        )}
         <Row label="NOI" value={`${e(c.noi_annual)} €/год`} bold />
       </div>
 

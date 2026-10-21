@@ -75,6 +75,9 @@ function runTenantMigrations(db) {
   // Разходи по придобиване (МДТ, нотариус, вписване, брокер). NULL нарочно —
   // означава „не е заведено, смятай го по процента от настройките".
   try { db.exec("ALTER TABLE properties ADD COLUMN acquisition_costs REAL"); console.log('Migration: added properties.acquisition_costs'); } catch(_) {}
+  // Тежест при разпределяне на общите разходи. NULL = изведи я от „тип"
+  // (гараж/мазе/склад/паркомясто → 0, останалото → 1).
+  try { db.exec("ALTER TABLE properties ADD COLUMN opex_share REAL"); console.log('Migration: added properties.opex_share'); } catch(_) {}
   try { db.exec("ALTER TABLE properties ADD COLUMN stripe_enabled INTEGER DEFAULT 1"); console.log('Migration: added properties.stripe_enabled'); } catch(_) {}
   db.exec("UPDATE properties SET stripe_enabled = 1 WHERE stripe_enabled IS NULL");
 
