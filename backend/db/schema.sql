@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS properties (
   cost_basis_kind TEXT DEFAULT 'total',
   cost_vat_recovered INTEGER DEFAULT 0,
   reno_vat_recovered INTEGER DEFAULT 0,
+  acquisition_costs REAL,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );

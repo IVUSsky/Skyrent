@@ -122,6 +122,12 @@ function CalcBreakdown({ c, p }) {
             ) : (
               <Row label="+ ремонт" value={`${e(c.ремонт)} €`} />
             )}
+            {c.acquisition_costs > 0 && (
+              <Row label="+ разходи по придобиване" value={`${e(c.acquisition_costs)} €`}
+                note={c.acquisition_costs_estimated
+                  ? 'МДТ, нотариус, вписване, брокер — изчислени по процент'
+                  : 'МДТ, нотариус, вписване, брокер'} />
+            )}
             <Row label="Цена на придобиване" value={`${e(c.cost_recorded)} €`} muted />
             <Row label="− дял от кредита" value={`−${e(c.allocated_debt)} €`} muted />
             <Row label="Вложени средства" value={`${e(c.equity_invested)} €`} bold />
