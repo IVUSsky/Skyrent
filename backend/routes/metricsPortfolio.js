@@ -1,5 +1,6 @@
 const express = require('express');
 const { renovationByProperty, renoTotal } = require('../lib/renovationCosts');
+const { acquisitionCost, acquisitionPct } = require('../lib/acquisitionCost');
 
 const BGN_RATE = 1.95583;
 const toEur = (amount, currency) => {
@@ -186,6 +187,10 @@ module.exports = function(db) {
       const apprRow = db.prepare("SELECT value FROM settings WHERE key='appreciation_pct'").get();
       const apprPct = (apprRow && !isNaN(parseFloat(apprRow.value)) ? parseFloat(apprRow.value) : 3) / 100;
 
+      // Допускане за разходите по придобиване, когато не са заведени поотделно.
+      // Настройва се от Настройки → acquisition_cost_pct. 0 = не се начисляват.
+      const acqPct = acquisitionPct(db);
+
       // OPEX source #1: expense_invoices — само BUSINESS scope (или NULL legacy)
       const expensesRows = db.prepare(`
         SELECT property_id, amount, currency, expense_category, месец, scope
@@ -272,9 +277,15 @@ module.exports = function(db) {
         // Вложени средства: при pre-construction реално платеното е капарото,
         // не договорната цена (покупна), която още не е дължима изцяло.
         const preCon = stage === 'pre_construction' || (p.purchase_balance_due || 0) > 0;
+        // Разходите по придобиване се плащат на нотариуса. При pre-construction
+        // сделката още не е изповядана, затова още ги няма. Наследените имоти
+        // („market") не са купувани — също нямат.
+        const acqCosts = (preCon || p.cost_basis_kind === 'market')
+          ? 0
+          : acquisitionCost(p, p['покупна'] || 0, acqPct);
         const invested = preCon
           ? (p.purchase_paid_amount || 0) / purchaseDiv + renoNet
-          : costBasis;
+          : costBasis + acqCosts;
         return {
           vat_exempt: p.vat_exempt ? 1 : 0,
           cost_vat_recovered: p.cost_vat_recovered ? 1 : 0,
@@ -286,6 +297,10 @@ module.exports = function(db) {
           // „Покупна цена" показваше цена + ремонт, а „ремонт" само фактурите.
           покупна_net: Math.round(purchaseNet * 100) / 100,
           ремонт_net: Math.round(renoNet * 100) / 100,
+          acquisition_costs: Math.round(acqCosts * 100) / 100,
+          // Заведена ли е сумата поотделно, или е процент от цената?
+          acquisition_costs_estimated: acqCosts > 0
+            && (p.acquisition_costs == null || p.acquisition_costs === ''),
           cost_basis_kind: COST_BASIS_KINDS.has(p.cost_basis_kind)
             ? p.cost_basis_kind
             : 'total',
@@ -490,6 +505,8 @@ module.exports = function(db) {
             ? Math.round((p.invested - p['ремонт_net']) * 100) / 100
             : p['покупна_net'],
           ремонт: p['ремонт_net'],
+          acquisition_costs: p.acquisition_costs,
+          acquisition_costs_estimated: p.acquisition_costs_estimated,
           покупна_raw: p['покупна_raw'],
           ремонт_raw: p['ремонт_raw'],
           cost_vat_recovered: p.cost_vat_recovered,

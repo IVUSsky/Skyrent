@@ -72,6 +72,9 @@ function runTenantMigrations(db) {
   // при имот, купен без него.
   try { db.exec("ALTER TABLE properties ADD COLUMN cost_vat_recovered INTEGER DEFAULT 0"); console.log('Migration: added properties.cost_vat_recovered'); } catch(_) {}
   try { db.exec("ALTER TABLE properties ADD COLUMN reno_vat_recovered INTEGER DEFAULT 0"); console.log('Migration: added properties.reno_vat_recovered'); } catch(_) {}
+  // Разходи по придобиване (МДТ, нотариус, вписване, брокер). NULL нарочно —
+  // означава „не е заведено, смятай го по процента от настройките".
+  try { db.exec("ALTER TABLE properties ADD COLUMN acquisition_costs REAL"); console.log('Migration: added properties.acquisition_costs'); } catch(_) {}
   try { db.exec("ALTER TABLE properties ADD COLUMN stripe_enabled INTEGER DEFAULT 1"); console.log('Migration: added properties.stripe_enabled'); } catch(_) {}
   db.exec("UPDATE properties SET stripe_enabled = 1 WHERE stripe_enabled IS NULL");
 

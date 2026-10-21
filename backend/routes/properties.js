@@ -708,6 +708,9 @@ module.exports = function(db) {
       const purchase_balance_due = numOrNull(body.purchase_balance_due, current.purchase_balance_due);
       const purchase_balance_due_date = dateOrNull(body.purchase_balance_due_date, current.purchase_balance_due_date);
       const lifecycle_eta_date = dateOrNull(body.lifecycle_eta_date, current.lifecycle_eta_date);
+      // NULL значи „не е заведено" → доходността го смята по процента от
+      // настройките. 0 значи „няма такива разходи" и е различно от NULL.
+      const acquisition_costs = numOrNull(body.acquisition_costs, current.acquisition_costs);
 
       db.prepare(`
         UPDATE properties
@@ -716,10 +719,10 @@ module.exports = function(db) {
             абонат_ток=?, абонат_вода=?, абонат_тец=?, абонат_вход=?, абонат_газ=?, owner_id=?,
             cost_basis_kind=?, lifecycle_stage=?, lifecycle_eta_date=?,
             purchase_paid_amount=?, purchase_balance_due=?, purchase_balance_due_date=?,
-            cost_vat_recovered=?, reno_vat_recovered=?,
+            cost_vat_recovered=?, reno_vat_recovered=?, acquisition_costs=?,
             updated_at=CURRENT_TIMESTAMP
         WHERE id=?
-      `).run(адрес, район, наем, наемател, статус, market_val, тип, площ, покупна, ремонт, email, телефон, invoice_enabled, invoice_recipient, vat_exempt, stripe_enabled, абонат_ток, абонат_вода, абонат_тец, абонат_вход, абонат_газ, owner_id, cost_basis_kind, lifecycle_stage, lifecycle_eta_date, purchase_paid_amount, purchase_balance_due, purchase_balance_due_date, cost_vat_recovered, reno_vat_recovered, id);
+      `).run(адрес, район, наем, наемател, статус, market_val, тип, площ, покупна, ремонт, email, телефон, invoice_enabled, invoice_recipient, vat_exempt, stripe_enabled, абонат_ток, абонат_вода, абонат_тец, абонат_вход, абонат_газ, owner_id, cost_basis_kind, lifecycle_stage, lifecycle_eta_date, purchase_paid_amount, purchase_balance_due, purchase_balance_due_date, cost_vat_recovered, reno_vat_recovered, acquisition_costs, id);
 
       const updated = db.prepare('SELECT * FROM properties WHERE id = ?').get(id);
       console.log('Saved тип:', updated.тип, '| покупна:', updated.покупна, '| ремонт:', updated.ремонт);
