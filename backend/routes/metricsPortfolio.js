@@ -2,6 +2,7 @@ const express = require('express');
 const { renovationByProperty, renoTotal } = require('../lib/renovationCosts');
 const { acquisitionCost, acquisitionPct } = require('../lib/acquisitionCost');
 const { allocateCommonOpex, opexWeight } = require('../lib/opexAllocation');
+const { txCurrency } = require('../lib/txCurrency');
 
 const BGN_RATE = 1.95583;
 const toEur = (amount, currency) => {
@@ -67,13 +68,6 @@ const PERSONAL_ONLY_CATEGORIES = new Set([
   'масло_мотор', 'теглене_кеш_за_гърците', 'данък_по_чл.50', 'лихва_болгар',
   'приход_друг', 'разход_друг',
 ]);
-
-// transactions.дата е DATE формата 'YYYY-MM-DD'; for BGN→EUR преди 2026-01-01,
-// EUR след. Конвертираме консистентно в EUR.
-const txCurrency = (дата) => {
-  if (!дата) return 'EUR';
-  return дата < '2026-01-01' ? 'BGN' : 'EUR';
-};
 
 function calcCurrentBalance(остатък, вноска, лихва, balance_date) {
   if (!остатък || !вноска || !лихва || !balance_date) return остатък || 0;
@@ -202,7 +196,7 @@ module.exports = function(db) {
 
       // OPEX source #2: transactions — само BUSINESS scope
       const txRows = db.prepare(`
-        SELECT property_id, сума, operation, категория, дата, месец, scope
+        SELECT property_id, сума, operation, категория, дата, месец, scope, currency
         FROM transactions
         WHERE operation = 'Дт' AND COALESCE(месец, '') >= ?
           AND COALESCE(scope, 'business') = 'business'
@@ -234,13 +228,13 @@ module.exports = function(db) {
 
       for (const t of txRows) {
         if (!isOpexCategory(t['категория'])) continue;
-        addOpex(t.property_id, toEur(Math.abs(t['сума']), txCurrency(t['дата'])));
+        addOpex(t.property_id, toEur(Math.abs(t['сума']), txCurrency(t.currency, t['дата'])));
       }
 
       // INCOME реално получен — от bank Кт + категория = наем*
       // Само business scope (личен наем не се брои в бизнес portfolio metrics).
       const incomeRows = db.prepare(`
-        SELECT property_id, сума, категория, дата, месец, scope
+        SELECT property_id, сума, категория, дата, месец, scope, currency
         FROM transactions
         WHERE operation = 'Кт' AND COALESCE(месец, '') >= ?
           AND COALESCE(scope, 'business') = 'business'
@@ -251,7 +245,7 @@ module.exports = function(db) {
       for (const t of incomeRows) {
         const cat = (t['категория'] || '').trim().toLowerCase();
         if (!RENT_INCOME_CATEGORIES.has(cat)) continue;
-        const eur = toEur(Math.abs(t['сума']), txCurrency(t['дата']));
+        const eur = toEur(Math.abs(t['сума']), txCurrency(t.currency, t['дата']));
         rentReceivedTotal += eur;
         if (t.property_id) {
           rentReceivedByProp.set(t.property_id, (rentReceivedByProp.get(t.property_id) || 0) + eur);

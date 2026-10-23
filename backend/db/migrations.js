@@ -191,12 +191,25 @@ function runTenantMigrations(db) {
   try { db.exec("ALTER TABLE transactions ADD COLUMN rule_id INTEGER");             console.log('Migration: added rule_id');   } catch(_) {}
   // Transactions: currency (BGN before 2026, EUR from 2026)
   try { db.exec("ALTER TABLE transactions ADD COLUMN currency TEXT"); console.log('Migration: added currency to transactions'); } catch(_) {}
-  // Backfill currency based on дата for existing transactions
-  db.exec("UPDATE transactions SET currency='EUR' WHERE currency IS NULL AND дата >= '2026-01-01'");
-  db.exec("UPDATE transactions SET currency='BGN' WHERE currency IS NULL");
-  // Backfill expense_invoices currency based on месец (банков_импорт rows had 'BGN' hardcoded)
-  db.exec("UPDATE expense_invoices SET currency='EUR' WHERE (currency IS NULL OR currency='BGN') AND месец >= '2026-01'");
-  db.exec("UPDATE expense_invoices SET currency='BGN' WHERE currency IS NULL");
+  // Backfill currency за заварените движения — само празните, никога заведена
+  // стойност. След това всеки ред има валута и резервата по дата е излишна.
+  db.exec("UPDATE transactions SET currency='EUR' WHERE (currency IS NULL OR currency='') AND дата >= '2026-01-01'");
+  db.exec("UPDATE transactions SET currency='BGN' WHERE currency IS NULL OR currency=''");
+  // Backfill expense_invoices currency — САМО празните.
+  //
+  // ⚠️ Дотук тук стоеше:
+  //   UPDATE ... SET currency='EUR' WHERE (currency IS NULL OR currency='BGN')
+  //                                   AND месец >= '2026-01'
+  // Това преправяше насила всяка фактура от 2026 г., заведена в ЛЕВА, на евро,
+  // без да дели сумата — „52 200,01 лв" ставаше „52 200,01 €", тоест двойно.
+  // И понеже миграциите текат при всяко стартиране, всяка ръчна поправка се
+  // връщаше при следващия деплой. Точно това беше причината един и същи
+  // валутен дефект да се „оправя" по няколко пъти.
+  //
+  // България приема еврото на 01.01.2026, но левови фактури от началото на
+  // годината съществуват — преходът не е рязък. Заведена валута се уважава.
+  db.exec("UPDATE expense_invoices SET currency='EUR' WHERE (currency IS NULL OR currency='') AND месец >= '2026-01'");
+  db.exec("UPDATE expense_invoices SET currency='BGN' WHERE currency IS NULL OR currency=''");
 
   // ── Personal vs Business scope ────────────────────────────────────────
   // scope='business' (default) → имотен бизнес: ОПР, наеми, кредити, ремонти
