@@ -50,7 +50,12 @@ CREATE TABLE IF NOT EXISTS transactions (
   operation TEXT,
   категория TEXT,
   property_id INTEGER REFERENCES properties(id),
-  месец TEXT
+  месец TEXT,
+  -- Валутата на реда. Попълва се при импорта, а миграцията я допълва за
+  -- заварените редове, така че НИКОГА не е празна. Четете я, не я гадайте по
+  -- датата — левови движения от 2026 г. съществуват.
+  currency TEXT,
+  scope TEXT DEFAULT 'business'
 );
 
 CREATE TABLE IF NOT EXISTS settings (
