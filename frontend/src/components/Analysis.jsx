@@ -57,13 +57,17 @@ function CalcBreakdown({ c, p }) {
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 text-sm">
       <div>
         <div className="text-xs font-bold text-gray-500 uppercase mb-1">1 · Приход</div>
-        <Row label="Наем, както го плаща наемателят" value={`${e(c.rent_gross_monthly)} €/мес`} />
-        <Row
-          label={c.vat_divisor === 1 ? 'Без ДДС (освободен)' : 'Делено на 1.20 (с ДДС)'}
-          value={`${e(c.rent_net_monthly)} €/мес`}
-          muted
-        />
-        <Row label="× 12 месеца" value={`${e(c.rent_annual)} €/год`} muted />
+        <Row label="Реално постъпило за 12 месеца" value={`${e(c.rent_received_net_12m)} €/год`}
+          note="банка, в брой и платени фактури, без ДДС" />
+        <Row label="Договорен наем" value={`${e(c.rent_annual)} €/год`} muted
+          note={`${e(c.rent_gross_monthly)} €/мес${c.vat_divisor === 1 ? ' (освободен от ДДС)' : ' ÷ 1.20'} × 12`} />
+        {c.rent_collection_rate != null && (
+          <Row label="Събираемост" value={`${Math.round(c.rent_collection_rate * 100)}%`}
+            muted={c.rent_collection_rate >= 0.95}
+            note={c.rent_collection_rate < 0.95
+              ? 'празни месеци, просрочие или незаведено плащане'
+              : undefined} />
+        )}
         {c.opex_annual_direct > 0 && (
           <Row label="− преки разходи" value={`−${e(c.opex_annual_direct)} €`} muted />
         )}

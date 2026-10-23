@@ -3,6 +3,7 @@ const { renovationByProperty, renoTotal } = require('../lib/renovationCosts');
 const { acquisitionCost, acquisitionPct } = require('../lib/acquisitionCost');
 const { allocateCommonOpex, opexWeight } = require('../lib/opexAllocation');
 const { txCurrency } = require('../lib/txCurrency');
+const { rentReceivedByProperty } = require('../lib/rentReceived');
 
 const BGN_RATE = 1.95583;
 const toEur = (amount, currency) => {
@@ -19,10 +20,6 @@ const NON_OPEX_CATEGORIES = new Set([
   'вноска', 'депозит_получен', 'депозит_върнат', 'депозит_задържан',
   'equity_inject', 'equity_withdraw', 'заем_sky', 'заем_антон',
   'нап_ддс',  // данък — отделна група, не recurring opex
-]);
-
-const RENT_INCOME_CATEGORIES = new Set([
-  'наем', 'наем_фактуриран', 'rent',
 ]);
 
 // properties.наем се въвежда както го плаща наемателят. За облагаемите имоти
@@ -231,26 +228,12 @@ module.exports = function(db) {
         addOpex(t.property_id, toEur(Math.abs(t['сума']), txCurrency(t.currency, t['дата'])));
       }
 
-      // INCOME реално получен — от bank Кт + категория = наем*
-      // Само business scope (личен наем не се брои в бизнес portfolio metrics).
-      const incomeRows = db.prepare(`
-        SELECT property_id, сума, категория, дата, месец, scope, currency
-        FROM transactions
-        WHERE operation = 'Кт' AND COALESCE(месец, '') >= ?
-          AND COALESCE(scope, 'business') = 'business'
-      `).all(opexFromPeriod);
-
-      const rentReceivedByProp = new Map();
-      let rentReceivedTotal = 0;
-      for (const t of incomeRows) {
-        const cat = (t['категория'] || '').trim().toLowerCase();
-        if (!RENT_INCOME_CATEGORIES.has(cat)) continue;
-        const eur = toEur(Math.abs(t['сума']), txCurrency(t.currency, t['дата']));
-        rentReceivedTotal += eur;
-        if (t.property_id) {
-          rentReceivedByProp.set(t.property_id, (rentReceivedByProp.get(t.property_id) || 0) + eur);
-        }
-      }
+      // Реално постъпил наем — банка + в брой + платени фактури с карта.
+      // Дотук тук се четяха само банковите движения, затова изпускаше
+      // наема, платен в брой или с карта, и показваше 78% от договореното.
+      const received = rentReceivedByProperty(db, opexFromPeriod);
+      const rentReceivedByProp = received.byProperty;
+      const rentReceivedTotal = received.total;
 
       const renoMap = renovationByProperty(db);
       const propRows = properties.map(p => {
@@ -336,7 +319,19 @@ module.exports = function(db) {
         p.opex_ratio = p.rent_annual > 0
           ? Math.round((p.opex_annual_total / p.rent_annual) * 10000) / 10000
           : null;
-        p.noi_annual = Math.round((p.rent_annual - p.opex_annual_total) * 100) / 100;
+        // Два прихода, нарочно и двата:
+        //   …_contracted — полето „наем" × 12, тоест капацитетът при пълна
+        //                  заетост и нула просрочия. Поглед напред.
+        //   без наставка — реално постъпилото за последните 12 месеца.
+        //                  Това е парата, която влиза, и то води сметката.
+        // Постъпилото е брутно, както го плаща наемателят, затова минава през
+        // същия ДДС делител като договорения наем — иначе двете се разминават.
+        p.rent_received_net_12m = Math.round((p.rent_received_12m / (p.vat_exempt ? 1 : VAT_RATE)) * 100) / 100;
+        p.rent_collection_rate = p.rent_annual > 0
+          ? Math.round((p.rent_received_net_12m / p.rent_annual) * 10000) / 10000
+          : null;
+        p.noi_annual_contracted = Math.round((p.rent_annual - p.opex_annual_total) * 100) / 100;
+        p.noi_annual = Math.round((p.rent_received_net_12m - p.opex_annual_total) * 100) / 100;
       }
 
       let unallocatedDebt = 0;
@@ -418,6 +413,7 @@ module.exports = function(db) {
         p.cap_rate_cost = p.cost_basis > 0 ? Math.round((p.noi_annual / p.cost_basis) * 10000) / 10000 : null;
         p.expense_ratio = p.opex_ratio;
         p.net_cash_flow = Math.round((p.noi_annual - p.allocated_debt_service) * 100) / 100;
+        p.net_cash_flow_contracted = Math.round((p.noi_annual_contracted - p.allocated_debt_service) * 100) / 100;
 
         // Cash-on-Cash (standard definition) = Net CF / cash actually invested.
         // Approximation: cost_basis - current_debt (assume principal paid =
@@ -495,6 +491,10 @@ module.exports = function(db) {
           vat_divisor: p.vat_exempt ? 1 : VAT_RATE,
           rent_net_monthly: Math.round(p.rent_monthly * 100) / 100,
           rent_annual: p.rent_annual,
+          rent_received_net_12m: p.rent_received_net_12m,
+          rent_collection_rate: p.rent_collection_rate,
+          noi_annual_contracted: p.noi_annual_contracted,
+          net_cash_flow_contracted: p.net_cash_flow_contracted,
           opex_annual: p.opex_annual_total,
           opex_annual_direct: p.opex_annual_direct,
           opex_annual_allocated: p.opex_annual_allocated,
@@ -557,7 +557,18 @@ module.exports = function(db) {
       const portfolioTotalDebt = portfolioDebtAllocated + unallocatedDebt;
       const portfolioDebtServiceAllocated = propRows.reduce((s, p) => s + p.allocated_debt_service, 0);
       const portfolioDebtServiceTotal = portfolioDebtServiceAllocated + unallocatedDebtService;
-      const portfolioNoi = portfolioRentAnnual - portfolioOpexAnnual;
+      // Приходът на портфейла е реално постъпилото, нетирано от ДДС.
+      // Договореното остава до него, като капацитет.
+      const portfolioRentReceivedNet = propRows.reduce((s, p) => s + p.rent_received_net_12m, 0);
+      const portfolioNoiContracted = portfolioRentAnnual - portfolioOpexAnnual;
+      const portfolioNoi = portfolioRentReceivedNet - portfolioOpexAnnual;
+      const portfolioCollection = portfolioRentAnnual > 0
+        ? Math.round((portfolioRentReceivedNet / portfolioRentAnnual) * 10000) / 10000
+        : null;
+      // Имот с наемател и договорен наем, по който НЕ е постъпило нищо, почти
+      // винаги е липсващ импорт, не празен имот. Приходът честно пада на нула,
+      // но мълчаливо това срива целия портфейл — затова се отчита отделно.
+      const noReceipts = activeProps.filter(p => p.rent_annual > 0 && p.rent_received_12m <= 0);
       const portfolioEquity = portfolioAssetBase - portfolioTotalDebt;
 
       // Lifecycle groupings + pre-construction финансово отражение
@@ -675,6 +686,21 @@ module.exports = function(db) {
           ? Math.round((portfolioOpexAnnual / portfolioRentAnnual) * 10000) / 10000
           : null,
         noi_annual: Math.round(portfolioNoi * 100) / 100,
+        // Същото, но от договорения наем — капацитетът при пълна заетост.
+        rent_received_net_12m: Math.round(portfolioRentReceivedNet * 100) / 100,
+        rent_collection_rate: portfolioCollection,
+        noi_annual_contracted: Math.round(portfolioNoiContracted * 100) / 100,
+        net_cash_flow_annual_contracted: Math.round((portfolioNoiContracted - portfolioDebtServiceTotal) * 100) / 100,
+        rent_no_receipts: {
+          count: noReceipts.length,
+          contracted: Math.round(noReceipts.reduce((s, p) => s + p.rent_annual, 0) * 100) / 100,
+          ids: noReceipts.map(p => p.id),
+        },
+        rent_received_by_source: {
+          bank: Math.round(received.bySource.bank * 100) / 100,
+          manual: Math.round(received.bySource.manual * 100) / 100,
+          invoice: Math.round(received.bySource.invoice * 100) / 100,
+        },
         debt_service_annual: Math.round(portfolioDebtServiceTotal * 100) / 100,
         dscr: portfolioDebtServiceTotal > 0
           ? Math.round((portfolioNoi / portfolioDebtServiceTotal) * 10000) / 10000
