@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { setCanonical } from '../lib/seo'
 import { parseVideo } from '../lib/videoEmbed'
 
@@ -22,6 +22,30 @@ export default function PublicListing({ param, API = '' }) {
   const [sent, setSent] = useState(false)
   const [sending, setSending] = useState(false)
   const [formErr, setFormErr] = useState(null)
+  const [zoom, setZoom] = useState(false)   // отворен лайтбокс
+  const [mag, setMag] = useState(null)      // точката, около която е увеличено
+  const touchX = useRef(null)
+  const swiped = useRef(false)   // плъзгането не бива да мине и за натискане
+
+  // Стрелките и Esc работят само докато лайтбоксът е отворен, а страницата
+  // отдолу не скролира — иначе на телефон пръстът мести обявата, не снимката.
+  useEffect(() => {
+    if (!zoom) return
+    const n = (data?.photo_ids || []).length
+    const step = d => { setMag(null); if (n) setActive(i => (i + d + n) % n) }
+    const onKey = e => {
+      if (e.key === 'Escape') { setZoom(false); setMag(null) }
+      else if (e.key === 'ArrowRight') step(1)
+      else if (e.key === 'ArrowLeft') step(-1)
+    }
+    window.addEventListener('keydown', onKey)
+    const prevOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      document.body.style.overflow = prevOverflow
+    }
+  }, [zoom, data])
 
   useEffect(() => {
     if (!org || !pid) { setErr(true); return }
@@ -77,6 +101,28 @@ export default function PublicListing({ param, API = '' }) {
 
   const photos = data.photo_ids || []
   const fmt = n => Number(n || 0).toLocaleString('bg-BG')
+  const photoUrl = id => `${API}/api/public/listings/${org}/${pid}/photo/${id}`
+  const step = d => { setMag(null); setActive(i => (i + d + photos.length) % photos.length) }
+
+  // Натискане върху отворената снимка я увеличава около мястото, където е
+  // натиснато; следващото натискане я връща цяла.
+  const magnify = e => {
+    if (swiped.current) { swiped.current = false; return }
+    if (mag) { setMag(null); return }
+    const r = e.currentTarget.getBoundingClientRect()
+    setMag({ x: ((e.clientX - r.left) / r.width) * 100, y: ((e.clientY - r.top) / r.height) * 100 })
+  }
+
+  const swipe = {
+    onTouchStart: e => { touchX.current = e.touches[0].clientX; swiped.current = false },
+    onTouchEnd: e => {
+      const x0 = touchX.current
+      touchX.current = null
+      if (x0 == null || mag || photos.length < 2) return
+      const dx = e.changedTouches[0].clientX - x0
+      if (Math.abs(dx) > 40) { swiped.current = true; step(dx < 0 ? 1 : -1) }
+    },
+  }
 
   return (
     <div style={S.wrap}>
@@ -86,12 +132,17 @@ export default function PublicListing({ param, API = '' }) {
         <div style={S.gallery}>
           {photos.length ? (
             <>
-              <img src={`${API}/api/public/listings/${org}/${pid}/photo/${photos[active]}`} alt="" style={S.hero} />
+              <div style={S.heroWrap} {...swipe}
+                onClick={() => { if (swiped.current) { swiped.current = false; return } setZoom(true) }}
+                title="Натисни за цялата снимка">
+                <img src={photoUrl(photos[active])} alt="" style={S.hero} />
+                <div style={S.heroHint}>⤢ Увеличи</div>
+              </div>
               {photos.length > 1 && (
                 <div style={S.thumbs}>
                   {photos.map((id, i) => (
-                    <img key={id} src={`${API}/api/public/listings/${org}/${pid}/photo/${id}`} alt=""
-                      onClick={() => setActive(i)}
+                    <img key={id} src={photoUrl(id)} alt=""
+                      onClick={() => { setMag(null); setActive(i) }}
                       style={{ ...S.thumb, ...(i === active ? S.thumbOn : {}) }} />
                   ))}
                 </div>
@@ -155,6 +206,31 @@ export default function PublicListing({ param, API = '' }) {
         </div>
       </div>
       {!data.white_label && <div style={S.foot}>Powered by <b style={{ color: '#1a1a2e' }}>Skyrent</b>°</div>}
+
+      {/* Лайтбокс — цялата снимка, не изрязаната. Натискане навън затваря. */}
+      {zoom && photos.length > 0 && (
+        <div style={S.lb} onClick={() => { setZoom(false); setMag(null) }}>
+          {photos.length > 1 && <div style={S.lbCount}>{active + 1} / {photos.length}</div>}
+          <button style={S.lbX} aria-label="Затвори"
+            onClick={e => { e.stopPropagation(); setZoom(false); setMag(null) }}>×</button>
+          {photos.length > 1 && (
+            <button style={{ ...S.lbArrow, left: 12 }} aria-label="Предишна"
+              onClick={e => { e.stopPropagation(); step(-1) }}>‹</button>
+          )}
+          <img src={photoUrl(photos[active])} alt="" {...swipe}
+            onClick={e => { e.stopPropagation(); magnify(e) }}
+            style={{
+              ...S.lbImg,
+              cursor: mag ? 'zoom-out' : 'zoom-in',
+              transform: mag ? 'scale(2.4)' : 'none',
+              transformOrigin: mag ? `${mag.x}% ${mag.y}%` : 'center',
+            }} />
+          {photos.length > 1 && (
+            <button style={{ ...S.lbArrow, right: 12 }} aria-label="Следваща"
+              onClick={e => { e.stopPropagation(); step(1) }}>›</button>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -164,7 +240,14 @@ const S = {
   wrap: { minHeight: '100vh', background: '#f4f5f8', fontFamily: "'Manrope', system-ui, sans-serif", padding: '32px 16px', display: 'flex', flexDirection: 'column', alignItems: 'center' },
   shell: { width: '100%', maxWidth: 960, background: '#fff', borderRadius: 18, overflow: 'hidden', boxShadow: '0 20px 60px -30px rgba(0,0,0,.25)', display: 'grid', gridTemplateColumns: '1.1fr 1fr' },
   gallery: { background: '#0f0f17', display: 'flex', flexDirection: 'column' },
+  heroWrap: { position: 'relative', cursor: 'zoom-in' },
   hero: { width: '100%', height: 360, objectFit: 'cover', display: 'block' },
+  heroHint: { position: 'absolute', right: 10, bottom: 10, background: 'rgba(0,0,0,.45)', color: '#fff', fontSize: 12, borderRadius: 8, padding: '4px 9px', pointerEvents: 'none', backdropFilter: 'blur(2px)' },
+  lb: { position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(8,8,12,.94)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, overflow: 'hidden' },
+  lbImg: { maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', borderRadius: 4, transition: 'transform .25s ease', userSelect: 'none', WebkitUserSelect: 'none', WebkitTouchCallout: 'none' },
+  lbX: { position: 'absolute', top: 14, right: 16, width: 40, height: 40, borderRadius: 999, border: 'none', background: 'rgba(255,255,255,.14)', color: '#fff', fontSize: 26, lineHeight: 1, cursor: 'pointer' },
+  lbCount: { position: 'absolute', top: 24, left: 22, color: '#cfd0d8', fontSize: 13, letterSpacing: '.06em' },
+  lbArrow: { position: 'absolute', top: '50%', marginTop: -23, width: 46, height: 46, borderRadius: 999, border: 'none', background: 'rgba(255,255,255,.14)', color: '#fff', fontSize: 30, lineHeight: 1, cursor: 'pointer' },
   thumbs: { display: 'flex', gap: 6, padding: 8, overflowX: 'auto' },
   thumb: { width: 56, height: 44, objectFit: 'cover', borderRadius: 6, cursor: 'pointer', opacity: .55, transition: '.2s' },
   thumbOn: { opacity: 1, outline: `2px solid ${BRASS}` },
