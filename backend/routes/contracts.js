@@ -13,7 +13,7 @@ const { getIssuer, issuerComplete } = require('../lib/branding');
 const { normalizeIdCard } = require('../lib/idCard');
 const { kontrolisiContractsOn, sendContractToKontrolisi } = require('../lib/kontrolisiContract');
 const { reinstateContract } = require('../lib/contractReinstate');
-const { depositSchedule, validateDepositSplit, depositPlaceholders } = require('../lib/depositSchedule');
+const { depositSchedule, validateDepositSplit, depositPlaceholders, depositClauseBG, depositClauseEN } = require('../lib/depositSchedule');
 const { preparePdfImages, pickImage, protocolImagePaths, PHOTO_WIDTH, THUMB_WIDTH } = require('../lib/pdfPhotos');
 const { releaseProperty } = require('../lib/propertyRelease');
 const { amountToWords } = require('../lib/bgWords');
@@ -219,6 +219,13 @@ function buildFields(contract, issuer) {
     // „януари/февруари", както стоеше в бланката. Договор без разбивка дава
     // целия депозит при подписване и нули за вноските.
     ...depositPlaceholders(contract),
+    // Цяло изречение за това КАК се плаща депозитът. Чл.5 на двуезичната
+    // бланка твърдеше „При подписване на договора…", което при разсрочване е
+    // невярно — договорът трябва да каже, че страните са се споразумели за
+    // вноски заедно с наема. Полето пасва на всяка бланка: без разсрочване
+    // казва „при подписване", с разсрочване изброява вноските.
+    'ДЕПОЗИТ_ПЛАЩАНЕ':        depositClauseBG(contract),
+    'ДЕПОЗИТ_ПЛАЩАНЕ_EN':     depositClauseEN(contract),
     'ПАДЕЖ_ДЕН':              String(contract.payment_day || 5),
     'УСЛОВИЯ':                contract.conditions || '',
     'БЕЛЕЖКИ':                contract.notes || '',

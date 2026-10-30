@@ -119,3 +119,60 @@ describe('месец на наема', () => {
     expect(rentMonth('боклук', 0)).toBeNull();
   });
 });
+
+// Чл.5 на двуезичната бланка твърдеше „При подписване на договора Наемателят
+// заплаща гаранционен депозит…" — при разсрочване това е НЕВЯРНО. Клаузата
+// трябва да казва, че страните са се споразумели за вноски заедно с наема.
+describe('клауза за плащане на депозита', () => {
+  const { depositClauseBG, depositClauseEN } = require('./depositSchedule');
+  const split2 = { deposit: 1100, currency: 'EUR', start_date: '2026-11-04',
+    deposit_at_signing: 0, deposit_part_1: 550, deposit_part_2: 550 };
+  const split3 = { ...split2, deposit_at_signing: 300, deposit_part_1: 400, deposit_part_2: 400 };
+  const plain = { deposit: 1100, currency: 'EUR', start_date: '2026-11-04' };
+
+  it('без разсрочване казва „при подписване"', () => {
+    expect(depositClauseBG(plain)).toBe('Депозитът се заплаща при подписване на договора.');
+    expect(depositClauseEN(plain)).toBe('The deposit is payable upon signing of this Agreement.');
+  });
+
+  it('две вноски — споразумение, брой с думи и двата месеца', () => {
+    const bg = depositClauseBG(split2);
+    expect(bg).toContain('Страните се споразумяват');
+    expect(bg).toContain('на 2 (две) вноски заедно с плащането на наема');
+    expect(bg).toContain('550,00 EUR с наема за месец ноември');
+    expect(bg).toContain('550,00 EUR с наема за месец декември');
+  });
+
+  it('не повтаря „с плащането на наема" за всяка вноска', () => {
+    expect(depositClauseBG(split2).match(/с плащането на наема/g)).toHaveLength(1);
+  });
+
+  it('част при подписване влиза в изброяването', () => {
+    const bg = depositClauseBG(split3);
+    expect(bg).toContain('на 3 (три) вноски');
+    expect(bg).toContain('300,00 EUR при подписване на договора');
+  });
+
+  it('английският дава истинските месеци, не заместител', () => {
+    const en = depositClauseEN(split2);
+    expect(en).toContain('EUR 550.00 with the rent for November');
+    expect(en).toContain('with the rent for December');
+    expect(en).not.toContain('respective month');
+  });
+
+  it('валутата идва от договора', () => {
+    expect(depositClauseBG({ ...split2, currency: 'BGN' })).toContain('BGN');
+    expect(depositClauseEN({ ...split2, currency: 'BGN' })).toContain('BGN 550.00');
+  });
+
+  it('договор без депозит не дава клауза', () => {
+    expect(depositClauseBG({ deposit: 0 })).toBe('');
+    expect(depositClauseEN({ deposit: 0 })).toBe('');
+  });
+
+  it('без начална дата не хвърля и не лъже за месец', () => {
+    const c = { deposit: 400, currency: 'EUR', deposit_at_signing: 0, deposit_part_1: 400, deposit_part_2: 0 };
+    expect(depositClauseBG(c)).toContain('с наема');
+    expect(depositClauseEN(c)).toContain('the respective month');
+  });
+});
