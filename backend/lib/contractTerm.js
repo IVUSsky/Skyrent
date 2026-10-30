@@ -11,23 +11,10 @@
 // {{СРОК_МЕСЕЦИ}} помежду си.
 
 const { amountToWords } = require('./bgWords');
+const { enIntToWords } = require('./enWords');
 
-const EN_ONES = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine',
-  'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen',
-  'eighteen', 'nineteen'];
-const EN_TENS = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety'];
-
-// Срокове са месеци — до 99 стига с много запас.
-function enWords(n) {
-  n = Math.trunc(Math.abs(Number(n) || 0));
-  if (n < 20) return EN_ONES[n];
-  if (n < 100) {
-    const t = EN_TENS[Math.floor(n / 10)];
-    const o = n % 10;
-    return o ? `${t}-${EN_ONES[o]}` : t;
-  }
-  return String(n);
-}
+// Числата с думи са общи с договорите — lib/enWords.js.
+const enWords = enIntToWords;
 
 // null = безсрочен (няма крайна дата). Иначе цели месеци, минимум 1.
 function termMonths(startDate, endDate) {

@@ -146,7 +146,8 @@ function depositPlaceholders(contract = {}) {
 const EN_MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December'];
 
-const EN_COUNT = ['zero', 'one', 'two', 'three'];
+// Броят вноски с думи — общо с договорите (lib/enWords.js).
+const { enIntToWords } = require('./enWords');
 
 function monthIndex(ym) {
   const m = String(ym || '').match(/^\d{4}-(\d{2})/);
@@ -194,7 +195,7 @@ function depositClauseEN(contract = {}) {
   const last = parts.pop();
   const list = parts.length ? `${parts.join(', ')} and ${last}` : last;
   const n = sched.length;
-  return `The parties agree that the deposit shall be paid in ${n} (${EN_COUNT[n] || n}) `
+  return `The parties agree that the deposit shall be paid in ${n} (${enIntToWords(n)}) `
        + `instalments together with the rent: ${list}.`;
 }
 
