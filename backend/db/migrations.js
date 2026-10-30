@@ -1040,6 +1040,11 @@ function runTenantMigrations(db) {
     caption TEXT DEFAULT '',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`);
+  // Подредба на снимките. Дотук галерията вървеше само по дата на качване и
+  // корицата в каталога беше „най-старата снимка" — за ап. 5 това се оказа
+  // кадър от коридора с кофа в огледалото. Отрицателна стойност избутва напред;
+  // 0 за всички = заварено поведение (по дата).
+  try { db.exec("ALTER TABLE property_photos ADD COLUMN sort_order INTEGER DEFAULT 0"); console.log('Migration: added property_photos.sort_order'); } catch(_) {}
   console.log('property_photos table ready');
 
   // Chat learning queue — weekly digest of tenant Q&A patterns that aren't

@@ -14,6 +14,7 @@ const { normalizeIdCard } = require('../lib/idCard');
 const { kontrolisiContractsOn, sendContractToKontrolisi } = require('../lib/kontrolisiContract');
 const { reinstateContract } = require('../lib/contractReinstate');
 const { depositSchedule, validateDepositSplit, depositPlaceholders } = require('../lib/depositSchedule');
+const { preparePdfImages, pickImage, protocolImagePaths, PHOTO_WIDTH, THUMB_WIDTH } = require('../lib/pdfPhotos');
 const { releaseProperty } = require('../lib/propertyRelease');
 const { amountToWords } = require('../lib/bgWords');
 
@@ -260,12 +261,27 @@ function buildFields(contract, issuer) {
 // opts.filenamePrefix — file prefix (default "contract"; use "protocol" for standalone)
 // opts.appendInventory — append the property inventory list (grouped by category) (default false; true for protocols)
 // opts.inventory — pre-fetched property_inventory items (with photos array per item)
-function generateContractPDF(contract, template, issuer, photos = [], opts = {}) {
+async function generateContractPDF(contract, template, issuer, photos = [], opts = {}) {
   const appendProtocol     = opts.appendProtocol     !== false;
   const includeSignatures  = opts.includeSignatures  !== false;
   const filenamePrefix     = opts.filenamePrefix     || 'contract';
   const appendInventory    = opts.appendInventory    === true;
   const inventoryItems     = opts.inventory          || [];
+
+  // Прекодираме снимките ПРЕДИ рисуването — pdfkit е синхронен, а sharp не е.
+  // Без това в PDF-а влизат оригиналните файлове от телефон (виж lib/pdfPhotos.js).
+  let imageBufs = new Map();
+  if (appendInventory && (photos.length || inventoryItems.length)) {
+    const { grid, thumbs } = protocolImagePaths({
+      photos, inventory: inventoryItems, photosDir: PHOTOS_DIR, inventoryDir: INVENTORY_DIR,
+    });
+    const [g, t] = await Promise.all([
+      preparePdfImages(grid, PHOTO_WIDTH),
+      preparePdfImages(thumbs, THUMB_WIDTH),
+    ]);
+    imageBufs = new Map([...g, ...t]);
+  }
+
   return new Promise((resolve, reject) => {
     const filename = `${filenamePrefix}_${contract.contract_number.replace(/[^a-zA-Z0-9]/g,'-')}.pdf`;
     const filepath = path.join(PDF_DIR, filename);
@@ -525,7 +541,7 @@ function generateContractPDF(contract, template, issuer, photos = [], opts = {})
 
     // ── Inventory + photos (auto-appended for protocol PDFs) ──────
     if (appendInventory) {
-      appendInventoryAndPhotos(doc, inventoryItems, photos, ML, PW, HEADER_H, PH, FOOTER_H);
+      appendInventoryAndPhotos(doc, inventoryItems, photos, ML, PW, HEADER_H, PH, FOOTER_H, imageBufs);
     }
 
     // ── Appendix: Приемо-предавателен протокол (опционално) ─────
@@ -563,7 +579,9 @@ function fmtItemDate(s) {
 // and the property photos grid to the current PDF document. Used by the
 // standalone protocol generator. Sky logo header is drawn automatically via
 // the pageAdded listener registered by generateContractPDF.
-function appendInventoryAndPhotos(doc, inventory, photos, ML, PW, HEADER_H, PH, FOOTER_H) {
+// imageBufs — Map път→Buffer с вече смалените картинки (lib/pdfPhotos.js).
+// Липсващ ключ значи „вгради оригинала"; протоколът пак излиза, само по-тежък.
+function appendInventoryAndPhotos(doc, inventory, photos, ML, PW, HEADER_H, PH, FOOTER_H, imageBufs) {
   // Always start the inventory section on a fresh page so layout is predictable
   if (inventory && inventory.length > 0) {
     doc.addPage();
@@ -611,7 +629,7 @@ function appendInventoryAndPhotos(doc, inventory, photos, ML, PW, HEADER_H, PH, 
         if (firstPhoto) {
           const fp = path.join(INVENTORY_DIR, firstPhoto.filename);
           if (fs.existsSync(fp)) {
-            try { doc.image(fp, thumbX, y, { fit: [thumbW, thumbH] }); } catch(_) {}
+            try { doc.image(pickImage(imageBufs, fp), thumbX, y, { fit: [thumbW, thumbH] }); } catch(_) {}
           }
         } else {
           doc.rect(thumbX, y, thumbW, thumbH).lineWidth(0.3).strokeColor('#e5e7eb').stroke();
@@ -683,7 +701,7 @@ function appendInventoryAndPhotos(doc, inventory, photos, ML, PW, HEADER_H, PH, 
       if (!fs.existsSync(fp)) continue;
       if (col === 0 && y + IMG_H > PH - FOOTER_H - 10) { doc.addPage(); y = HEADER_H + 10; }
       const x = ML + col * (IMG_W + 10);
-      try { doc.image(fp, x, y, { fit: [IMG_W, IMG_H] }); } catch(_) {}
+      try { doc.image(pickImage(imageBufs, fp), x, y, { fit: [IMG_W, IMG_H] }); } catch(_) {}
       col++;
       if (col === 2) { col = 0; y += IMG_H + 10; }
     }
@@ -1363,7 +1381,7 @@ module.exports = function(db) {
       if (!splitCheck.ok) return res.status(400).json({ error: splitCheck.error });
 
       const photos = property_id
-        ? db.prepare('SELECT * FROM property_photos WHERE property_id=? ORDER BY created_at').all(property_id)
+        ? db.prepare('SELECT * FROM property_photos WHERE property_id=? ORDER BY sort_order, created_at').all(property_id)
         : [];
       const { filepath, filename } = await generateContractPDF(contract, template, issuer, photos);
       contract.pdf_path = filename;
@@ -1443,7 +1461,7 @@ module.exports = function(db) {
       if (!template) return res.status(404).json({ error: 'Шаблонът не е намерен' });
       const issuer = getIssuer(db);
       const photos = contract.property_id
-        ? db.prepare('SELECT * FROM property_photos WHERE property_id=? ORDER BY created_at').all(contract.property_id)
+        ? db.prepare('SELECT * FROM property_photos WHERE property_id=? ORDER BY sort_order, created_at').all(contract.property_id)
         : [];
       const { filename } = await generateContractPDF(contract, template, issuer, photos);
 
@@ -1537,7 +1555,7 @@ const DEPOSIT_PARTS = ['deposit_at_signing', 'deposit_part_1', 'deposit_part_2']
       if (!isScan && template && b.regenerate !== false) {
         const issuer = getIssuer(db);
         const photos = fresh.property_id
-          ? db.prepare('SELECT * FROM property_photos WHERE property_id=? ORDER BY created_at').all(fresh.property_id) : [];
+          ? db.prepare('SELECT * FROM property_photos WHERE property_id=? ORDER BY sort_order, created_at').all(fresh.property_id) : [];
         const { filename } = await generateContractPDF(fresh, template, issuer, photos);
         let protocolFilename = contractKind(fresh.kind) === 'интернет' ? null : fresh.protocol_pdf_path;
         const protocolTmpl = contractKind(fresh.kind) === 'интернет' ? null
@@ -1936,7 +1954,7 @@ const DEPOSIT_PARTS = ['deposit_at_signing', 'deposit_part_1', 'deposit_part_2']
         if (!template) return res.status(404).json({ error: 'Шаблон "Приемо-предавателен протокол" липсва.' });
         const issuer = getIssuer(db);
         const photos = contract.property_id
-          ? db.prepare('SELECT * FROM property_photos WHERE property_id=? ORDER BY created_at').all(contract.property_id)
+          ? db.prepare('SELECT * FROM property_photos WHERE property_id=? ORDER BY sort_order, created_at').all(contract.property_id)
           : [];
         const invItems = contract.property_id
           ? db.prepare(`SELECT * FROM property_inventory WHERE property_id=? ORDER BY category, sort_order, name`).all(contract.property_id)

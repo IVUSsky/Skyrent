@@ -811,7 +811,7 @@ module.exports = function(db) {
 
   // ── Property photos ───────────────────────────────────────────
   router.get('/:id/photos', (req, res) => {
-    const rows = db.prepare('SELECT * FROM property_photos WHERE property_id=? ORDER BY created_at').all(req.params.id);
+    const rows = db.prepare('SELECT * FROM property_photos WHERE property_id=? ORDER BY sort_order, created_at').all(req.params.id);
     res.json(rows);
   });
 
@@ -872,6 +872,23 @@ module.exports = function(db) {
       db.prepare('DELETE FROM property_photos WHERE id=?').run(req.params.photoId);
     }
     res.json({ ok: true });
+  });
+
+  // Направи тази снимка корица на обявата.
+  //
+  // Каталогът показва ПЪРВАТА снимка (ORDER BY sort_order, created_at), а дотук
+  // подредба нямаше — корицата беше най-старата качена. Тук избраната отива на
+  // -1, а всички останали се връщат на 0, тоест пак по дата. Така винаги има
+  // точно една изнесена напред и не се трупат отрицателни стойности.
+  router.patch('/:id/photos/:photoId/cover', (req, res) => {
+    try {
+      const row = db.prepare('SELECT id FROM property_photos WHERE id=? AND property_id=?')
+        .get(req.params.photoId, req.params.id);
+      if (!row) return res.status(404).json({ error: 'Снимката не е намерена' });
+      db.prepare('UPDATE property_photos SET sort_order=0 WHERE property_id=?').run(req.params.id);
+      db.prepare('UPDATE property_photos SET sort_order=-1 WHERE id=?').run(row.id);
+      res.json({ ok: true, cover_id: row.id });
+    } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
   // Serve photo file
