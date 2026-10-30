@@ -17,6 +17,7 @@ const { depositSchedule, validateDepositSplit, depositPlaceholders } = require('
 const { preparePdfImages, pickImage, protocolImagePaths, PHOTO_WIDTH, THUMB_WIDTH } = require('../lib/pdfPhotos');
 const { releaseProperty } = require('../lib/propertyRelease');
 const { amountToWords } = require('../lib/bgWords');
+const { termMonths, termBG, termEN } = require('../lib/contractTerm');
 
 const FONT_REGULAR = path.join(__dirname, '../fonts/arial.ttf');
 const FONT_BOLD    = path.join(__dirname, '../fonts/arialbd.ttf');
@@ -228,19 +229,17 @@ function buildFields(contract, issuer) {
     'НАЧИН_ПЛАЩАНЕ':          (!isCompany || contract.payment_method === 'в брой')
                                 ? 'в брой'
                                 : (contract.payment_method === 'карта (Stripe)' ? 'с картово плащане през онлайн портала' : `по банков път на IBAN: ${issuer.iban || ''}`),
-    // ─── Срок в месеци ─────────────────────────────────────────────
-    'СРОК_МЕСЕЦИ':            (() => {
-      if (!contract.start_date || !contract.end_date) return '12';
-      const s = new Date(contract.start_date), e = new Date(contract.end_date);
-      const m = Math.max(1, Math.round((e - s) / (1000*60*60*24*30.44)));
-      return String(m);
-    })(),
-    'СРОК_МЕСЕЦИ_ДУМИ':       (() => {
-      if (!contract.start_date || !contract.end_date) return 'дванадесет';
-      const s = new Date(contract.start_date), e = new Date(contract.end_date);
-      const m = Math.max(1, Math.round((e - s) / (1000*60*60*24*30.44)));
-      return amountToWords(m);
-    })(),
+    // ─── Срок ──────────────────────────────────────────────────────
+    // Броят месеци идва от lib/contractTerm.js, за да не се разминава с
+    // готовите изречения СРОК_BG / СРОК_EN. Безсрочен договор (без крайна
+    // дата) продължава да дава 12 тук — така беше и досега.
+    'СРОК_МЕСЕЦИ':            String(termMonths(contract.start_date, contract.end_date) ?? 12),
+    'СРОК_МЕСЕЦИ_ДУМИ':       amountToWords(termMonths(contract.start_date, contract.end_date) ?? 12),
+    // Цели изречения за двуезичната бланка — тя ги искаше, но ги нямаше и в
+    // договора стоеше буквално самият плейсхолдър. Без точка накрая: бланката
+    // слага своята.
+    'СРОК_BG':                termBG(contract),
+    'СРОК_EN':                termEN(contract),
     // ─── Pro-rata за частичен първи месец ──────────────────────────
     'ПРОПОРЦИОНАЛЕН_НАЕМ':    contract.pro_rata_amount
                                 ? Number(contract.pro_rata_amount).toLocaleString('bg-BG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -558,6 +557,9 @@ async function generateContractPDF(contract, template, issuer, photos = [], opts
 const PHOTOS_DIR    = path.join(DATA_DIR, 'property_photos');
 const INVENTORY_DIR = path.join(DATA_DIR, 'inventory_files');
 
+// Колко снимки влизат в протокола. Осем = една страница в решетка 2x4.
+const PROTOCOL_MAX_PHOTOS = 8;
+
 const CAT_LABELS = {
   'мебели':       '🛋️ Мебели',
   'бяла техника': '🧊 Бяла техника',
@@ -582,6 +584,18 @@ function fmtItemDate(s) {
 // imageBufs — Map път→Buffer с вече смалените картинки (lib/pdfPhotos.js).
 // Липсващ ключ значи „вгради оригинала"; протоколът пак излиза, само по-тежък.
 function appendInventoryAndPhotos(doc, inventory, photos, ML, PW, HEADER_H, PH, FOOTER_H, imageBufs) {
+  // Празен опис се ИЗПИСВА, вместо секцията да изчезне. Иначе не се разбира
+  // дали имуществото го няма, или протоколът просто не го показва.
+  if (!inventory || inventory.length === 0) {
+    doc.addPage();
+    const y0 = HEADER_H + 10;
+    doc.font('B').fontSize(13).fillColor('#0e3d52')
+       .text('ОПИС НА ОБЗАВЕЖДАНЕТО', ML, y0, { width: PW, align: 'center' });
+    doc.moveTo(ML, y0 + 20).lineTo(ML + PW, y0 + 20).lineWidth(0.5).strokeColor('#4AABCC').stroke();
+    doc.font('R').fontSize(9).fillColor('#6b7280')
+       .text('За имота няма въведено обзавеждане. Описът се попълва в Имоти → Инвентар и влиза тук автоматично.',
+             ML, y0 + 34, { width: PW, align: 'center' });
+  }
   // Always start the inventory section on a fresh page so layout is predictable
   if (inventory && inventory.length > 0) {
     doc.addPage();
@@ -682,7 +696,14 @@ function appendInventoryAndPhotos(doc, inventory, photos, ML, PW, HEADER_H, PH, 
   }
 
   // Property photos grid
+  //
+  // Протоколът е документ за подписване, не галерия — 48 снимки го правят
+  // неудобен за четене и за разпечатване. Показват се първите
+  // PROTOCOL_MAX_PHOTOS (по реда от обявата, тоест корицата е първа), а колко
+  // са общо се казва изрично, за да не изглежда, че липсват.
   if (photos && photos.length > 0) {
+    const shown = photos.slice(0, PROTOCOL_MAX_PHOTOS);
+    const hidden = photos.length - shown.length;
     doc.addPage();
     let y = HEADER_H + 10;
 
@@ -696,7 +717,14 @@ function appendInventoryAndPhotos(doc, inventory, photos, ML, PW, HEADER_H, PH, 
     const IMG_H = IMG_W * 0.67;
     let col = 0;
 
-    for (const photo of photos) {
+    if (hidden > 0) {
+      doc.font('R').fontSize(8).fillColor('#6b7280')
+         .text('Показани са първите ' + shown.length + ' от общо ' + photos.length +
+               ' снимки на имота. Пълната галерия е в обявата.', ML, y, { width: PW, align: 'center' });
+      y += 14;
+    }
+
+    for (const photo of shown) {
       const fp = path.join(PHOTOS_DIR, photo.filename);
       if (!fs.existsSync(fp)) continue;
       if (col === 0 && y + IMG_H > PH - FOOTER_H - 10) { doc.addPage(); y = HEADER_H + 10; }
