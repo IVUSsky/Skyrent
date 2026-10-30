@@ -442,7 +442,13 @@ function runTenantMigrations(db) {
    'id_back_path TEXT',
    'signed_pdf_path TEXT',
    'signed_at DATE',
-   "kind TEXT DEFAULT 'наем'"
+   "kind TEXT DEFAULT 'наем'",
+   // Разсрочен депозит по Чл.13 — при подписване / с 1-вия наем / с 2-рия.
+   // NULL и в трите = заварен договор, целият депозит при подписване
+   // (виж lib/depositSchedule.js). Затова НЕ се попълват с подразбиране.
+   'deposit_at_signing REAL',
+   'deposit_part_1 REAL',
+   'deposit_part_2 REAL'
   ].forEach(col => { try { db.exec(`ALTER TABLE contracts ADD COLUMN ${col}`); } catch(_) {} });
   // Архивираните договори са качени вече подписани — сканът им Е подписаният
   // екземпляр. Еднократно ги отбелязваме като такива (флаг в settings, иначе
@@ -539,6 +545,10 @@ function runTenantMigrations(db) {
       db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('deposit_contract_backfill', '1')").run();
     }
   } catch(_) {}
+  // Коя вноска от депозита е тази фактура (1 при подписване, 2 с 1-вия наем,
+  // 3 с 2-рия). NULL = заварена фактура за целия депозит. Пазачът за дубликат
+  // е по (договор, вноска) — иначе втората вноска нямаше да може да се издаде.
+  try { db.exec("ALTER TABLE rent_invoices ADD COLUMN deposit_part INTEGER"); console.log('Migration: added rent_invoices.deposit_part'); } catch(_) {}
   console.log('rent_invoices table ready');
 
   // Addon services catalog + tenant subscriptions
@@ -934,6 +944,40 @@ function runTenantMigrations(db) {
     }
   } catch (e) { console.warn('doc placeholder rewrite skipped:', e.message); }
 
+  // Чл.13 — разсрочването на депозита става попълваемо.
+  //
+  // Бланката ОТДАВНА предвижда депозитът да се плаща на три части, но с
+  // многоточия за ръчно писане и със заковани „януари" и „февруари" — верни
+  // само за договор, започнал през декември. Тук изречението се заменя с
+  // плейсхолдъри, които се пълнят от lib/depositSchedule.js.
+  //
+  // Пазачи, за да не изяде ръчна редакция ([[feedback_migrations_rerun_undo_manual_fixes]]):
+  //   • флаг в settings → минава веднъж;
+  //   • пипа само бланка, в която още стои старото изречение С многоточия;
+  //   • бланка, която вече носи плейсхолдъра, се прескача.
+  try {
+    const done = db.prepare("SELECT value FROM settings WHERE key='deposit_split_placeholders'").get();
+    if (!done) {
+      // Броят точки се различава между бланките — затова шаблон, не точен низ.
+      const OLD = /Депозита ще бъде платен по следния начин:[\s\S]*?наема за месец февруари\./;
+      const NEW = 'Депозита ще бъде платен по следния начин: {{ДЕПОЗИТ_ПРИ_ПОДПИС}} от депозита '
+                + 'се заплащат със сключването на договора, {{ДЕПОЗИТ_ВНОСКА_1}} от депозита се '
+                + 'заплащат с плащането на наема за месец {{ДЕПОЗИТ_МЕСЕЦ_1}} и останалите '
+                + '{{ДЕПОЗИТ_ВНОСКА_2}} от депозита се заплащат с плащането на наема за месец '
+                + '{{ДЕПОЗИТ_МЕСЕЦ_2}}.';
+      let fixed = 0;
+      for (const t of db.prepare("SELECT id, content FROM contract_templates").all()) {
+        const c = t.content || '';
+        if (c.includes('{{ДЕПОЗИТ_ПРИ_ПОДПИС}}')) continue;   // вече е мигрирана
+        if (!OLD.test(c)) continue;                            // пипана на ръка или друга бланка
+        db.prepare("UPDATE contract_templates SET content=? WHERE id=?").run(c.replace(OLD, NEW), t.id);
+        fixed++;
+      }
+      db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('deposit_split_placeholders', ?)").run(String(fixed));
+      if (fixed) console.log('Migration: Чл.13 с плейсхолдъри за разсрочен депозит →', fixed);
+    }
+  } catch (e) { console.warn('deposit split placeholders skipped:', e.message); }
+
   // Нотариални актове — качени документи (PDF/JPEG→PDF) + извлечен текст/данни.
   // Свързват се с имот; могат да обновят данните му и да открият допълнителни
   // единици (мазета/паркоместа) за добавяне в портфолиото.
@@ -996,6 +1040,11 @@ function runTenantMigrations(db) {
     caption TEXT DEFAULT '',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`);
+  // Подредба на снимките. Дотук галерията вървеше само по дата на качване и
+  // корицата в каталога беше „най-старата снимка" — за ап. 5 това се оказа
+  // кадър от коридора с кофа в огледалото. Отрицателна стойност избутва напред;
+  // 0 за всички = заварено поведение (по дата).
+  try { db.exec("ALTER TABLE property_photos ADD COLUMN sort_order INTEGER DEFAULT 0"); console.log('Migration: added property_photos.sort_order'); } catch(_) {}
   console.log('property_photos table ready');
 
   // Chat learning queue — weekly digest of tenant Q&A patterns that aren't

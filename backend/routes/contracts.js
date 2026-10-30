@@ -13,6 +13,8 @@ const { getIssuer, issuerComplete } = require('../lib/branding');
 const { normalizeIdCard } = require('../lib/idCard');
 const { kontrolisiContractsOn, sendContractToKontrolisi } = require('../lib/kontrolisiContract');
 const { reinstateContract } = require('../lib/contractReinstate');
+const { depositSchedule, validateDepositSplit, depositPlaceholders } = require('../lib/depositSchedule');
+const { preparePdfImages, pickImage, protocolImagePaths, PHOTO_WIDTH, THUMB_WIDTH } = require('../lib/pdfPhotos');
 const { releaseProperty } = require('../lib/propertyRelease');
 const { amountToWords } = require('../lib/bgWords');
 
@@ -212,6 +214,10 @@ function buildFields(contract, issuer) {
     'НАЕМ_ДУМИ':              amountToWords(contract.monthly_rent),
     'ДЕПОЗИТ':                Number(contract.deposit || 0).toLocaleString('bg-BG', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
     'ДЕПОЗИТ_ДУМИ':           amountToWords(contract.deposit),
+    // Чл.13 — разсрочването. Месеците се смятат от началната дата, а не са
+    // „януари/февруари", както стоеше в бланката. Договор без разбивка дава
+    // целия депозит при подписване и нули за вноските.
+    ...depositPlaceholders(contract),
     'ПАДЕЖ_ДЕН':              String(contract.payment_day || 5),
     'УСЛОВИЯ':                contract.conditions || '',
     'БЕЛЕЖКИ':                contract.notes || '',
@@ -255,12 +261,27 @@ function buildFields(contract, issuer) {
 // opts.filenamePrefix — file prefix (default "contract"; use "protocol" for standalone)
 // opts.appendInventory — append the property inventory list (grouped by category) (default false; true for protocols)
 // opts.inventory — pre-fetched property_inventory items (with photos array per item)
-function generateContractPDF(contract, template, issuer, photos = [], opts = {}) {
+async function generateContractPDF(contract, template, issuer, photos = [], opts = {}) {
   const appendProtocol     = opts.appendProtocol     !== false;
   const includeSignatures  = opts.includeSignatures  !== false;
   const filenamePrefix     = opts.filenamePrefix     || 'contract';
   const appendInventory    = opts.appendInventory    === true;
   const inventoryItems     = opts.inventory          || [];
+
+  // Прекодираме снимките ПРЕДИ рисуването — pdfkit е синхронен, а sharp не е.
+  // Без това в PDF-а влизат оригиналните файлове от телефон (виж lib/pdfPhotos.js).
+  let imageBufs = new Map();
+  if (appendInventory && (photos.length || inventoryItems.length)) {
+    const { grid, thumbs } = protocolImagePaths({
+      photos, inventory: inventoryItems, photosDir: PHOTOS_DIR, inventoryDir: INVENTORY_DIR,
+    });
+    const [g, t] = await Promise.all([
+      preparePdfImages(grid, PHOTO_WIDTH),
+      preparePdfImages(thumbs, THUMB_WIDTH),
+    ]);
+    imageBufs = new Map([...g, ...t]);
+  }
+
   return new Promise((resolve, reject) => {
     const filename = `${filenamePrefix}_${contract.contract_number.replace(/[^a-zA-Z0-9]/g,'-')}.pdf`;
     const filepath = path.join(PDF_DIR, filename);
@@ -520,7 +541,7 @@ function generateContractPDF(contract, template, issuer, photos = [], opts = {})
 
     // ── Inventory + photos (auto-appended for protocol PDFs) ──────
     if (appendInventory) {
-      appendInventoryAndPhotos(doc, inventoryItems, photos, ML, PW, HEADER_H, PH, FOOTER_H);
+      appendInventoryAndPhotos(doc, inventoryItems, photos, ML, PW, HEADER_H, PH, FOOTER_H, imageBufs);
     }
 
     // ── Appendix: Приемо-предавателен протокол (опционално) ─────
@@ -558,7 +579,9 @@ function fmtItemDate(s) {
 // and the property photos grid to the current PDF document. Used by the
 // standalone protocol generator. Sky logo header is drawn automatically via
 // the pageAdded listener registered by generateContractPDF.
-function appendInventoryAndPhotos(doc, inventory, photos, ML, PW, HEADER_H, PH, FOOTER_H) {
+// imageBufs — Map път→Buffer с вече смалените картинки (lib/pdfPhotos.js).
+// Липсващ ключ значи „вгради оригинала"; протоколът пак излиза, само по-тежък.
+function appendInventoryAndPhotos(doc, inventory, photos, ML, PW, HEADER_H, PH, FOOTER_H, imageBufs) {
   // Always start the inventory section on a fresh page so layout is predictable
   if (inventory && inventory.length > 0) {
     doc.addPage();
@@ -606,7 +629,7 @@ function appendInventoryAndPhotos(doc, inventory, photos, ML, PW, HEADER_H, PH, 
         if (firstPhoto) {
           const fp = path.join(INVENTORY_DIR, firstPhoto.filename);
           if (fs.existsSync(fp)) {
-            try { doc.image(fp, thumbX, y, { fit: [thumbW, thumbH] }); } catch(_) {}
+            try { doc.image(pickImage(imageBufs, fp), thumbX, y, { fit: [thumbW, thumbH] }); } catch(_) {}
           }
         } else {
           doc.rect(thumbX, y, thumbW, thumbH).lineWidth(0.3).strokeColor('#e5e7eb').stroke();
@@ -678,7 +701,7 @@ function appendInventoryAndPhotos(doc, inventory, photos, ML, PW, HEADER_H, PH, 
       if (!fs.existsSync(fp)) continue;
       if (col === 0 && y + IMG_H > PH - FOOTER_H - 10) { doc.addPage(); y = HEADER_H + 10; }
       const x = ML + col * (IMG_W + 10);
-      try { doc.image(fp, x, y, { fit: [IMG_W, IMG_H] }); } catch(_) {}
+      try { doc.image(pickImage(imageBufs, fp), x, y, { fit: [IMG_W, IMG_H] }); } catch(_) {}
       col++;
       if (col === 2) { col = 0; y += IMG_H + 10; }
     }
@@ -1335,6 +1358,11 @@ module.exports = function(db) {
         monthly_rent:  fields.monthly_rent || prop?.['наем'] || 0,
         currency:      fields.currency     || 'EUR',
         deposit:       fields.deposit      || 0,
+        // Разсрочване по Чл.13. undefined (не е подадено) → NULL, тоест
+        // „целият депозит при подписване". Нула НЕ е същото и се пази.
+        deposit_at_signing: fields.deposit_at_signing === undefined || fields.deposit_at_signing === '' ? null : Number(fields.deposit_at_signing),
+        deposit_part_1:     fields.deposit_part_1     === undefined || fields.deposit_part_1     === '' ? null : Number(fields.deposit_part_1),
+        deposit_part_2:     fields.deposit_part_2     === undefined || fields.deposit_part_2     === '' ? null : Number(fields.deposit_part_2),
         payment_day:   fields.payment_day  || 5,
         start_date:    fields.start_date   || null,
         end_date:      fields.end_date     || null,
@@ -1347,8 +1375,13 @@ module.exports = function(db) {
         абонат_вход:  fields.абонат_вход  || prop?.['абонат_вход'] || '',
       };
 
+      // Сборът на вноските трябва да дава депозита — иначе Чл.13 обещава едно,
+      // а фактурите вадят друго. Проверява се ПРЕДИ да се генерира PDF.
+      const splitCheck = validateDepositSplit(contract);
+      if (!splitCheck.ok) return res.status(400).json({ error: splitCheck.error });
+
       const photos = property_id
-        ? db.prepare('SELECT * FROM property_photos WHERE property_id=? ORDER BY created_at').all(property_id)
+        ? db.prepare('SELECT * FROM property_photos WHERE property_id=? ORDER BY sort_order, created_at').all(property_id)
         : [];
       const { filepath, filename } = await generateContractPDF(contract, template, issuer, photos);
       contract.pdf_path = filename;
@@ -1384,11 +1417,12 @@ module.exports = function(db) {
           tenant_name, tenant_address, tenant_egn, tenant_phone, tenant_email, tenant_mol,
           tenant_doc, tenant_doc_number, tenant_doc_valid_until, tenant_doc_date, tenant_doc_country, tenant_dob,
           property_address, property_description, property_area,
-          monthly_rent, currency, deposit, payment_day, payment_method,
+          monthly_rent, currency, deposit, deposit_at_signing, deposit_part_1, deposit_part_2,
+          payment_day, payment_method,
           start_date, end_date, delivery_date, conditions, notes,
           абонат_ток, абонат_вода, абонат_тец, абонат_вход,
           pdf_path, protocol_pdf_path, id_front_path, id_back_path, kind)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       `).run(
         contract.template_id, contract.property_id, contract.contract_number, contract.status,
         contract.landlord_type, contract.landlord_name, contract.landlord_address, contract.landlord_egn,
@@ -1396,7 +1430,9 @@ module.exports = function(db) {
         contract.tenant_name, contract.tenant_address, contract.tenant_egn, contract.tenant_phone, contract.tenant_email, contract.tenant_mol,
         contract.tenant_doc, contract.tenant_doc_number, contract.tenant_doc_valid_until, contract.tenant_doc_date, contract.tenant_doc_country, contract.tenant_dob,
         contract.property_address, contract.property_description, contract.property_area,
-        contract.monthly_rent, contract.currency, contract.deposit, contract.payment_day, contract.payment_method,
+        contract.monthly_rent, contract.currency, contract.deposit,
+        contract.deposit_at_signing, contract.deposit_part_1, contract.deposit_part_2,
+        contract.payment_day, contract.payment_method,
         contract.start_date, contract.end_date, contract.delivery_date, contract.conditions, contract.notes,
         contract.абонат_ток, contract.абонат_вода, contract.абонат_тец, contract.абонат_вход,
         filename, protocolFilename, contract.id_front_path, contract.id_back_path, contract.kind
@@ -1425,7 +1461,7 @@ module.exports = function(db) {
       if (!template) return res.status(404).json({ error: 'Шаблонът не е намерен' });
       const issuer = getIssuer(db);
       const photos = contract.property_id
-        ? db.prepare('SELECT * FROM property_photos WHERE property_id=? ORDER BY created_at').all(contract.property_id)
+        ? db.prepare('SELECT * FROM property_photos WHERE property_id=? ORDER BY sort_order, created_at').all(contract.property_id)
         : [];
       const { filename } = await generateContractPDF(contract, template, issuer, photos);
 
@@ -1465,7 +1501,10 @@ module.exports = function(db) {
     // Същото за имота: Чл.1 се описва от тези три полета.
     'property_address', 'property_description', 'property_area',
     'monthly_rent', 'currency', 'deposit', 'payment_day', 'start_date', 'end_date', 'delivery_date',
-    'conditions', 'notes'];
+    'conditions', 'notes',
+    // Разсрочването по Чл.13
+    'deposit_at_signing', 'deposit_part_1', 'deposit_part_2'];
+const DEPOSIT_PARTS = ['deposit_at_signing', 'deposit_part_1', 'deposit_part_2'];
   router.put('/:id', async (req, res) => {
     try {
       const contract = db.prepare('SELECT * FROM contracts WHERE id=?').get(req.params.id);
@@ -1476,11 +1515,23 @@ module.exports = function(db) {
         if (b[k] === undefined) continue;
         let v = b[k];
         if (['monthly_rent', 'deposit'].includes(k)) v = v === '' || v === null ? 0 : Number(v);
+        // Празна вноска = NULL (няма разбивка), не нула — иначе договор без
+        // разсрочване би станал „0 при подписване" и целият депозит би изчезнал.
+        if (DEPOSIT_PARTS.includes(k)) v = v === '' || v === null ? null : Number(v);
         if (k === 'payment_day') v = v === '' || v === null ? contract.payment_day : Number(v);
-        if (['monthly_rent', 'deposit', 'payment_day'].includes(k) && Number.isNaN(v)) return res.status(400).json({ error: `Невалидна стойност за ${k}` });
+        if ([...DEPOSIT_PARTS, 'monthly_rent', 'deposit', 'payment_day'].includes(k) && v !== null && Number.isNaN(v)) {
+          return res.status(400).json({ error: `Невалидна стойност за ${k}` });
+        }
         if (typeof v === 'string') v = v.trim();
         sets.push(`${k}=?`); vals.push(v === '' ? null : v);
       }
+
+      // Проверката е върху СЛЯТОТО състояние — редакция само на една вноска
+      // иначе би минала, а сборът да се разпадне.
+      const merged = { ...contract };
+      for (const k of EDITABLE) if (b[k] !== undefined) merged[k] = b[k] === '' || b[k] === null ? null : b[k];
+      const splitCheck = validateDepositSplit(merged);
+      if (!splitCheck.ok) return res.status(400).json({ error: splitCheck.error });
       // Смяна на бланката (напр. наемна → интернет): видът следва шаблона
       if (b.template_id !== undefined && b.template_id !== null && b.template_id !== '') {
         const tpl = db.prepare('SELECT id, kind FROM contract_templates WHERE id=?').get(Number(b.template_id));
@@ -1504,7 +1555,7 @@ module.exports = function(db) {
       if (!isScan && template && b.regenerate !== false) {
         const issuer = getIssuer(db);
         const photos = fresh.property_id
-          ? db.prepare('SELECT * FROM property_photos WHERE property_id=? ORDER BY created_at').all(fresh.property_id) : [];
+          ? db.prepare('SELECT * FROM property_photos WHERE property_id=? ORDER BY sort_order, created_at').all(fresh.property_id) : [];
         const { filename } = await generateContractPDF(fresh, template, issuer, photos);
         let protocolFilename = contractKind(fresh.kind) === 'интернет' ? null : fresh.protocol_pdf_path;
         const protocolTmpl = contractKind(fresh.kind) === 'интернет' ? null
@@ -1636,10 +1687,20 @@ module.exports = function(db) {
         if (wantDeposit && kind !== 'интернет' && contract.property_id && Number(contract.deposit) > 0) {
           const withVat = req.body?.deposit_with_vat !== false;
           const month = (contract.start_date || new Date().toISOString()).slice(0, 7);
-          const r = await generateDepositInvoice(db, {
-            property_id: contract.property_id, contract_id: contract.id,
-            amount: Number(contract.deposit), with_vat: withVat, month,
-          });
+          // При разсрочване сега се дължи САМО частта „при подписване".
+          // Останалите вноски излизат в лентата „Депозит без фактура" в своя
+          // месец. Договор без разбивка дава един ред за целия депозит.
+          const sched = depositSchedule(contract);
+          const split = sched.length > 1 || (sched[0] && sched[0].part !== 1);
+          const first = sched.find(s => s.part === 1);
+          const r = (split && !first)
+            ? { ok: false, reason: 'nothing_due_at_signing' }
+            : await generateDepositInvoice(db, {
+                property_id: contract.property_id, contract_id: contract.id,
+                amount: split ? first.amount : Number(contract.deposit),
+                with_vat: withVat, month,
+                deposit_part: split ? 1 : null,
+              });
           deposit_invoice = r.ok ? { id: r.id, invoice_number: r.invoice_number, total: r.total }
                                  : { skipped: r.reason, invoice_number: r.invoice_number };
         }
@@ -1893,7 +1954,7 @@ module.exports = function(db) {
         if (!template) return res.status(404).json({ error: 'Шаблон "Приемо-предавателен протокол" липсва.' });
         const issuer = getIssuer(db);
         const photos = contract.property_id
-          ? db.prepare('SELECT * FROM property_photos WHERE property_id=? ORDER BY created_at').all(contract.property_id)
+          ? db.prepare('SELECT * FROM property_photos WHERE property_id=? ORDER BY sort_order, created_at').all(contract.property_id)
           : [];
         const invItems = contract.property_id
           ? db.prepare(`SELECT * FROM property_inventory WHERE property_id=? ORDER BY category, sort_order, name`).all(contract.property_id)

@@ -100,7 +100,7 @@ module.exports = function(db) {
       "SELECT 1 FROM contracts WHERE tenant_user_id=? AND property_id=? AND status IN ('active','sent','draft')"
     ).get(req.user.id, req.params.id);
     if (!owns) return res.status(403).json({ error: 'Forbidden' });
-    const photos = db.prepare('SELECT id, filename, caption, created_at FROM property_photos WHERE property_id=? ORDER BY created_at').all(req.params.id);
+    const photos = db.prepare('SELECT id, filename, caption, created_at FROM property_photos WHERE property_id=? ORDER BY sort_order, created_at').all(req.params.id);
     res.json(photos);
   });
 

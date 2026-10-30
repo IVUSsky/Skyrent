@@ -11,6 +11,7 @@ const { vatSummary, vatRows } = require('../lib/vatSummary');
 const { getIssuer, issuerComplete, brandEmailHtml } = require('../lib/branding');
 const { reconcileInvoices } = require('../lib/invoiceReconcile');
 const { amountToWordsBG } = require('../lib/bgWords');
+const { depositSchedule } = require('../lib/depositSchedule');
 
 const FONT_REGULAR = path.join(__dirname, '../fonts/arial.ttf');
 const FONT_BOLD    = path.join(__dirname, '../fonts/arialbd.ttf');
@@ -591,7 +592,10 @@ async function generateRentInvoice(db, { property_id, month, payment_type, notes
 // Пазачът за дубликат е ПО ДОГОВОР (rent_invoices.contract_id): депозитът се плаща
 // веднъж за договора, а при нов наемател на същия имот пак се дължи и фактурира.
 // Без разпознат договор (стар имот без запис) — по имот, само сред несвързаните.
-async function generateDepositInvoice(db, { property_id, contract_id, amount, with_vat = false, month, notes, payment_type }) {
+// deposit_part — коя вноска по Чл.13 е тази фактура (1 при подписване, 2 с
+// 1-вия наем, 3 с 2-рия). Без него се пази заварено поведение: една фактура за
+// целия депозит на договор.
+async function generateDepositInvoice(db, { property_id, contract_id, amount, with_vat = false, month, notes, payment_type, deposit_part = null }) {
   const prop = db.prepare('SELECT * FROM properties WHERE id = ?').get(property_id);
   if (!prop) return { ok: false, reason: 'no_property' };
 
@@ -606,17 +610,25 @@ async function generateDepositInvoice(db, { property_id, contract_id, amount, wi
   const gross = Math.round(Number(amount != null ? amount : (contract?.deposit || 0)) * 100) / 100;
   if (!(gross > 0)) return { ok: false, reason: 'no_amount' };
 
+  // Пазачът е по (договор, вноска). При разсрочен депозит втората вноска е
+  // отделна фактура и старият пазач „една на договор" би я спрял.
   const existing = contract
-    ? db.prepare(`SELECT id, invoice_number FROM rent_invoices WHERE contract_id=? AND type='invoice' AND product='депозит'`).get(contract.id)
+    ? (deposit_part
+        ? db.prepare(`SELECT id, invoice_number FROM rent_invoices WHERE contract_id=? AND type='invoice' AND product='депозит' AND deposit_part=?`).get(contract.id, deposit_part)
+        : db.prepare(`SELECT id, invoice_number FROM rent_invoices WHERE contract_id=? AND type='invoice' AND product='депозит' AND deposit_part IS NULL`).get(contract.id))
     : db.prepare(`SELECT id, invoice_number FROM rent_invoices WHERE property_id=? AND contract_id IS NULL AND type='invoice' AND product='депозит'`).get(property_id);
   if (existing) return { ok: false, reason: 'duplicate', id: existing.id, invoice_number: existing.invoice_number };
 
   let recipient = {};
   try { recipient = JSON.parse(prop.invoice_recipient || '{}'); } catch {}
 
-  const label = contract?.contract_number
+  // При разсрочване редът казва коя вноска е — иначе три еднакви реда по
+  // договора не се различават нито от наемателя, нито от счетоводителя.
+  const PART_LABEL = { 1: '1-ва вноска (при подписване)', 2: '2-ра вноска', 3: '3-та вноска' };
+  const suffix = deposit_part && PART_LABEL[deposit_part] ? ` — ${PART_LABEL[deposit_part]}` : '';
+  const label = (contract?.contract_number
     ? `Гаранционен депозит по договор за наем № ${contract.contract_number}`
-    : 'Гаранционен депозит по договор за наем';
+    : 'Гаранционен депозит по договор за наем') + suffix;
 
   const r = await createSimpleInvoice(db, {
     property_id,
@@ -635,6 +647,11 @@ async function generateDepositInvoice(db, { property_id, contract_id, amount, wi
     notes: notes || 'Депозитът подлежи на връщане при прекратяване на договора съгласно Чл.8.',
     contract_id: contract?.id || null,
   });
+
+  // createSimpleInvoice не знае за вноските — колоната се пише след него.
+  if (deposit_part) {
+    try { db.prepare('UPDATE rent_invoices SET deposit_part=? WHERE id=?').run(deposit_part, r.id); } catch (_) {}
+  }
 
   if (contract?.tenant_user_id) {
     notifyTenant(db, contract.tenant_user_id, {
@@ -840,20 +857,48 @@ module.exports = function(db) {
   });
 
   // Кои действащи договори имат депозит, за който още няма фактура.
+  //
+  // При разсрочване по Чл.13 един договор дава до ТРИ реда — по един на вноска,
+  // всеки със своята сума и месец на падежа. Договор без разбивка дава един ред
+  // за целия депозит, точно както досега.
   router.get('/deposit-pending', (req, res) => {
     try {
-      const rows = db.prepare(`
-        SELECT c.id AS contract_id, c.contract_number, c.property_id, c.deposit,
-               c.tenant_name, c.start_date, p.адрес AS address
+      const contracts = db.prepare(`
+        SELECT c.*, p.адрес AS address
         FROM contracts c
         JOIN properties p ON p.id = c.property_id
         WHERE c.status='active' AND COALESCE(c.kind,'наем')='наем' AND c.deposit > 0
-          AND NOT EXISTS (
-            SELECT 1 FROM rent_invoices i
-            WHERE i.contract_id = c.id AND i.type='invoice' AND i.product='депозит'
-          )
         ORDER BY c.start_date DESC
       `).all();
+
+      const issuedWhole = db.prepare(`SELECT 1 FROM rent_invoices WHERE contract_id=? AND type='invoice' AND product='депозит' AND deposit_part IS NULL`);
+      const issuedPart  = db.prepare(`SELECT 1 FROM rent_invoices WHERE contract_id=? AND type='invoice' AND product='депозит' AND deposit_part=?`);
+
+      const rows = [];
+      for (const c of contracts) {
+        const sched = depositSchedule(c);
+        const split = sched.length > 1 || (sched[0] && sched[0].part !== 1);
+        if (!split) {
+          // Заварен договор: един ред за целия депозит.
+          if (issuedWhole.get(c.id)) continue;
+          rows.push({
+            contract_id: c.id, contract_number: c.contract_number, property_id: c.property_id,
+            deposit: c.deposit, amount: c.deposit, tenant_name: c.tenant_name,
+            start_date: c.start_date, address: c.address,
+            deposit_part: null, part_label: null, due_month: null,
+          });
+          continue;
+        }
+        for (const s of sched) {
+          if (issuedPart.get(c.id, s.part)) continue;
+          rows.push({
+            contract_id: c.id, contract_number: c.contract_number, property_id: c.property_id,
+            deposit: c.deposit, amount: s.amount, tenant_name: c.tenant_name,
+            start_date: c.start_date, address: c.address,
+            deposit_part: s.part, part_label: s.label, due_month: s.month,
+          });
+        }
+      }
       res.json({ contracts: rows });
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
@@ -863,10 +908,13 @@ module.exports = function(db) {
   // начислява ставката на издателя.
   router.post('/deposit', async (req, res) => {
     try {
-      const { property_id, contract_id, amount, with_vat, month, notes, payment_type } = req.body;
+      const { property_id, contract_id, amount, with_vat, month, notes, payment_type, deposit_part } = req.body;
       if (!property_id) return res.status(400).json({ error: 'property_id е задължителен' });
       if (!issuerComplete(getIssuer(db))) return res.status(400).json({ error: 'Попълнете фирмените данни (Настройки → Данни на издателя) преди да издавате фактури.', code: 'ISSUER_INCOMPLETE' });
-      const r = await generateDepositInvoice(db, { property_id, contract_id: contract_id || null, amount, with_vat: !!with_vat, month, notes, payment_type });
+      const r = await generateDepositInvoice(db, {
+        property_id, contract_id: contract_id || null, amount, with_vat: !!with_vat, month, notes, payment_type,
+        deposit_part: deposit_part ? Number(deposit_part) : null,
+      });
       if (!r.ok) {
         const map = {
           no_property: ['Имотът не е намерен', 404],

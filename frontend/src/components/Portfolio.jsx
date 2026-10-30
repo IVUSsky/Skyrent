@@ -315,6 +315,17 @@ export default function Portfolio({ API, role }) {
       .then(() => setPhotos(ph => ph.filter(p => p.id !== photoId)))
   }
 
+  // Изнася снимката най-отпред — тя става корица в каталога. Пречита се от
+  // сървъра, за да е подредбата същата като в обявата.
+  const makeCover = (photoId) => {
+    apiFetch(`${API}/api/properties/${photosProp.id}/photos/${photoId}/cover`, { method: 'PATCH' })
+      .then(r => r.json())
+      .then(d => {
+        if (!d.ok) return
+        return apiFetch(`${API}/api/properties/${photosProp.id}/photos`).then(r => r.json()).then(setPhotos)
+      })
+  }
+
   const totalRent = properties.filter(p => p['статус'] === '✅').reduce((s, p) => s + (p['наем'] || 0), 0)
 
   // Изтриване на имот (+ свързаните данни). Admin only.
@@ -759,9 +770,18 @@ export default function Portfolio({ API, role }) {
                         <img
                           src={authUrl(`${API}/api/properties/${photosProp.id}/photos/${ph.id}/file`)}
                           alt={ph.caption || ''}
-                          className="w-full h-36 object-cover rounded-lg border border-gray-200"
+                          className={`w-full h-36 object-cover rounded-lg border ${ph.sort_order < 0 ? 'border-amber-400 ring-2 ring-amber-300' : 'border-gray-200'}`}
                           onError={e => { e.target.src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg"/>'; }}
                         />
+                        {/* Корицата е първата снимка в каталога — дотук беше
+                            просто най-старата качена и често слаб кадър. */}
+                        {ph.sort_order < 0
+                          ? <span className="absolute top-1 left-1 bg-amber-500 text-white rounded px-1.5 py-0.5 text-[10px] font-semibold">★ Корица</span>
+                          : <button
+                              onClick={() => makeCover(ph.id)}
+                              className="absolute top-1 left-1 bg-white/90 border border-amber-300 text-amber-800 rounded px-1.5 py-0.5 text-[10px] opacity-0 group-hover:opacity-100 transition-opacity"
+                              title="Направи корица на обявата"
+                            >★ Корица</button>}
                         <button
                           onClick={() => deletePhoto(ph.id)}
                           className="absolute top-1 right-1 bg-red-600 text-white rounded-full w-6 h-6 text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"

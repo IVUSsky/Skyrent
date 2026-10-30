@@ -90,7 +90,7 @@ module.exports = function (getOrgDb, controlDb) {
         for (const p of rows) {
           if (p.наемател && String(p.наемател).trim()) continue; // отдаден → не се показва
           let photo = null;
-          try { photo = db.prepare('SELECT id FROM property_photos WHERE property_id=? ORDER BY created_at LIMIT 1').get(p.id)?.id ?? null; } catch {}
+          try { photo = db.prepare('SELECT id FROM property_photos WHERE property_id=? ORDER BY sort_order, created_at LIMIT 1').get(p.id)?.id ?? null; } catch {}
           out.push({ org_id: o.id, id: p.id, район: p.район, адрес: p.адрес, наем: p.наем, тип: p.тип, площ: p.площ, desc: p.listing_desc || '', photo, video: !!p.listing_video });
         }
       }
@@ -111,7 +111,7 @@ module.exports = function (getOrgDb, controlDb) {
     const p = db.prepare('SELECT id, адрес, район, наем, тип, площ, listing_desc, listing_video, published, наемател FROM properties WHERE id=?').get(req.params.id);
     // 404 ако не е публикувана ИЛИ е отдадена (има наемател)
     if (!p || !p.published || (p.наемател && String(p.наемател).trim())) return res.status(404).json({ error: 'Не е намерена или вече е отдадена' });
-    const photos = db.prepare('SELECT id FROM property_photos WHERE property_id=? ORDER BY created_at').all(p.id);
+    const photos = db.prepare('SELECT id FROM property_photos WHERE property_id=? ORDER BY sort_order, created_at').all(p.id);
     let white_label = false;
     try { const w = db.prepare("SELECT value FROM settings WHERE key='white_label'").get(); white_label = !!w && (w.value === 'true' || w.value === '"true"'); } catch (_) {}
     res.json({

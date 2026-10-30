@@ -17,6 +17,68 @@ const KIND_LABELS = {
 }
 const kindOf = c => (c?.kind || 'наем') === 'интернет' ? 'интернет' : 'наем'
 
+const money2 = n => Number(n || 0).toLocaleString('bg-BG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
+// Разсрочване на депозита по Чл.13 — трите вноски. Ползва се и в новата форма,
+// и в редакцията, затова е отделен компонент върху {form, setForm}.
+//
+// Празни и трите полета = няма разсрочване (целият депозит при подписване).
+// Затова включването ги попълва с нещо смислено, а изключването ги ИЗПРАЗВА —
+// нула в „при подписване" би значела друго и бекендът я пази.
+function DepositSplit({ form, setForm }) {
+  const deposit = Number(form.deposit) || 0
+  const parts = ['deposit_at_signing', 'deposit_part_1', 'deposit_part_2']
+  const on = parts.some(k => String(form[k] ?? '') !== '')
+  const sum = parts.reduce((s, k) => s + (Number(form[k]) || 0), 0)
+  // Сравнение в стотинки — 166.67 × 3 иначе не дава 500.
+  const matches = Math.round(sum * 100) === Math.round(deposit * 100)
+
+  const toggle = (next) => setForm(f => next
+    ? { ...f, deposit_at_signing: String(deposit || ''), deposit_part_1: '0', deposit_part_2: '0' }
+    : { ...f, deposit_at_signing: '', deposit_part_1: '', deposit_part_2: '' })
+
+  if (!deposit) return null
+  return (
+    <div className={`mt-3 rounded-lg border p-3 ${on ? 'bg-amber-50 border-amber-200' : 'border-gray-200'}`}>
+      <label className="flex items-center gap-2 cursor-pointer">
+        <input type="checkbox" checked={on} onChange={e => toggle(e.target.checked)}
+          className="rounded border-gray-300 text-amber-600 focus:ring-amber-500" />
+        <span className="text-sm font-semibold text-amber-900">Разсрочи депозита (Чл.13)</span>
+      </label>
+      {!on && (
+        <div className="text-xs text-gray-500 mt-1">
+          Сега целият депозит {money2(deposit)} € се дължи при подписване.
+        </div>
+      )}
+      {on && (
+        <>
+          <div className="grid grid-cols-3 gap-2 mt-2">
+            {[['deposit_at_signing', 'При подписване'],
+              ['deposit_part_1', 'С 1-вия наем'],
+              ['deposit_part_2', 'С 2-рия наем']].map(([k, l]) => (
+              <div key={k}>
+                <label className="block text-[11px] font-medium text-amber-900 mb-1">{l}</label>
+                <input type="number" step="0.01" min="0" value={form[k] ?? ''}
+                  onChange={e => setForm(f => ({ ...f, [k]: e.target.value }))}
+                  className="w-full border border-amber-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500" />
+              </div>
+            ))}
+          </div>
+          <div className={`text-xs mt-2 ${matches ? 'text-emerald-700' : 'text-red-600 font-semibold'}`}>
+            {matches
+              ? `✓ ${money2(sum)} € — сборът отговаря на депозита`
+              : `Сборът е ${money2(sum)} €, а депозитът е ${money2(deposit)} €`}
+          </div>
+          <div className="text-[11px] text-amber-800 mt-1">
+            Месеците в договора се смятат от началната дата. Всяка вноска излиза
+            като отделна депозитна фактура в своя месец.
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
 function fmtDate(d) {
   if (!d) return '—'
   return new Date(d).toLocaleDateString('bg-BG')
@@ -376,6 +438,8 @@ export default function Contracts({ API }) {
     id_front_path: '', id_back_path: '',
     property_address: '', property_description: '', property_area: '',
     monthly_rent: '', currency: 'EUR', deposit: '', payment_day: '5',
+    // Разсрочване по Чл.13 — празно значи „целият депозит при подписване".
+    deposit_at_signing: '', deposit_part_1: '', deposit_part_2: '',
     start_date: '', end_date: '', delivery_date: '', conditions: '', notes: '',
     video_surveillance_clause: false,
   })
@@ -538,6 +602,7 @@ export default function Contracts({ API }) {
     setEditForm({
       tenant_name: c.tenant_name || '', tenant_email: c.tenant_email || '', tenant_phone: c.tenant_phone || '',
       monthly_rent: c.monthly_rent ?? '', currency: c.currency || 'EUR', deposit: c.deposit ?? '',
+      deposit_at_signing: c.deposit_at_signing ?? '', deposit_part_1: c.deposit_part_1 ?? '', deposit_part_2: c.deposit_part_2 ?? '',
       payment_day: c.payment_day ?? 5, start_date: c.start_date || '', end_date: c.end_date || '', notes: c.notes || '',
       conditions: c.conditions || '', template_id: c.template_id || '',
       landlord_type: c.landlord_type || 'физическо', landlord_name: c.landlord_name || '',
@@ -1520,6 +1585,7 @@ export default function Contracts({ API }) {
                     </div>
                   ))}
                 </div>
+                {!isNetForm && <DepositSplit form={newForm} setForm={setNewForm} />}
                 {!isNetForm && <div className="mt-3">
                   <label className="block text-xs font-medium text-gray-600 mb-1">Допълнителни условия / Бележки</label>
                   <textarea value={newForm.conditions} onChange={e=>setNewForm(f=>({...f,conditions:e.target.value}))}
@@ -2031,6 +2097,11 @@ export default function Contracts({ API }) {
                 <label className="block text-xs font-medium text-gray-600 mb-1">Ден на плащане</label>
                 <input type="number" min="1" max="31" value={editForm.payment_day} onChange={e => setEditForm(f => ({ ...f, payment_day: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-3 py-2" />
               </div>
+              {kindOf(editModal) === 'наем' && (
+                <div className="md:col-span-2">
+                  <DepositSplit form={editForm} setForm={setEditForm} />
+                </div>
+              )}
               <div className="md:col-span-2">
                 <label className="block text-xs font-medium text-gray-600 mb-1">{kindOf(editModal) === 'интернет' || (templates.find(t => String(t.id) === String(editForm.template_id)) && kindOf(templates.find(t => String(t.id) === String(editForm.template_id))) === 'интернет') ? 'Абонаментен план ({{УСЛОВИЯ}} в бланката — напр. „Net 300 + TV — 300 Mbps")' : 'Допълнителни условия ({{УСЛОВИЯ}})'}</label>
                 <textarea rows={2} value={editForm.conditions} onChange={e => setEditForm(f => ({ ...f, conditions: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-3 py-2" />
