@@ -13,6 +13,7 @@ const { getIssuer, issuerComplete } = require('../lib/branding');
 const { normalizeIdCard } = require('../lib/idCard');
 const { kontrolisiContractsOn, sendContractToKontrolisi } = require('../lib/kontrolisiContract');
 const { reinstateContract } = require('../lib/contractReinstate');
+const { releaseProperty } = require('../lib/propertyRelease');
 const { amountToWords } = require('../lib/bgWords');
 
 const FONT_REGULAR = path.join(__dirname, '../fonts/arial.ttf');
@@ -1737,8 +1738,14 @@ module.exports = function(db) {
   });
 
   // Terminate contract
+  //
+  // `release_listing` (по подразбиране ВКЛЮЧЕНО) освобождава имота: изчиства
+  // наемателя, с което публичната обява на вече публикуван имот се появява сама.
+  // Дотук това се правеше на ръка — името се триеше от 🏢 Имоти. Виж
+  // lib/propertyRelease.js за това какво НЕ се пипа (`published`, `наем`, `статус`).
   router.post('/:id/terminate', (req, res) => {
     const { end_date } = req.body;
+    const releaseListing = req.body.release_listing !== false;
     const contract = db.prepare('SELECT * FROM contracts WHERE id=?').get(req.params.id);
     if (!contract) return res.status(404).json({ error: 'Not found' });
     db.prepare("UPDATE contracts SET status='terminated', terminated_at=datetime('now'), end_date=? WHERE id=?")
@@ -1748,7 +1755,12 @@ module.exports = function(db) {
       db.prepare("UPDATE tenant_history SET end_date=? WHERE property_id=? AND (end_date IS NULL OR end_date='')")
         .run(end_date || new Date().toISOString().slice(0,10), contract.property_id);
     }
-    res.json({ ok: true });
+    // Освобождаването е СЛЕД смяната на статуса — пазачът „друг действащ
+    // договор" иначе щеше да брои този, който току-що прекратяваме.
+    const listing = releaseListing
+      ? releaseProperty(db, contract)
+      : { released: false, reason: 'not_requested' };
+    res.json({ ok: true, listing });
   });
 
   // Възстановяване на прекратен договор — обратното на ⛔.

@@ -11,13 +11,16 @@ const addContract = (over = {}) => {
     contract_number: 'C-1', tenant_name: 'Хабип Муса', property_id: 1,
     status: 'terminated', start_date: '2026-08-09', end_date: '2026-08-09',
     monthly_rent: 667, deposit: 1000, kind: 'наем', terminated_at: '2026-08-09 19:49:31',
-    activated_at: '2026-08-09 19:51:48', conditions: null, notes: null, ...over,
+    activated_at: '2026-08-09 19:51:48', conditions: null, notes: null,
+    tenant_phone: null, tenant_email: null, ...over,
   };
   return db.prepare(`
     INSERT INTO contracts (contract_number, tenant_name, property_id, status, start_date, end_date,
-                           monthly_rent, deposit, kind, terminated_at, activated_at, conditions, notes)
+                           monthly_rent, deposit, kind, terminated_at, activated_at, conditions, notes,
+                           tenant_phone, tenant_email)
     VALUES (@contract_number, @tenant_name, @property_id, @status, @start_date, @end_date,
-            @monthly_rent, @deposit, @kind, @terminated_at, @activated_at, @conditions, @notes)
+            @monthly_rent, @deposit, @kind, @terminated_at, @activated_at, @conditions, @notes,
+            @tenant_phone, @tenant_email)
   `).run(row).lastInsertRowid;
 };
 
@@ -40,7 +43,7 @@ beforeEach(() => {
       contract_number TEXT, tenant_name TEXT, property_id INTEGER, status TEXT,
       start_date TEXT, end_date TEXT, monthly_rent REAL, deposit REAL,
       kind TEXT DEFAULT 'наем', terminated_at TEXT, activated_at TEXT,
-      conditions TEXT, notes TEXT
+      conditions TEXT, notes TEXT, tenant_phone TEXT, tenant_email TEXT
     );
     CREATE TABLE tenant_history (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -50,7 +53,8 @@ beforeEach(() => {
     );
     CREATE TABLE properties (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      наемател TEXT, наем REAL, статус TEXT, updated_at DATETIME
+      наемател TEXT, наем REAL, статус TEXT, телефон TEXT, email TEXT,
+      updated_at DATETIME
     );
     INSERT INTO properties (id, наемател, наем, статус) VALUES (1, NULL, 0, '🔑');
   `);
@@ -130,12 +134,40 @@ describe('възстановяване на прекратен договор', 
     expect(p.статус).toBe('✅');
   });
 
-  it('интернет договорът не пипа имота и историята', () => {
+  // ⛔ вече изчиства и контактите (lib/propertyRelease.js) — щом ги чисти, ↩️
+  // трябва да ги връща, иначе възстановеният договор оставя имот без телефон.
+  it('връща телефона и имейла на наемателя', () => {
+    const id = addContract({ tenant_phone: '0888123456', tenant_email: 'habip@example.com' });
+    reinstateContract(db, get(id));
+    const p = db.prepare('SELECT * FROM properties WHERE id=1').get();
+    expect(p.телефон).toBe('0888123456');
+    expect(p.email).toBe('habip@example.com');
+  });
+
+  it('интернет договорът не пипа наема и историята', () => {
     const id = addContract({ kind: 'интернет', monthly_rent: 25.98 });
     const r = reinstateContract(db, get(id));
     expect(r.history).toBe('skipped');
     expect(history()).toHaveLength(0);
     expect(db.prepare('SELECT * FROM properties WHERE id=1').get().наем).toBe(0);
     expect(get(id).status).toBe('active');
+  });
+
+  it('интернет договорът връща наемателя, щом имотът няма наемен договор', () => {
+    const id = addContract({ kind: 'интернет', monthly_rent: 25.98, tenant_phone: '0888123456' });
+    reinstateContract(db, get(id));
+    const p = db.prepare('SELECT * FROM properties WHERE id=1').get();
+    expect(p.наемател).toBe('Хабип Муса');
+    expect(p.телефон).toBe('0888123456');
+  });
+
+  it('интернет договорът не презаписва истинския наемател', () => {
+    addContract({ tenant_name: 'Наемателят', status: 'active', kind: 'наем' });
+    db.prepare("UPDATE properties SET наемател='Наемателят' WHERE id=1").run();
+    const id = addContract({ kind: 'интернет', tenant_name: 'Абонатът' });
+
+    reinstateContract(db, get(id));
+
+    expect(db.prepare('SELECT * FROM properties WHERE id=1').get().наемател).toBe('Наемателят');
   });
 });

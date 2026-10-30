@@ -75,15 +75,35 @@ function reinstateContract(db, contract, opts = {}) {
      WHERE id=?
   `).run(endDate, contract.id);
 
+  if (!contract.property_id) return { history: 'skipped', closed: 0, endDate };
+
   // Интернет договорът не пипа наема, заетостта и историята — както при
-  // активирането (същият наемател плаща и наем на същия имот).
-  if (!contract.property_id || kind !== KIND_RENT) return { history: 'skipped', closed: 0, endDate };
+  // активирането (същият наемател плаща и наем на същия имот). Връща само
+  // наемателя и то само при имот без действащ наемен договор — иначе би
+  // презаписал истинския наемател с абоната. Това е нужно, откакто ⛔
+  // освобождава имота (lib/propertyRelease.js): преди името оставаше на място
+  // и нямаше какво да се възстановява.
+  if (kind !== KIND_RENT) {
+    const rentActive = db.prepare(
+      "SELECT 1 FROM contracts WHERE property_id=? AND status='active' AND COALESCE(kind,'наем')=? AND id<>?"
+    ).get(contract.property_id, KIND_RENT, contract.id);
+    if (!rentActive) {
+      db.prepare(`
+        UPDATE properties
+           SET наемател=?, телефон=?, email=?, updated_at=CURRENT_TIMESTAMP
+         WHERE id=?
+      `).run(contract.tenant_name, contract.tenant_phone || null,
+             contract.tenant_email || null, contract.property_id);
+    }
+    return { history: 'skipped', closed: 0, endDate };
+  }
 
   db.prepare(`
     UPDATE properties
-       SET наемател=?, наем=?, статус='✅', updated_at=CURRENT_TIMESTAMP
+       SET наемател=?, наем=?, телефон=?, email=?, статус='✅', updated_at=CURRENT_TIMESTAMP
      WHERE id=?
-  `).run(contract.tenant_name, contract.monthly_rent, contract.property_id);
+  `).run(contract.tenant_name, contract.monthly_rent, contract.tenant_phone || null,
+         contract.tenant_email || null, contract.property_id);
 
   return { ...restoreTenantHistory(db, contract, endDate, today), endDate };
 }

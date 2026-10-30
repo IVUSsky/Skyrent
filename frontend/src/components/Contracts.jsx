@@ -561,6 +561,9 @@ export default function Contracts({ API }) {
       .finally(() => setEditSaving(false))
   }
   const [termDate, setTermDate] = useState(new Date().toISOString().slice(0,10))
+  // ⛔ освобождава имота по подразбиране — обявата на вече публикуван имот лъсва
+  // сама. Отметката е тук, а не в скрита настройка, защото каталогът е публичен.
+  const [termRelease, setTermRelease] = useState(true)
   // ↩️ Възстановяване на прекратен договор — прекратяването е презаписало
   // крайната дата с деня на натискане, затова тя се пита наново.
   const [reinstateModal, setReinstateModal] = useState(null)
@@ -760,13 +763,38 @@ export default function Contracts({ API }) {
       .catch(e => { setSendingKontrolisi(null); showToast(e.message, 'error') })
   }
 
+  // Казва какво ТОЧНО е станало с обявата. Мълчаливото „Прекратен" остава, когато
+  // няма какво да се каже; иначе обещава каталог, който няма да покаже нищо
+  // (имот без published си стои скрит).
+  const terminationToast = (listing) => {
+    if (!listing || !listing.released) {
+      if (listing && listing.reason === 'other_active_contract') {
+        return ['Договорът е прекратен. Имотът остава зает — има друг действащ договор.', 'success']
+      }
+      return ['Договорът е прекратен', 'success']
+    }
+    if (!listing.published) {
+      return ['Договорът е прекратен. Имотът е свободен — пусни обявата от 🏢 Имоти.', 'success']
+    }
+    return listing.photos
+      ? ['Договорът е прекратен — обявата е в каталога', 'success']
+      : ['Договорът е прекратен — обявата е в каталога, но е без снимки.', 'success']
+  }
+
   const terminateContract = () => {
     apiFetch(`${API}/api/contracts/${termModal.id}/terminate`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ end_date: termDate }),
+      // Само наемният договор освобождава имота. Интернет договорът остава както
+      // беше — таксата не е наем и прекратяването му не значи, че имотът се дава.
+      body: JSON.stringify({ end_date: termDate, release_listing: kindOf(termModal) === 'наем' && termRelease }),
     })
       .then(r => r.json())
-      .then(d => { d.ok ? (setTermModal(null), showToast('Договорът е прекратен'), load()) : showToast(d.error, 'error') })
+      .then(d => {
+        if (!d.ok) return showToast(d.error, 'error')
+        setTermModal(null)
+        showToast(...terminationToast(d.listing))
+        load()
+      })
   }
 
   const reinstate = () => {
@@ -1151,7 +1179,7 @@ export default function Contracts({ API }) {
                               </button>
                             )}
                             {c.status === 'active' && (
-                              <button onClick={() => { setTermModal(c); setTermDate(new Date().toISOString().slice(0,10)) }}
+                              <button onClick={() => { setTermModal(c); setTermDate(new Date().toISOString().slice(0,10)); setTermRelease(true) }}
                                 className="px-2 py-1 text-xs bg-red-50 border border-red-200 text-red-600 hover:bg-red-100 rounded" title="Прекрати">
                                 ⛔
                               </button>
@@ -2035,6 +2063,19 @@ export default function Contracts({ API }) {
             <label className="block text-xs font-medium text-gray-700 mb-1">Дата на прекратяване</label>
             <input type="date" value={termDate} onChange={e => setTermDate(e.target.value)}
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-red-500" />
+            {kindOf(termModal) === 'наем' && (
+              <label className="flex items-start gap-2 mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg cursor-pointer">
+                <input type="checkbox" checked={termRelease} onChange={e => setTermRelease(e.target.checked)}
+                  className="mt-0.5 rounded border-gray-300 text-amber-600 focus:ring-amber-500" />
+                <span className="text-xs text-amber-900">
+                  <b>Освободи имота и пусни обявата</b>
+                  <span className="block text-amber-800 mt-0.5">
+                    Изчиства наемателя от имота, с което публикуваната обява се връща в каталога.
+                    Имот, който не е пускан в каталога, само се освобождава.
+                  </span>
+                </span>
+              </label>
+            )}
             <div className="flex justify-end gap-2">
               <button onClick={() => setTermModal(null)} className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded-lg">Отказ</button>
               <button onClick={terminateContract} className="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg">Прекрати</button>
