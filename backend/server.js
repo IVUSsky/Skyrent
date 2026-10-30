@@ -89,6 +89,11 @@ async function main() {
     res.json({ ok: true, ts: Date.now(), sharp, sharp_error, formats });
   });
 
+  // Кой код върти (public, без база) — за проверка СЛЕД мърдж. `main` не е
+  // доказателство, че продът го върти; виж lib/version.js защо.
+  const { versionInfo } = require('./lib/version');
+  app.get('/api/version', (req, res) => res.json(versionInfo()));
+
   // Auth (public)
   app.use('/api/auth', require('./routes/auth')(controlDb, getOrgDb));
 
