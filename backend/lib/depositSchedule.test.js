@@ -73,6 +73,22 @@ describe('проверка на разбивката', () => {
   it('отрицателна вноска се отказва', () => {
     expect(validateDepositSplit({ deposit: 700, deposit_at_signing: 900, deposit_part_1: -200, deposit_part_2: 0 }).ok).toBe(false);
   });
+
+  // Полето „Депозит" е `number` без долна граница и стрелката го вкарва под
+  // нулата. Дотук -2 минаваше, стига вноските да дават -2.
+  it('отрицателен депозит се отказва, дори вноските да дават точно него', () => {
+    const r = validateDepositSplit({ deposit: -2, deposit_at_signing: -2, deposit_part_1: 0, deposit_part_2: 0 });
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain('отрицателен');
+  });
+
+  it('отрицателен депозит се отказва и без разбивка', () => {
+    expect(validateDepositSplit({ deposit: -2 }).ok).toBe(false);
+  });
+
+  it('нулев депозит минава — договор без депозит е нормален', () => {
+    expect(validateDepositSplit({ deposit: 0 }).ok).toBe(true);
+  });
 });
 
 describe('плейсхолдърите в Чл.13', () => {

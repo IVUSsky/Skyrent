@@ -25,6 +25,11 @@ const money2 = n => Number(n || 0).toLocaleString('bg-BG', { minimumFractionDigi
 // Празни и трите полета = няма разсрочване (целият депозит при подписване).
 // Затова включването ги попълва с нещо смислено, а изключването ги ИЗПРАЗВА —
 // нула в „при подписване" би значела друго и бекендът я пази.
+//
+// Подразбирането при включване е ПОЛОВИНА С ПЪРВИЯ НАЕМ, ПОЛОВИНА С ВТОРИЯ,
+// нищо при подписване — това е случаят, заради който изобщо има разсрочване.
+// Първо беше „всичко при подписване" и трябваше да се нулират три полета на
+// ръка, при което едно от тях лесно отиваше под нулата.
 function DepositSplit({ form, setForm }) {
   const deposit = Number(form.deposit) || 0
   const parts = ['deposit_at_signing', 'deposit_part_1', 'deposit_part_2']
@@ -33,10 +38,29 @@ function DepositSplit({ form, setForm }) {
   // Сравнение в стотинки — 166.67 × 3 иначе не дава 500.
   const matches = Math.round(sum * 100) === Math.round(deposit * 100)
 
-  const toggle = (next) => setForm(f => next
-    ? { ...f, deposit_at_signing: String(deposit || ''), deposit_part_1: '0', deposit_part_2: '0' }
-    : { ...f, deposit_at_signing: '', deposit_part_1: '', deposit_part_2: '' })
+  const toggle = (next) => setForm(f => {
+    if (!next) return { ...f, deposit_at_signing: '', deposit_part_1: '', deposit_part_2: '' }
+    // Остатъкът от нечетна стотинка отива на първата вноска.
+    const c = Math.round(deposit * 100)
+    const half = Math.floor(c / 2)
+    return {
+      ...f,
+      deposit_at_signing: '0',
+      deposit_part_1: ((c - half) / 100).toFixed(2),
+      deposit_part_2: (half / 100).toFixed(2),
+    }
+  })
 
+  // Отрицателен депозит е грешка в самото поле — панелът не бива да я
+  // преписва в „при подписване" и да я представя за разсрочване.
+  if (deposit < 0) {
+    return (
+      <div className="mt-3 rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-700">
+        Депозитът е <b>{money2(deposit)} €</b> — отрицателен. Поправи сумата
+        по-горе; разсрочване върху отрицателен депозит няма смисъл.
+      </div>
+    )
+  }
   if (!deposit) return null
   return (
     <div className={`mt-3 rounded-lg border p-3 ${on ? 'bg-amber-50 border-amber-200' : 'border-gray-200'}`}>
@@ -1579,8 +1603,10 @@ export default function Contracts({ API }) {
                   ]).map(([k,l,ph,type]) => (
                     <div key={k}>
                       <label className="block text-xs font-medium text-gray-600 mb-1">{l}</label>
+                      {/* Парите и денят не могат да са отрицателни — без min
+                          стрелката и колелцето на мишката ги вкарват под нулата. */}
                       <input type={type||'text'} value={newForm[k]} onChange={e=>setNewForm(f=>({...f,[k]:e.target.value}))}
-                        placeholder={ph}
+                        placeholder={ph} {...(type === 'number' ? { min: 0 } : {})}
                         className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
                     </div>
                   ))}
@@ -2083,7 +2109,7 @@ export default function Contracts({ API }) {
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">Депозит</label>
-                <input type="number" step="0.01" value={editForm.deposit} onChange={e => setEditForm(f => ({ ...f, deposit: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-3 py-2" />
+                <input type="number" step="0.01" min="0" value={editForm.deposit} onChange={e => setEditForm(f => ({ ...f, deposit: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-3 py-2" />
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">Начало</label>

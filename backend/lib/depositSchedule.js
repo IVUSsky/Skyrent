@@ -88,6 +88,11 @@ function depositSchedule(contract = {}) {
 // Трите суми трябва да дават точно депозита — иначе Чл.13 обещава едно, а
 // фактурите вадят друго. Празна разбивка е валидна (заварено поведение).
 function validateDepositSplit({ deposit, deposit_at_signing, deposit_part_1, deposit_part_2 }) {
+  // Отрицателен депозит няма смисъл и дотук минаваше: полето е `number` без
+  // долна граница и стрелката/колелцето го вкарват под нулата. Хваща се тук,
+  // защото оттам нататък всичко останало е вярно смятане върху грешно число.
+  if (Number(deposit || 0) < 0) return { ok: false, error: 'Депозитът не може да е отрицателен' };
+
   const atSigningRaw = num(deposit_at_signing);
   const p1Raw = num(deposit_part_1);
   const p2Raw = num(deposit_part_2);
