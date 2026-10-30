@@ -17,6 +17,7 @@ const { depositSchedule, validateDepositSplit, depositPlaceholders, depositClaus
 const { preparePdfImages, pickImage, protocolImagePaths, PHOTO_WIDTH, THUMB_WIDTH } = require('../lib/pdfPhotos');
 const { releaseProperty } = require('../lib/propertyRelease');
 const { amountToWords } = require('../lib/bgWords');
+const { amountToWordsEN, fmtAmountEN } = require('../lib/enWords');
 const { termMonths, termBG, termEN } = require('../lib/contractTerm');
 
 const FONT_REGULAR = path.join(__dirname, '../fonts/arial.ttf');
@@ -213,8 +214,15 @@ function buildFields(contract, issuer) {
     'ВАЛУТА':                 contract.currency || 'EUR',
     'ВАЛУТА_EN':              contract.currency || 'EUR',
     'НАЕМ_ДУМИ':              amountToWords(contract.monthly_rent),
+    // Английските половини на двуезичните бланки. Дотук ползваха българските
+    // полета и в договор за чуждестранно лице пишеше „1100,00 EUR (хиляда и
+    // сто EUR)" — и сумата с думи, и форматът на числото бяха български.
+    'НАЕМ_EN':                fmtAmountEN(contract.monthly_rent),
+    'НАЕМ_ДУМИ_EN':           amountToWordsEN(contract.monthly_rent),
     'ДЕПОЗИТ':                Number(contract.deposit || 0).toLocaleString('bg-BG', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
     'ДЕПОЗИТ_ДУМИ':           amountToWords(contract.deposit),
+    'ДЕПОЗИТ_EN':             fmtAmountEN(contract.deposit),
+    'ДЕПОЗИТ_ДУМИ_EN':        amountToWordsEN(contract.deposit),
     // Чл.13 — разсрочването. Месеците се смятат от началната дата, а не са
     // „януари/февруари", както стоеше в бланката. Договор без разбивка дава
     // целия депозит при подписване и нули за вноските.
