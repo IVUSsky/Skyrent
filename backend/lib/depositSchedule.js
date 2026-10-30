@@ -12,6 +12,8 @@
 // Заварените договори нямат разбивка (трите колони са NULL) — за тях целият
 // депозит е „при подписване", тоест поведението остава точно каквото беше.
 
+const { amountToWords } = require('./bgWords');
+
 const BG_MONTHS = [
   'януари', 'февруари', 'март', 'април', 'май', 'юни',
   'юли', 'август', 'септември', 'октомври', 'ноември', 'декември',
@@ -131,7 +133,73 @@ function depositPlaceholders(contract = {}) {
   };
 }
 
+
+// ─── Клаузата за плащане на депозита ────────────────────────────────────
+//
+// Чл.5 на двуезичната бланка твърдеше „При подписване на договора Наемателят
+// заплаща гаранционен депозит…" — при разсрочване това е НЕВЯРНО. Договорът
+// трябва да каже, че страните са се споразумели за вноски заедно с наема.
+//
+// Затова едно поле дава цяло изречение, което пасва на всяка бланка:
+// без разсрочване казва „при подписване", с разсрочване изброява вноските.
+
+const EN_MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December'];
+
+const EN_COUNT = ['zero', 'one', 'two', 'three'];
+
+function monthIndex(ym) {
+  const m = String(ym || '').match(/^\d{4}-(\d{2})/);
+  return m ? Number(m[1]) - 1 : null;
+}
+
+const fmtMoney = (n, locale) => Number(n || 0).toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+// Разсрочен ли е изобщо: или има повече от една вноска, или единствената не е
+// „при подписване".
+function isSplit(sched) {
+  return sched.length > 1 || (sched.length === 1 && sched[0].part !== PART_AT_SIGNING);
+}
+
+function depositClauseBG(contract = {}) {
+  const cur = contract.currency || 'EUR';
+  const sched = depositSchedule(contract);
+  if (!sched.length) return '';
+  if (!isSplit(sched)) return 'Депозитът се заплаща при подписване на договора.';
+
+  const parts = sched.map(s => {
+    const sum = `${fmtMoney(s.amount, 'bg-BG')} ${cur}`;
+    return s.when === 'signing'
+      ? `${sum} при подписване на договора`
+      : `${sum} с наема за месец ${s.monthName || '—'}`;
+  });
+  const last = parts.pop();
+  const list = parts.length ? `${parts.join(', ')} и ${last}` : last;
+  return `Страните се споразумяват депозитът да се заплати на ${sched.length} `
+       + `(${amountToWords(sched.length)}) вноски заедно с плащането на наема: ${list}.`;
+}
+
+function depositClauseEN(contract = {}) {
+  const cur = contract.currency || 'EUR';
+  const sched = depositSchedule(contract);
+  if (!sched.length) return '';
+  if (!isSplit(sched)) return 'The deposit is payable upon signing of this Agreement.';
+
+  const parts = sched.map(s => {
+    const sum = `${cur} ${fmtMoney(s.amount, 'en-US')}`;
+    if (s.when === 'signing') return `${sum} upon signing of this Agreement`;
+    const mi = monthIndex(s.month);
+    return `${sum} with the rent for ${mi === null ? 'the respective month' : EN_MONTHS[mi]}`;
+  });
+  const last = parts.pop();
+  const list = parts.length ? `${parts.join(', ')} and ${last}` : last;
+  const n = sched.length;
+  return `The parties agree that the deposit shall be paid in ${n} (${EN_COUNT[n] || n}) `
+       + `instalments together with the rent: ${list}.`;
+}
+
 module.exports = {
   depositSchedule, validateDepositSplit, depositPlaceholders, rentMonth,
+  depositClauseBG, depositClauseEN,
   PART_AT_SIGNING, PART_RENT_1, PART_RENT_2, BG_MONTHS,
 };
