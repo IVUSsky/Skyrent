@@ -169,7 +169,8 @@ export default function Invoices({ API, role }) {
   }
 
   const openDeposit = (c) => {
-    setDepositForm({ amount: c.deposit, withVat: false })
+    // При разсрочване сумата е на ВНОСКАТА, не целият депозит.
+    setDepositForm({ amount: c.amount ?? c.deposit, withVat: false })
     setDepositModal(c)
   }
 
@@ -183,6 +184,10 @@ export default function Invoices({ API, role }) {
         contract_id: c.contract_id,
         amount: Number(depositForm.amount),
         with_vat: depositForm.withVat,
+        // Коя вноска по Чл.13 — без нея пазачът за дубликат би спрял втората.
+        deposit_part: c.deposit_part || null,
+        // Вноската се води в месеца на своя падеж, не в текущия.
+        month: c.due_month || undefined,
       }),
     })
       .then(r => r.json())
@@ -654,10 +659,13 @@ export default function Invoices({ API, role }) {
       {depositPending.length > 0 && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 mb-4 flex flex-wrap gap-2 items-center">
           <span className="text-sm text-amber-900 font-medium">🔐 Депозит без фактура:</span>
+          {/* При разсрочен депозит (Чл.13) един договор дава по един бутон на
+              вноска — със своята сума и месец, иначе трите са неразличими. */}
           {depositPending.map(c => (
-            <button key={c.contract_id} onClick={() => openDeposit(c)}
+            <button key={`${c.contract_id}_${c.deposit_part || 0}`} onClick={() => openDeposit(c)}
               className="text-xs px-3 py-1 bg-white border border-amber-300 text-amber-900 hover:bg-amber-100 rounded-lg">
-              + {c.address} · {fmtMoney(c.deposit)} €
+              + {c.address} · {fmtMoney(c.amount ?? c.deposit)} €
+              {c.deposit_part ? <span className="text-amber-700"> · {c.part_label}</span> : null}
             </button>
           ))}
         </div>
