@@ -518,6 +518,13 @@ export default function Contracts({ API }) {
     tenant_mol: '',
     tenant_doc: 'лична карта', tenant_doc_number: '', tenant_doc_date: '', tenant_doc_valid_until: '',
     tenant_doc_country: 'България', tenant_dob: '',
+    // Втори ползвател — страна по договора, солидарно отговорен. Празно
+    // име значи „няма втори" и нищо в договора не се променя.
+    tenant2_on: false,
+    tenant2_name: '', tenant2_egn: '', tenant2_mol: '', tenant2_address: '',
+    tenant2_phone: '', tenant2_email: '', tenant2_dob: '',
+    tenant2_doc: 'лична карта', tenant2_doc_number: '', tenant2_doc_date: '',
+    tenant2_doc_valid_until: '', tenant2_doc_country: 'България',
     id_front_path: '', id_back_path: '',
     property_address: '', property_description: '', property_area: '',
     monthly_rent: '', currency: 'EUR', deposit: '', payment_day: '5',
@@ -635,6 +642,19 @@ export default function Contracts({ API }) {
       tenant_phone: p.phone || '', tenant_email: p.email || '', tenant_dob: p.dob || '',
       tenant_doc: p.doc_type || f.tenant_doc, tenant_doc_number: p.doc_number || '', tenant_doc_date: p.doc_date || '',
       tenant_doc_country: p.doc_country || f.tenant_doc_country,
+    }))
+  }
+
+  // Същото автопопълване от указателя, но за втория ползвател.
+  const applyParty2 = (id) => {
+    const p = directory.find(x => x.id === Number(id))
+    if (!p) return
+    setNewForm(f => ({
+      ...f,
+      tenant2_name: p.name || '', tenant2_egn: p.egn || '', tenant2_address: p.address || '',
+      tenant2_phone: p.phone || '', tenant2_email: p.email || '', tenant2_dob: p.dob || '',
+      tenant2_doc: p.doc_type || f.tenant2_doc, tenant2_doc_number: p.doc_number || '',
+      tenant2_doc_date: p.doc_date || '', tenant2_doc_country: p.doc_country || f.tenant2_doc_country,
     }))
   }
 
@@ -1611,6 +1631,72 @@ export default function Contracts({ API }) {
                       className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
                   </div>
                 </div>
+                {/* Втори ползвател. Страна по договора, солидарно отговорен —
+                    затова има свой ред за подпис и свои данни в шапката. */}
+                {!isNetForm && (
+                  <div className={`mt-4 rounded-lg border p-3 ${newForm.tenant2_on ? "bg-violet-50 border-violet-200" : "border-gray-200"}`}>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input type="checkbox" checked={!!newForm.tenant2_on}
+                        onChange={e => setNewForm(f => e.target.checked
+                          ? { ...f, tenant2_on: true }
+                          : { ...f, tenant2_on: false, tenant2_name: "", tenant2_egn: "", tenant2_address: "",
+                              tenant2_phone: "", tenant2_email: "", tenant2_dob: "", tenant2_mol: "",
+                              tenant2_doc_number: "", tenant2_doc_date: "", tenant2_doc_valid_until: "" })}
+                        className="rounded border-gray-300 text-violet-600 focus:ring-violet-500" />
+                      <span className="text-sm font-semibold text-violet-900">👥 Добави втори ползвател</span>
+                    </label>
+                    {!newForm.tenant2_on && (
+                      <div className="text-xs text-gray-500 mt-1">
+                        Когато имотът се ползва от двама — и двамата подписват и отговарят солидарно за наема.
+                      </div>
+                    )}
+                    {newForm.tenant2_on && (
+                      <>
+                        <div className="mt-2 mb-3">
+                          <label className="block text-xs font-semibold text-violet-900 mb-1">📇 Избери от указателя</label>
+                          <select defaultValue="" onChange={e => { applyParty2(e.target.value); e.target.value = "" }}
+                            className="w-full border border-violet-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-violet-500">
+                            <option value="">— нов ползвател —</option>
+                            {directory.map(p => <option key={p.id} value={p.id}>{p.name}{p.egn ? ` (${p.egn})` : ""}</option>)}
+                          </select>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          {[
+                            ['tenant2_name','Пълно име *','Мария Иванова'],
+                            ['tenant2_egn','ЕГН','8501011234'],
+                            ['tenant2_address','Адрес','гр. София, ул. ...'],
+                            ['tenant2_phone','Телефон','+359...'],
+                            ['tenant2_email','Имейл','maria@example.com'],
+                            ['tenant2_dob','Дата на раждане','01.01.1985'],
+                            ['tenant2_doc_number','Номер на документа','123456789'],
+                            ['tenant2_doc_date','Дата на издаване','2020-05-12'],
+                            ['tenant2_doc_valid_until','Валиден до','2030-05-12'],
+                            ['tenant2_doc_country','Страна на издаване','България'],
+                          ].map(([k,l,ph]) => (
+                            <div key={k}>
+                              <label className="block text-xs font-medium text-gray-600 mb-1">{l}</label>
+                              <input type="text" value={newForm[k] ?? ""} onChange={e=>setNewForm(f=>({...f,[k]:e.target.value}))}
+                                placeholder={ph}
+                                className="w-full border border-violet-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500" />
+                            </div>
+                          ))}
+                          <div>
+                            <label className="block text-xs font-medium text-gray-600 mb-1">Вид документ</label>
+                            <select value={newForm.tenant2_doc} onChange={e=>setNewForm(f=>({...f,tenant2_doc:e.target.value}))}
+                              className="w-full border border-violet-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500">
+                              <option value="лична карта">Лична карта</option>
+                              <option value="паспорт">Паспорт</option>
+                            </select>
+                          </div>
+                        </div>
+                        <div className="text-[11px] text-violet-800 mt-2">
+                          Вторият ползвател влиза в шапката на договора, получава свой ред за подпис
+                          и се записва в указателя на контактите.
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Property details — при интернет адресът идва от имота, описание/площ не влизат в договора */}

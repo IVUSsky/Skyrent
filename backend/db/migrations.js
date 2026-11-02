@@ -452,7 +452,14 @@ function runTenantMigrations(db) {
    // Разсрочване на повече от два месеца: JSON масив със сумите по наемни
    // месеци. deposit_part_1/2 остават само за заварените договори — четат се,
    // когато тази колона е празна (виж lib/depositSchedule.js).
-   'deposit_months TEXT'
+   'deposit_months TEXT',
+   // Втори наемател — страна по договора, солидарно отговорен. Огледало на
+   // tenant_*; при трети и следващ ще трябва отделна таблица, но за двойка
+   // или съквартиранти това стига и не пипа нищо съществуващо.
+   'tenant2_name TEXT', 'tenant2_egn TEXT', 'tenant2_address TEXT',
+   'tenant2_phone TEXT', 'tenant2_email TEXT', 'tenant2_mol TEXT',
+   'tenant2_doc TEXT', 'tenant2_doc_number TEXT', 'tenant2_doc_valid_until TEXT',
+   'tenant2_doc_date TEXT', 'tenant2_doc_country TEXT', 'tenant2_dob TEXT'
   ].forEach(col => { try { db.exec(`ALTER TABLE contracts ADD COLUMN ${col}`); } catch(_) {} });
   // Архивираните договори са качени вече подписани — сканът им Е подписаният
   // екземпляр. Еднократно ги отбелязваме като такива (флаг в settings, иначе

@@ -213,6 +213,25 @@ function buildFields(contract, issuer) {
     'НАЕМАТЕЛ_РОДЕН':         contract.tenant_dob       || '',
     'НАЕМАТЕЛ_ТЕЛЕФОН':       contract.tenant_phone     || '',
     'НАЕМАТЕЛ_ИМЕЙЛ':         contract.tenant_email     || '',
+    // ─── Втори наемател ────────────────────────────────────────────
+    // Бланките могат да ползват {{НАЕМАТЕЛИ}} и {{НАЕМАТЕЛ2_ДАННИ}} без
+    // условие: при един наемател и двете са празни/само първото име, тоест
+    // текстът не се променя за заварените договори.
+    'НАЕМАТЕЛ2_ИМЕ':          contract.tenant2_name     || '',
+    'НАЕМАТЕЛ2_АДРЕС':        contract.tenant2_address  || '',
+    'НАЕМАТЕЛ2_ЕГН':          contract.tenant2_egn      || '',
+    'НАЕМАТЕЛ2_ДОКУМЕНТ':     contract.tenant2_doc_number || '',
+    'НАЕМАТЕЛ2_ДОКУМЕНТ_НОМЕР': contract.tenant2_doc_number || '',
+    'НАЕМАТЕЛ2_ДОКУМЕНТ_ВИД': contract.tenant2_doc      || '',
+    'НАЕМАТЕЛ2_ДОКУМЕНТ_ВАЛИДЕН': contract.tenant2_doc_valid_until || '',
+    'НАЕМАТЕЛ2_ДОКУМЕНТ_ДАТА': contract.tenant2_doc_date || '',
+    'НАЕМАТЕЛ2_ДОКУМЕНТ_СТРАНА': contract.tenant2_doc_country || '',
+    'НАЕМАТЕЛ2_РОДЕН':        contract.tenant2_dob      || '',
+    'НАЕМАТЕЛ2_ТЕЛЕФОН':      contract.tenant2_phone    || '',
+    'НАЕМАТЕЛ2_ИМЕЙЛ':        contract.tenant2_email    || '',
+    'НАЕМАТЕЛИ':              [contract.tenant_name, contract.tenant2_name]
+                                .map(x => String(x || '').trim()).filter(Boolean).join(' и '),
+    ...tenant2Block(contract),
     'АБОНАТ_ТОК':             contract.абонат_ток  || '..................',
     'АБОНАТ_ВОДА':            contract.абонат_вода || '..................',
     'АБОНАТ_ТЕЦ':             contract.абонат_тец  || '..................',
@@ -297,6 +316,33 @@ function loadInventory(db, propertyId) {
     it.photos = db.prepare("SELECT id, type, filename, original_name FROM inventory_files WHERE inventory_id=? AND type='photo'").all(it.id);
   }
   return items;
+}
+
+// Готовият абзац за втория наемател — за да може бланката да го сложи
+// безусловно. Без втори наемател дава празен низ и текстът остава както беше.
+//
+// ⚠️ Двата плейсхолдъра са АЛТЕРНАТИВИ, не се ползват заедно:
+//   {{НАЕМАТЕЛИ}}          → „Първи и Втора" — само имената, за кратка шапка;
+//   {{НАЕМАТЕЛ2_ДАННИ}}    → „и Втора, ЕГН …, солидарно отговорни" — слага се
+//                            СЛЕД данните на ПЪРВИЯ наемател.
+// Сложени едно до друго, името на втория излиза два пъти.
+function tenant2Block(contract = {}) {
+  const name = String(contract.tenant2_name || '').trim();
+  if (!name) return { 'НАЕМАТЕЛ2_ДАННИ': '', 'НАЕМАТЕЛ2_ДАННИ_EN': '' };
+  const bits = [
+    contract.tenant2_egn ? `ЕГН ${contract.tenant2_egn}` : '',
+    contract.tenant2_doc_number ? `${contract.tenant2_doc || 'л.к.'} № ${contract.tenant2_doc_number}` : '',
+    contract.tenant2_address ? `адрес: ${contract.tenant2_address}` : '',
+  ].filter(Boolean).join(', ');
+  const bitsEn = [
+    contract.tenant2_egn ? `ID ${contract.tenant2_egn}` : '',
+    contract.tenant2_doc_number ? `doc. No ${contract.tenant2_doc_number}` : '',
+    contract.tenant2_address ? `address: ${contract.tenant2_address}` : '',
+  ].filter(Boolean).join(', ');
+  return {
+    'НАЕМАТЕЛ2_ДАННИ': `и ${name}${bits ? ', ' + bits : ''}, наричани заедно „Наемател", солидарно отговорни за задълженията по този договор`,
+    'НАЕМАТЕЛ2_ДАННИ_EN': `and ${name}${bitsEn ? ', ' + bitsEn : ''}, jointly referred to as the "Tenant" and jointly and severally liable for the obligations under this Agreement`,
+  };
 }
 
 // Generate PDF from template text
@@ -581,6 +627,17 @@ async function generateContractPDF(contract, template, issuer, photos = [], opts
          .text(contract.landlord_name || issuer.name || '', ML, lineY + 5, { width: col, align: 'center', lineBreak: false });
       doc.font('R').fontSize(8).fillColor('#6b7280')
          .text(contract.tenant_name || '', ML + PW / 2, lineY + 5, { width: col, align: 'center', lineBreak: false });
+
+      // Вторият наемател е страна по договора и трябва да се подпише — иначе
+      // солидарната отговорност виси само на хартия.
+      const t2 = String(contract.tenant2_name || '').trim();
+      if (t2) {
+        const lineY2 = lineY + 45;
+        doc.moveTo(ML + PW / 2, lineY2).lineTo(ML + PW, lineY2).lineWidth(0.7).strokeColor('#374151').stroke();
+        doc.font('R').fontSize(8).fillColor('#6b7280')
+           .text(t2, ML + PW / 2, lineY2 + 5, { width: col, align: 'center', lineBreak: false });
+        doc.y = lineY2 + 18;
+      }
     }
 
     // ── Inventory + photos (auto-appended for protocol PDFs) ──────
@@ -948,6 +1005,15 @@ function appendHandoverProtocol(doc, contract, issuer, photos, ML, MR, PW, HEADE
      .text(contract.landlord_name || issuer.name || '', ML, lineY2 + 4, { width: col2, align: 'center', lineBreak: false });
   doc.font('R').fontSize(7.5).fillColor('#6b7280')
      .text(contract.tenant_name || '', ML + PW / 2, lineY2 + 4, { width: col2, align: 'center', lineBreak: false });
+
+  // Вторият наемател приема имота наравно с първия — своя черта и свое име.
+  const t2sig = String(contract.tenant2_name || '').trim();
+  if (t2sig) {
+    const lineY3 = lineY2 + 34;
+    doc.moveTo(ML + PW / 2, lineY3).lineTo(ML + PW, lineY3).lineWidth(0.7).strokeColor('#374151').stroke();
+    doc.font('R').fontSize(7.5).fillColor('#6b7280')
+       .text(t2sig, ML + PW / 2, lineY3 + 4, { width: col2, align: 'center', lineBreak: false });
+  }
 }
 
 // Generate Annex PDF
@@ -1047,10 +1113,18 @@ function generateAnnexPDF(annex, contract, issuer) {
       : `${contract.landlord_name || issuer.name || ''}${contract.landlord_egn ? ', ЕГН ' + contract.landlord_egn : ''}`;
     // Наемател-фирма (има МОЛ) → идентификаторът е ЕИК, не ЕГН
     const tenantIdLabel = contract.tenant_mol ? 'ЕИК' : 'ЕГН';
+    // Двамата наематели на един ред — вторият е страна по договора и
+    // приема имота наравно с първия.
+    const tenantParts = [contract.tenant_name + (contract.tenant_egn ? `, ${tenantIdLabel} ${contract.tenant_egn}` : '')
+      + (contract.tenant_mol ? `, представлявано от ${contract.tenant_mol}` : '')];
+    if (String(contract.tenant2_name || '').trim()) {
+      tenantParts.push(contract.tenant2_name + (contract.tenant2_egn ? `, ЕГН ${contract.tenant2_egn}` : ''));
+    }
+    const tenantLabel = tenantParts.join(' и ');
 
     [
       ['НАЕМОДАТЕЛ / LANDLORD:', landlordLabel],
-      ['НАЕМАТЕЛ / TENANT:', `${contract.tenant_name}${contract.tenant_egn ? `, ${tenantIdLabel} ` + contract.tenant_egn : ''}${contract.tenant_mol ? `, представлявано от ${contract.tenant_mol}` : ''}`],
+      ['НАЕМАТЕЛ / TENANT:', tenantLabel],
     ].forEach(([lbl, val]) => {
       doc.font('B').fontSize(9).fillColor('#374151').text(lbl + '  ', ML, y, { continued: true });
       doc.font('R').fontSize(9).fillColor('#111827').text(val, { width: PW - 140 });
@@ -1464,6 +1538,18 @@ module.exports = function(db) {
         tenant_doc_date:     fields.tenant_doc_date     || '',
         tenant_doc_country:  fields.tenant_doc_country  || '',
         tenant_dob:          fields.tenant_dob          || '',
+        tenant2_name:               fields.tenant2_name               || '',
+        tenant2_egn:                fields.tenant2_egn                || '',
+        tenant2_address:            fields.tenant2_address            || '',
+        tenant2_phone:              fields.tenant2_phone              || '',
+        tenant2_email:              fields.tenant2_email              || '',
+        tenant2_mol:                fields.tenant2_mol                || '',
+        tenant2_doc:                fields.tenant2_doc                || '',
+        tenant2_doc_number:         fields.tenant2_doc_number         || '',
+        tenant2_doc_valid_until:    fields.tenant2_doc_valid_until    || '',
+        tenant2_doc_date:           fields.tenant2_doc_date           || '',
+        tenant2_doc_country:        fields.tenant2_doc_country        || '',
+        tenant2_dob:                fields.tenant2_dob                || '',
         id_front_path:       fields.id_front_path       || null,
         id_back_path:        fields.id_back_path        || null,
         property_address:     fields.property_address     || prop?.['адрес'] || '',
@@ -1534,19 +1620,21 @@ module.exports = function(db) {
           landlord_type, landlord_name, landlord_address, landlord_egn, landlord_phone, landlord_lk, landlord_lk_date,
           tenant_name, tenant_address, tenant_egn, tenant_phone, tenant_email, tenant_mol,
           tenant_doc, tenant_doc_number, tenant_doc_valid_until, tenant_doc_date, tenant_doc_country, tenant_dob,
+          tenant2_name, tenant2_egn, tenant2_address, tenant2_phone, tenant2_email, tenant2_mol, tenant2_doc, tenant2_doc_number, tenant2_doc_valid_until, tenant2_doc_date, tenant2_doc_country, tenant2_dob,
           property_address, property_description, property_area,
           monthly_rent, currency, deposit, deposit_at_signing, deposit_part_1, deposit_part_2, deposit_months,
           payment_day, payment_method,
           start_date, end_date, delivery_date, conditions, notes,
           абонат_ток, абонат_вода, абонат_тец, абонат_вход,
           pdf_path, protocol_pdf_path, id_front_path, id_back_path, kind)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       `).run(
         contract.template_id, contract.property_id, contract.contract_number, contract.status,
         contract.landlord_type, contract.landlord_name, contract.landlord_address, contract.landlord_egn,
         contract.landlord_phone, contract.landlord_lk, contract.landlord_lk_date,
         contract.tenant_name, contract.tenant_address, contract.tenant_egn, contract.tenant_phone, contract.tenant_email, contract.tenant_mol,
         contract.tenant_doc, contract.tenant_doc_number, contract.tenant_doc_valid_until, contract.tenant_doc_date, contract.tenant_doc_country, contract.tenant_dob,
+        contract.tenant2_name, contract.tenant2_egn, contract.tenant2_address, contract.tenant2_phone, contract.tenant2_email, contract.tenant2_mol, contract.tenant2_doc, contract.tenant2_doc_number, contract.tenant2_doc_valid_until, contract.tenant2_doc_date, contract.tenant2_doc_country, contract.tenant2_dob,
         contract.property_address, contract.property_description, contract.property_area,
         contract.monthly_rent, contract.currency, contract.deposit,
         contract.deposit_at_signing, contract.deposit_part_1, contract.deposit_part_2, contract.deposit_months,
@@ -1557,6 +1645,16 @@ module.exports = function(db) {
       );
 
       // Авто-запис на наемателя в указателя при всяко създаване на договор
+      // Вторият наемател също влиза в указателя — иначе следващия път пак
+      // се въвежда на ръка и става нов дубликат.
+      if (String(contract.tenant2_name || '').trim()) {
+        upsertParty({
+          name: contract.tenant2_name, egn: contract.tenant2_egn, address: contract.tenant2_address,
+          phone: contract.tenant2_phone, email: contract.tenant2_email,
+          doc_type: contract.tenant2_doc, doc_number: contract.tenant2_doc_number,
+          doc_date: contract.tenant2_doc_date, doc_country: contract.tenant2_doc_country, dob: contract.tenant2_dob,
+        }, 'авто от договор (втори наемател)');
+      }
       upsertParty({
         name: contract.tenant_name, egn: contract.tenant_egn, address: contract.tenant_address,
         phone: contract.tenant_phone, email: contract.tenant_email,
@@ -1611,6 +1709,7 @@ module.exports = function(db) {
   // Архивните договори (сканът Е pdf_path) не се регенерират — само данните.
   const EDITABLE = ['tenant_name', 'tenant_email', 'tenant_phone', 'tenant_address', 'tenant_egn',
     'tenant_doc', 'tenant_doc_number', 'tenant_doc_date', 'tenant_doc_valid_until', 'tenant_doc_country', 'tenant_dob',
+    'tenant2_name', 'tenant2_egn', 'tenant2_address', 'tenant2_phone', 'tenant2_email', 'tenant2_mol', 'tenant2_doc', 'tenant2_doc_number', 'tenant2_doc_valid_until', 'tenant2_doc_date', 'tenant2_doc_country', 'tenant2_dob',
     // Наемодателят се задаваше само при създаване — заварен договор, сгрешен
     // откъм страна по договора, можеше да се поправи единствено с пресъздаване
     // (и загуба на номера). Вече се редактира като всичко друго.
