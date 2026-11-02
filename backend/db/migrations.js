@@ -1058,6 +1058,22 @@ function runTenantMigrations(db) {
   try { db.exec("ALTER TABLE property_photos ADD COLUMN sort_order INTEGER DEFAULT 0"); console.log('Migration: added property_photos.sort_order'); } catch(_) {}
   console.log('property_photos table ready');
 
+  // Изпратени напомняния за забавен наем. Водим ги, за да не тръгне второ
+  // писмо за същия месец (нищо не ядосва изряден човек повече от три
+  // напомняния за един наем) и за да се вижда кога е пратено последното.
+  db.exec(`CREATE TABLE IF NOT EXISTS rent_reminders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    property_id INTEGER NOT NULL REFERENCES properties(id),
+    month TEXT NOT NULL,
+    sent_to TEXT NOT NULL,
+    subject TEXT,
+    body TEXT,
+    sent_by TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+  try { db.exec("CREATE INDEX IF NOT EXISTS idx_rent_reminders_prop_month ON rent_reminders(property_id, month)"); } catch(_) {}
+  console.log('rent_reminders table ready');
+
   // Chat learning queue — weekly digest of tenant Q&A patterns that aren't
   // well-answered yet. Admin reviews each row and either approves (promoted
   // into chat_learned_faqs) or rejects. See [[skyrent-tenant-chat-agent]].

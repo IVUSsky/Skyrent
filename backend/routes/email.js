@@ -1,7 +1,12 @@
 const express = require('express');
 const { Resend } = require('resend');
-const path = require('path');
 const { resolveSender } = require('../lib/email');
+const { getIssuer, brandEmailHtml } = require('../lib/branding');
+const { isOverdue, dueDayMap } = require('../lib/rentDue');
+const { withTenantEmail } = require('../lib/tenantEmailFallback');
+const {
+  remindable, reminderSubject, reminderBody, monthName, paidSignForMonth, alreadySent,
+} = require('../lib/rentReminder');
 
 module.exports = function(db) {
   const router = express.Router();
@@ -18,27 +23,6 @@ module.exports = function(db) {
     try { return JSON.parse(row.value); } catch { return {}; }
   }
 
-  function buildHtml(bodyHtml, senderName) {
-    return `<!DOCTYPE html><html><head><meta charset="utf-8"></head>
-<body style="margin:0;padding:0;background:#f0f2f8;font-family:Arial,sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f0f2f8;padding:30px 0;">
-    <tr><td align="center">
-      <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:10px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.10);">
-        <tr><td style="background:#1a1a2e;padding:18px 32px;">
-          <span style="color:#e8eaf2;font-size:16px;font-weight:bold;letter-spacing:2px;">SKY CAPITAL</span>
-        </td></tr>
-        <tr><td style="padding:32px 32px 24px;color:#1a1a2e;font-size:14px;line-height:1.7;">
-          ${bodyHtml}
-        </td></tr>
-        <tr><td style="background:#e8eaf2;padding:14px 32px;text-align:center;font-size:11px;color:#6b7280;border-top:1px solid #d1d5db;">
-          <strong>${senderName || 'Sky Capital OOD'}</strong>
-        </td></tr>
-      </table>
-    </td></tr>
-  </table>
-</body></html>`;
-  }
-
   // Test connection
   router.post('/test', async (req, res) => {
     const resend = getResend();
@@ -52,76 +36,121 @@ module.exports = function(db) {
     }
   });
 
-  // Send reminder to one tenant
+  // ── Напомняния за забавен наем ───────────────────────────────────────────
+  //
+  // Иво (02.11.2026): напомнянето отива до наемателя, но след ЕГО преглед.
+  // Затова има две стъпки: `prepare` показва кой закъснява и какво ще пише в
+  // писмото, `/reminder` праща ЕДНО писмо на ЕДИН адрес.
+  //
+  // Дотук бутонът пращаше веднага, с текст, зашит в този файл, и „до всички"
+  // хващаше всеки неплатил — включително хората, чийто падеж още не е дошъл
+  // (Стефан плаща към 15-о, Атанас към 18-о). Проверките по-долу са в
+  // сървъра нарочно: екранът може да е отпреди половин час.
+
+  const esc = (s) => String(s == null ? '' : s).replace(/[<>&"]/g, c => (
+    { '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]
+  ));
+  // Писмото се пише и преглежда като обикновен текст; тук става HTML.
+  const textToHtml = (text) => String(text || '').split(/\n{2,}/)
+    .map(p => `<p>${esc(p).replace(/\n/g, '<br>')}</p>`).join('\n');
+
+  const thisMonth = () => new Date().toISOString().slice(0, 7);
+
+  // Редовете за избрания месец: кой закъснява, какво ще му пишем, пращано ли
+  // е вече. Без никакво изпращане.
+  function prepareRows(month, ids) {
+    const issuer = getIssuer(db);
+    const dueDays = dueDayMap(db);
+    const where = ids && ids.length ? ` AND id IN (${ids.map(() => '?').join(',')})` : '';
+    const props = withTenantEmail(db, db.prepare(
+      `SELECT * FROM properties
+        WHERE статус = '✅' AND наемател IS NOT NULL AND наемател != ''${where}
+        ORDER BY адрес`
+    ).all(...(ids && ids.length ? ids : [])));
+
+    const marked = props.map(p => {
+      const due_day = dueDays[p.id] || 5;
+      return { ...p, due_day, is_overdue: isOverdue(month, due_day) };
+    });
+
+    const rows = remindable(marked, { month }).map(row => {
+      const paid = paidSignForMonth(db, row.property_id, month);
+      const sent = alreadySent(db, row.property_id, month);
+      return {
+        ...row,
+        subject: reminderSubject(row),
+        body: reminderBody(row, { name: issuer.name, iban: issuer.iban }),
+        paid_sign: paid.paid ? paid.reason : null,
+        already_sent_at: sent ? sent.created_at : null,
+        already_sent_to: sent ? sent.sent_to : null,
+        // Готов ли е за изпращане без повече мислене
+        can_send: row.can_send && !paid.paid,
+        blocked: row.blocked || (paid.paid ? `има ${paid.reason}` : null),
+      };
+    });
+
+    // Готовите за изпращане напред, после непратените, после вече пратените.
+    const rank = (r) => (r.can_send ? 0 : 2) + (r.already_sent_at ? 1 : 0);
+    return rows.sort((a, b) => rank(a) - rank(b) || b.days_late - a.days_late);
+  }
+
+  // Кой закъснява и какво ще му се прати — за прегледа.
+  router.get('/reminders', (req, res) => {
+    try {
+      const month = req.query.month || thisMonth();
+      const ids = String(req.query.ids || '').split(',').map(Number).filter(Boolean);
+      res.json({ month, month_label: monthName(month), reminders: prepareRows(month, ids) });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  // Изпраща ЕДНО напомняне, след преглед. `subject`/`body` идват от прегледа,
+  // за да може Иво да е поправил текста; ако не дойдат, се ползва готовият.
   router.post('/reminder', async (req, res) => {
-    const { to, tenant_name, property_address, amount, month_label, from_name } = req.body;
-    if (!to) return res.status(400).json({ error: 'Липсва email адрес' });
+    const month = req.body.month || thisMonth();
+    const propertyId = Number(req.body.property_id) || null;
+    const force = req.body.force === true;
+
+    // Старият път (само `to`, без property_id) вече не се поддържа: без имот
+    // не може да се провери дали човекът не е платил междувременно.
+    if (!propertyId) return res.status(400).json({ error: 'Липсва имот (property_id) — не може да се провери плащането' });
+
+    const row = prepareRows(month, [propertyId])[0];
+    if (!row) return res.status(400).json({ error: 'Имотът не е в списъка на закъснелите за този месец' });
+
+    const to = String(req.body.to || row.email || '').trim();
+    if (!to) return res.status(400).json({ error: 'Липсва имейл адрес' });
+    if (row.paid_sign) return res.status(409).json({ error: `Не е изпратено: ${row.paid_sign}` });
+    if (row.already_sent_at && !force) {
+      return res.status(409).json({ error: `Вече е изпратено на ${row.already_sent_at}`, already_sent_at: row.already_sent_at });
+    }
 
     const resend = getResend();
     if (!resend) return res.status(400).json({ error: 'RESEND_API_KEY не е зададен в Railway' });
 
     const smtp = getSmtpConfig();
-    const senderName = from_name || smtp.from_name || 'Sky Capital';
+    const issuer = getIssuer(db);
+    const senderName = req.body.from_name || smtp.from_name || issuer.name || 'Skyrent';
     const fromEmail = resolveSender(smtp);
-
-    const bodyHtml = `
-      <p>Уважаеми/а <strong>${tenant_name}</strong>,</p>
-      <p>Напомняме Ви, че наемът за <strong>${month_label}</strong> за имот
-      <strong>${property_address}</strong> в размер на <strong>${amount} €</strong>
-      все още не е постъпил по нашата сметка.</p>
-      <p>Моля, наредете плащането възможно най-скоро.</p>
-      <p>При въпроси не се колебайте да се свържете с нас.</p>
-      <p style="margin-top:24px;">С уважение,<br><strong>${senderName}</strong></p>`;
+    const subject = String(req.body.subject || row.subject);
+    const body = String(req.body.body || row.body);
 
     try {
       const { error } = await resend.emails.send({
         from: `${senderName} <${fromEmail}>`,
         to,
-        subject: `Напомняне за наем — ${month_label}`,
-        html: buildHtml(bodyHtml, senderName),
+        subject,
+        html: brandEmailHtml(textToHtml(body), issuer),
       });
       if (error) return res.status(500).json({ error: error.message });
-      res.json({ ok: true });
+      try {
+        db.prepare(`INSERT INTO rent_reminders (property_id, month, sent_to, subject, body, sent_by)
+                    VALUES (?, ?, ?, ?, ?, ?)`)
+          .run(propertyId, month, to, subject, body, req.user?.username || null);
+      } catch (e) { console.error('напомнянето е пратено, но не се записа:', e.message); }
+      res.json({ ok: true, to, property_id: propertyId, month });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
-  });
-
-  // Send reminders to all unpaid tenants (bulk)
-  router.post('/reminder-bulk', async (req, res) => {
-    const { tenants, month_label, from_name } = req.body;
-    if (!tenants || !tenants.length) return res.status(400).json({ error: 'Няма наематели' });
-
-    const resend = getResend();
-    if (!resend) return res.status(400).json({ error: 'RESEND_API_KEY не е зададен в Railway' });
-
-    const smtp = getSmtpConfig();
-    const senderName = from_name || smtp.from_name || 'Sky Capital';
-    const fromEmail = resolveSender(smtp);
-
-    const results = [];
-    for (const t of tenants) {
-      if (!t.email) { results.push({ name: t.name, ok: false, error: 'Няма email' }); continue; }
-      const bodyHtml = `
-        <p>Уважаеми/а <strong>${t.name}</strong>,</p>
-        <p>Напомняме Ви, че наемът за <strong>${month_label}</strong> за имот
-        <strong>${t.address}</strong> в размер на <strong>${t.amount} €</strong>
-        все още не е постъпил по нашата сметка.</p>
-        <p>Моля, наредете плащането възможно най-скоро.</p>
-        <p style="margin-top:24px;">С уважение,<br><strong>${senderName}</strong></p>`;
-      try {
-        const { error } = await resend.emails.send({
-          from: `${senderName} <${fromEmail}>`,
-          to: t.email,
-          subject: `Напомняне за наем — ${month_label}`,
-          html: buildHtml(bodyHtml, senderName),
-        });
-        results.push({ name: t.name, ok: !error, error: error?.message });
-      } catch (err) {
-        results.push({ name: t.name, ok: false, error: err.message });
-      }
-    }
-    res.json({ results });
   });
 
   return router;

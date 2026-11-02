@@ -190,49 +190,75 @@ export default function Tenants({ API }) {
     finally { setDeduping(false) }
   }
 
-  const sendReminder = (prop) => {
+  // ── Напомняния за забавен наем ──────────────────────────────────────────
+  // Нищо не тръгва от само себе си: сървърът подготвя писмото, то се вижда
+  // на екрана и Иво натиска „Изпрати" за всеки човек поотделно. Дотук този
+  // бутон пращаше веднага при клик, а „до всички" включваше и хората, чийто
+  // падеж още не е дошъл.
+  const [reminders, setReminders] = useState(null)   // { month_label, rows } | null
+  const [reminderBusy, setReminderBusy] = useState(null)  // property_id в изпращане
+  const [reminderEdits, setReminderEdits] = useState({})  // поправки по текста
+  const [openLetter, setOpenLetter] = useState(null)      // кое писмо е разгънато
+
+  const loadReminders = (ids) => {
+    const q = ids && ids.length ? `&ids=${ids.join(',')}` : ''
+    return apiFetch(`${API}/api/email/reminders?month=${month}${q}`)
+      .then(r => r.json())
+      .then(d => {
+        if (d.error) { showToast('Грешка: ' + d.error, 'error'); return null }
+        setReminders({ month_label: d.month_label, rows: d.reminders || [] })
+        return d.reminders || []
+      })
+      .catch(e => { showToast('Грешка: ' + e.message, 'error'); return null })
+  }
+
+  const openReminder = (prop) => {
+    setReminderEdits({}); setOpenLetter(prop.id)
+    loadReminders([prop.id]).then(rows => {
+      if (rows && !rows.length) showToast(`${prop['адрес']} не е в списъка на закъснелите`, 'error')
+    })
+  }
+
+  const openAllReminders = () => {
+    setReminderEdits({}); setOpenLetter(null)
+    loadReminders(null).then(rows => {
+      if (rows && !rows.length) showToast('Няма закъснели наеми за този месец')
+    })
+  }
+
+  const sendReminder = (row, force = false) => {
+    const edit = reminderEdits[row.property_id] || {}
+    setReminderBusy(row.property_id)
     apiFetch(`${API}/api/email/reminder`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        to: prop.email,
-        tenant_name: prop['наемател'],
-        property_address: prop['адрес'],
-        amount: fmt(prop['наем']),
-        month_label: monthLabel(month),
+        property_id: row.property_id,
+        month,
+        to: edit.email ?? row.email,
+        subject: edit.subject ?? row.subject,
+        body: edit.body ?? row.body,
+        force,
       }),
     })
-      .then(r => r.json())
-      .then(d => {
-        if (d.ok) showToast(`Напомняне изпратено до ${prop['наемател']}`)
-        else showToast('Грешка: ' + (d.error || 'неизвестна'), 'error')
+      .then(r => r.json().then(d => ({ status: r.status, d })))
+      .then(({ status, d }) => {
+        setReminderBusy(null)
+        if (d.ok) {
+          showToast(`Напомняне изпратено до ${row.tenant || row.email}`)
+          setReminders(prev => prev && {
+            ...prev,
+            rows: prev.rows.map(r => r.property_id === row.property_id
+              ? { ...r, already_sent_at: 'сега', already_sent_to: d.to } : r),
+          })
+          setOpenLetter(null)
+        } else if (status === 409 && d.already_sent_at && !force) {
+          if (confirm(`${d.error}.\n\nДа се изпрати ли повторно?`)) sendReminder(row, true)
+        } else {
+          showToast('Грешка: ' + (d.error || 'неизвестна'), 'error')
+        }
       })
-      .catch(e => showToast('Грешка: ' + e.message, 'error'))
-  }
-
-  const sendReminderAll = () => {
-    const unpaidWithEmail = (data?.properties || []).filter(p => !p.is_paid && p.email)
-    if (!unpaidWithEmail.length) { showToast('Няма наематели с email адрес', 'error'); return }
-    apiFetch(`${API}/api/email/reminder-bulk`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        month_label: monthLabel(month),
-        tenants: unpaidWithEmail.map(p => ({
-          email: p.email,
-          name: p['наемател'],
-          address: p['адрес'],
-          amount: fmt(p['наем']),
-        })),
-      }),
-    })
-      .then(r => r.json())
-      .then(d => {
-        const ok = (d.results || []).filter(r => r.ok).length
-        const fail = (d.results || []).filter(r => !r.ok).length
-        showToast(`Изпратени: ${ok}${fail ? `, неуспешни: ${fail}` : ''}`, fail ? 'error' : 'success')
-      })
-      .catch(e => showToast('Грешка: ' + e.message, 'error'))
+      .catch(e => { setReminderBusy(null); showToast('Грешка: ' + e.message, 'error') })
   }
 
   const sendSmsReminder = (prop) => {
@@ -263,7 +289,7 @@ export default function Tenants({ API }) {
 
   const tableProps = {
     API, month,
-    onEdit: openContact, onReminder: sendReminder, onSms: sendSmsReminder,
+    onEdit: openContact, onReminder: openReminder, onSms: sendSmsReminder,
     editingContact, contactForm, setContactForm,
     onSaveContact: saveContact, onCancelContact: () => setEditingContact(null), savingContact,
     markingPaid, markForm, setMarkForm,
@@ -280,6 +306,15 @@ export default function Tenants({ API }) {
         }`}>
           {toast.msg}
         </div>
+      )}
+
+      {reminders && (
+        <ReminderPanel
+          data={reminders} busy={reminderBusy}
+          edits={reminderEdits} setEdits={setReminderEdits}
+          open={openLetter} setOpen={setOpenLetter}
+          onSend={sendReminder} onClose={() => setReminders(null)}
+        />
       )}
 
       <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
@@ -325,11 +360,12 @@ export default function Tenants({ API }) {
               {rederiving ? '…' : '🔄 Преразпознай преводите'}
             </button>
           )}
-          {view === 'month' && (
+          {view === 'month' && unpaid.some(p => p.email) && (
             <button
-              onClick={sendReminderAll}
+              onClick={openAllReminders}
+              title="Показва закъснелите и писмото за всеки. Нищо не тръгва, докато не натиснеш „Изпрати“ за конкретния човек."
               className="flex items-center gap-2 px-4 py-2 text-sm font-medium bg-orange-600 hover:bg-orange-700 text-white rounded-lg">
-              📧 Изпрати напомняния до всички
+              📧 Напомняния за закъснелите ({unpaid.filter(p => p.email).length})
             </button>
           )}
         </div>
@@ -729,10 +765,10 @@ function TenantTable({
                         className="p-1 text-gray-400 hover:text-blue-600 rounded">
                         ✏️
                       </button>
-                      {/* Email reminder */}
-                      {!prop.is_paid && prop.email && (
+                      {/* Напомняне по имейл — само за закъснелите */}
+                      {prop.is_overdue && prop.email && (
                         <button onClick={() => onReminder(prop)}
-                          title="Изпрати напомняне по имейл"
+                          title="Прегледай и изпрати напомняне"
                           className="flex items-center gap-1 px-2 py-1 text-xs bg-orange-50 border border-orange-200 text-orange-700 rounded hover:bg-orange-100 whitespace-nowrap">
                           📧
                         </button>
@@ -896,6 +932,94 @@ function YearMatrix({ matrix, loading, onCellClick }) {
         <span className="inline-flex items-center gap-1"><span className="inline-block w-5 h-5 bg-red-50 text-red-700 rounded text-center font-bold">✗</span> Неплатен</span>
         <span className="inline-flex items-center gap-1"><span className="inline-block w-5 h-5 bg-green-100 ring-1 ring-amber-400 rounded text-center text-green-700 font-bold">✓</span> ≥2 транзакции (възможен дубликат)</span>
         <span className="ml-auto text-gray-400">💡 Кликни клетка → отвори месеца за детайл</span>
+      </div>
+    </div>
+  )
+}
+
+// ── Напомняния за забавен наем ───────────────────────────────────────────
+// Преглед преди изпращане. Писмото е видимо и поправимо; изпращането е по
+// един човек. Банковото извлечение се качва на ръка, затова един ред може
+// да е „закъснял" само защото преводът още не е разпознат — за това служат
+// и предупреждението, и възможността писмото да се пренапише.
+function ReminderPanel({ data, busy, edits, setEdits, open, setOpen, onSend, onClose }) {
+  const rows = data.rows || []
+  const edit = (id, field, value) => setEdits(prev => ({ ...prev, [id]: { ...(prev[id] || {}), [field]: value } }))
+  const val  = (row, field) => (edits[row.property_id]?.[field] ?? row[field]) || ''
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-start justify-center overflow-y-auto py-10 px-4"
+         onClick={onClose}>
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200">
+          <div>
+            <h3 className="text-lg font-bold text-gray-800">Напомняния за забавен наем</h3>
+            <div className="text-xs text-gray-500">{data.month_label} · {rows.length} {rows.length === 1 ? 'закъснял' : 'закъснели'}</div>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-700 text-xl leading-none px-2">×</button>
+        </div>
+
+        {!rows.length ? (
+          <div className="p-8 text-center text-gray-500">Няма закъснели наеми за този месец. 🎉</div>
+        ) : (
+          <div className="divide-y divide-gray-100 max-h-[70vh] overflow-y-auto">
+            {rows.map(row => {
+              const isOpen = open === row.property_id
+              return (
+                <div key={row.property_id} className="px-5 py-3">
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <div className="flex-1 min-w-[200px]">
+                      <div className="font-semibold text-gray-800">{row.tenant || '— без име —'}</div>
+                      <div className="text-xs text-gray-500">
+                        {row.address} · {row.amount.toLocaleString('bg-BG', { minimumFractionDigits: 2 })} € ·
+                        {' '}падеж {row.due_date} ({row.days_late} {row.days_late === 1 ? 'ден' : 'дни'} закъснение)
+                      </div>
+                      {row.already_sent_at && (
+                        <div className="text-xs text-amber-700 mt-0.5">
+                          ✓ вече е изпратено {row.already_sent_at === 'сега' ? 'сега' : `на ${row.already_sent_at}`}
+                          {row.already_sent_to ? ` до ${row.already_sent_to}` : ''}
+                        </div>
+                      )}
+                      {row.blocked && <div className="text-xs text-red-600 mt-0.5">⛔ {row.blocked}</div>}
+                    </div>
+                    <button onClick={() => setOpen(isOpen ? null : row.property_id)}
+                      className="px-3 py-1.5 text-xs border border-gray-300 rounded-lg hover:bg-gray-50 text-gray-700">
+                      {isOpen ? 'Скрий писмото' : '👁 Виж писмото'}
+                    </button>
+                    <button onClick={() => onSend(row)} disabled={!row.can_send || busy === row.property_id}
+                      title={row.blocked || 'Изпраща писмото до наемателя'}
+                      className="px-3 py-1.5 text-xs font-medium bg-orange-600 text-white rounded-lg hover:bg-orange-700 disabled:opacity-40 disabled:cursor-not-allowed">
+                      {busy === row.property_id ? 'Изпраща…' : '📧 Изпрати'}
+                    </button>
+                  </div>
+
+                  {isOpen && (
+                    <div className="mt-3 space-y-2 bg-gray-50 border border-gray-200 rounded-lg p-3">
+                      <label className="block">
+                        <span className="text-xs font-semibold text-gray-600">До</span>
+                        <input value={val(row, 'email')} onChange={e => edit(row.property_id, 'email', e.target.value)}
+                          className="w-full border border-gray-300 rounded px-2 py-1 text-sm mt-0.5" />
+                      </label>
+                      <label className="block">
+                        <span className="text-xs font-semibold text-gray-600">Тема</span>
+                        <input value={val(row, 'subject')} onChange={e => edit(row.property_id, 'subject', e.target.value)}
+                          className="w-full border border-gray-300 rounded px-2 py-1 text-sm mt-0.5" />
+                      </label>
+                      <label className="block">
+                        <span className="text-xs font-semibold text-gray-600">Текст</span>
+                        <textarea rows={10} value={val(row, 'body')} onChange={e => edit(row.property_id, 'body', e.target.value)}
+                          className="w-full border border-gray-300 rounded px-2 py-1 text-sm mt-0.5 font-mono" />
+                      </label>
+                      <div className="text-xs text-gray-500">
+                        Поправките важат само за това писмо.
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        )}
       </div>
     </div>
   )
