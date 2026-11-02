@@ -10,6 +10,7 @@ const { parseRecipients } = require('../lib/email');
 const { optimizeMany, isDisplayable } = require('../lib/imageOptimize');
 const { imagesOnly, safeExt } = require('../lib/uploadFilter');
 const { getIssuer, issuerComplete } = require('../lib/branding');
+const { ensureTenant2 } = require('../lib/tenant2Party');
 const { normalizeIdCard } = require('../lib/idCard');
 const { kontrolisiContractsOn, sendContractToKontrolisi } = require('../lib/kontrolisiContract');
 const { reinstateContract } = require('../lib/contractReinstate');
@@ -378,7 +379,10 @@ async function generateContractPDF(contract, template, issuer, photos = [], opts
     const filepath = path.join(PDF_DIR, filename);
 
     const fields  = buildFields(contract, issuer);
-    const filled  = fillTemplate(template.content, fields);
+    // Вторият наемател влиза в шапката и когато бланката не знае за него —
+    // иначе се подписва отдолу, без да е изписан горе като страна.
+    const body    = ensureTenant2(template.content, contract);
+    const filled  = fillTemplate(body, fields);
     const lines   = filled.split('\n');
 
     const ML = 50;
