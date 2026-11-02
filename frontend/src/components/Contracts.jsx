@@ -30,29 +30,64 @@ const money2 = n => Number(n || 0).toLocaleString('bg-BG', { minimumFractionDigi
 // нищо при подписване — това е случаят, заради който изобщо има разсрочване.
 // Първо беше „всичко при подписване" и трябваше да се нулират три полета на
 // ръка, при което едно от тях лесно отиваше под нулата.
+// Вноските идват от базата като JSON низ. Заварен договор няма такава колона —
+// тогава двете стари полета са месечните вноски.
+function parseDepositMonths(c) {
+  if (c.deposit_months) {
+    try {
+      const a = JSON.parse(c.deposit_months)
+      if (Array.isArray(a)) return a.map(v => String(v))
+    } catch (_) { /* пада на старите полета */ }
+  }
+  const p1 = c.deposit_part_1, p2 = c.deposit_part_2
+  if (p1 == null && p2 == null) return []
+  return [String(p1 ?? 0), String(p2 ?? 0)]
+}
+
+const DEPOSIT_MAX_MONTHS = 12
+const BG_MONTHS = ['януари','февруари','март','април','май','юни','юли','август','септември','октомври','ноември','декември']
+
+// Името на наемния месец с отместване i от началната дата. Празна дата →
+// „1-вата вноска", за да не лъжем с измислен месец.
+function monthLabel(startDate, i) {
+  const m = String(startDate || '').match(/^(\d{4})-(\d{2})/)
+  // Без начална дата не измисляме месец. Окончанието е по рода на „вноска":
+  // 1-ва, 2-ра, нататък -та.
+  if (!m) return `${i + 1}-${i === 0 ? 'ва' : i === 1 ? 'ра' : 'та'} вноска`
+  const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1 + i, 1))
+  return BG_MONTHS[d.getUTCMonth()] + (d.getUTCFullYear() !== Number(m[1]) ? ' ' + d.getUTCFullYear() : '')
+}
+
+// Дели на n равни вноски; остатъкът отива на първите, за да е сборът точен.
+function splitEvenly(total, n) {
+  const c = Math.round((Number(total) || 0) * 100)
+  const base = Math.floor(c / n), extra = c - base * n
+  return Array.from({ length: n }, (_, i) => ((base + (i < extra ? 1 : 0)) / 100).toFixed(2))
+}
+
 function DepositSplit({ form, setForm }) {
   const deposit = Number(form.deposit) || 0
-  const parts = ['deposit_at_signing', 'deposit_part_1', 'deposit_part_2']
-  const on = parts.some(k => String(form[k] ?? '') !== '')
-  const sum = parts.reduce((s, k) => s + (Number(form[k]) || 0), 0)
+  const months = Array.isArray(form.deposit_months) ? form.deposit_months : []
+  const atSigning = form.deposit_at_signing
+  const on = months.length > 0 || String(atSigning ?? '') !== ''
+
+  const sum = (Number(atSigning) || 0) + months.reduce((a, v) => a + (Number(v) || 0), 0)
   // Сравнение в стотинки — 166.67 × 3 иначе не дава 500.
   const matches = Math.round(sum * 100) === Math.round(deposit * 100)
 
-  const toggle = (next) => setForm(f => {
-    if (!next) return { ...f, deposit_at_signing: '', deposit_part_1: '', deposit_part_2: '' }
-    // Остатъкът от нечетна стотинка отива на първата вноска.
-    const c = Math.round(deposit * 100)
-    const half = Math.floor(c / 2)
-    return {
-      ...f,
-      deposit_at_signing: '0',
-      deposit_part_1: ((c - half) / 100).toFixed(2),
-      deposit_part_2: (half / 100).toFixed(2),
-    }
+  const setMonths = (n) => setForm(f => {
+    const count = Math.max(1, Math.min(DEPOSIT_MAX_MONTHS, Number(n) || 1))
+    const rest = (Number(f.deposit_at_signing) || 0)
+    return { ...f, deposit_months: splitEvenly(deposit - rest, count) }
   })
 
-  // Отрицателен депозит е грешка в самото поле — панелът не бива да я
-  // преписва в „при подписване" и да я представя за разсрочване.
+  // Включването дава най-честия случай: нищо при подписване, по равно на
+  // два наема. Първо беше „всичко при подписване" и трябваше да се нулира
+  // на ръка, при което полето лесно отиваше под нулата.
+  const toggle = (next) => setForm(f => next
+    ? { ...f, deposit_at_signing: '0', deposit_months: splitEvenly(deposit, 2), deposit_part_1: '', deposit_part_2: '' }
+    : { ...f, deposit_at_signing: '', deposit_months: [], deposit_part_1: '', deposit_part_2: '' })
+
   if (deposit < 0) {
     return (
       <div className="mt-3 rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-700">
@@ -67,7 +102,7 @@ function DepositSplit({ form, setForm }) {
       <label className="flex items-center gap-2 cursor-pointer">
         <input type="checkbox" checked={on} onChange={e => toggle(e.target.checked)}
           className="rounded border-gray-300 text-amber-600 focus:ring-amber-500" />
-        <span className="text-sm font-semibold text-amber-900">Разсрочи депозита (Чл.13)</span>
+        <span className="text-sm font-semibold text-amber-900">Разсрочи депозита</span>
       </label>
       {!on && (
         <div className="text-xs text-gray-500 mt-1">
@@ -76,26 +111,50 @@ function DepositSplit({ form, setForm }) {
       )}
       {on && (
         <>
-          <div className="grid grid-cols-3 gap-2 mt-2">
-            {[['deposit_at_signing', 'При подписване'],
-              ['deposit_part_1', 'С 1-вия наем'],
-              ['deposit_part_2', 'С 2-рия наем']].map(([k, l]) => (
-              <div key={k}>
-                <label className="block text-[11px] font-medium text-amber-900 mb-1">{l}</label>
-                <input type="number" step="0.01" min="0" value={form[k] ?? ''}
-                  onChange={e => setForm(f => ({ ...f, [k]: e.target.value }))}
+          <div className="flex items-end gap-2 mt-2">
+            <div className="w-32">
+              <label className="block text-[11px] font-medium text-amber-900 mb-1">При подписване</label>
+              <input type="number" step="0.01" min="0" value={atSigning ?? ''}
+                onChange={e => setForm(f => ({ ...f, deposit_at_signing: e.target.value }))}
+                className="w-full border border-amber-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500" />
+            </div>
+            <div className="w-40">
+              <label className="block text-[11px] font-medium text-amber-900 mb-1">Брой месечни вноски</label>
+              <input type="number" min="1" max={DEPOSIT_MAX_MONTHS} value={months.length}
+                onChange={e => setMonths(e.target.value)}
+                className="w-full border border-amber-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500" />
+            </div>
+            <button type="button" onClick={() => setMonths(months.length)}
+              className="px-2 py-1.5 text-xs border border-amber-300 text-amber-900 rounded-lg hover:bg-amber-100">
+              Раздели по равно
+            </button>
+          </div>
+
+          <div className="grid grid-cols-3 md:grid-cols-4 gap-2 mt-2">
+            {months.map((v, i) => (
+              <div key={i}>
+                <label className="block text-[11px] font-medium text-amber-900 mb-1">
+                  с наема за {monthLabel(form.start_date, i)}
+                </label>
+                <input type="number" step="0.01" min="0" value={v ?? ''}
+                  onChange={e => setForm(f => {
+                    const next = [...(f.deposit_months || [])]
+                    next[i] = e.target.value
+                    return { ...f, deposit_months: next }
+                  })}
                   className="w-full border border-amber-300 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500" />
               </div>
             ))}
           </div>
+
           <div className={`text-xs mt-2 ${matches ? 'text-emerald-700' : 'text-red-600 font-semibold'}`}>
             {matches
               ? `✓ ${money2(sum)} € — сборът отговаря на депозита`
               : `Сборът е ${money2(sum)} €, а депозитът е ${money2(deposit)} €`}
           </div>
           <div className="text-[11px] text-amber-800 mt-1">
-            Месеците в договора се смятат от началната дата. Всяка вноска излиза
-            като отделна депозитна фактура в своя месец.
+            Месеците се смятат от началната дата. Всяка вноска излиза като
+            отделна депозитна фактура в своя месец и се описва в договора.
           </div>
         </>
       )}
@@ -462,8 +521,9 @@ export default function Contracts({ API }) {
     id_front_path: '', id_back_path: '',
     property_address: '', property_description: '', property_area: '',
     monthly_rent: '', currency: 'EUR', deposit: '', payment_day: '5',
-    // Разсрочване по Чл.13 — празно значи „целият депозит при подписване".
-    deposit_at_signing: '', deposit_part_1: '', deposit_part_2: '',
+    // Разсрочване — празно значи „целият депозит при подписване".
+    // deposit_months е МАСИВ със сумите по наемни месеци (до 12).
+    deposit_at_signing: '', deposit_months: [], deposit_part_1: '', deposit_part_2: '',
     start_date: '', end_date: '', delivery_date: '', conditions: '', notes: '',
     video_surveillance_clause: false,
   })
@@ -626,7 +686,10 @@ export default function Contracts({ API }) {
     setEditForm({
       tenant_name: c.tenant_name || '', tenant_email: c.tenant_email || '', tenant_phone: c.tenant_phone || '',
       monthly_rent: c.monthly_rent ?? '', currency: c.currency || 'EUR', deposit: c.deposit ?? '',
-      deposit_at_signing: c.deposit_at_signing ?? '', deposit_part_1: c.deposit_part_1 ?? '', deposit_part_2: c.deposit_part_2 ?? '',
+      deposit_at_signing: c.deposit_at_signing ?? '',
+      // В базата е JSON; заварен договор без колоната пада на двете стари.
+      deposit_months: parseDepositMonths(c),
+      deposit_part_1: c.deposit_part_1 ?? '', deposit_part_2: c.deposit_part_2 ?? '',
       payment_day: c.payment_day ?? 5, start_date: c.start_date || '', end_date: c.end_date || '', notes: c.notes || '',
       conditions: c.conditions || '', template_id: c.template_id || '',
       landlord_type: c.landlord_type || 'физическо', landlord_name: c.landlord_name || '',

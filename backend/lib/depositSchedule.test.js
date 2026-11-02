@@ -176,3 +176,82 @@ describe('клауза за плащане на депозита', () => {
     expect(depositClauseEN(c)).toContain('the respective month');
   });
 });
+
+// Разсрочване на повече от два месеца. Старите два стълба остават само за
+// заварените договори; новото идва от JSON масива deposit_months.
+describe('разсрочване на много месеци', () => {
+  const { splitEvenly, MAX_MONTHS, depositClauseBG, depositClauseEN } = require('./depositSchedule');
+  const base = { deposit: 1200, currency: 'EUR', start_date: '2026-11-04' };
+
+  it('дели по равно, остатъкът е на първите вноски', () => {
+    expect(splitEvenly(500, 3)).toEqual([166.67, 166.67, 166.66]);
+    expect(splitEvenly(500, 3).reduce((a, b) => a + b, 0)).toBeCloseTo(500, 10);
+    expect(splitEvenly(1200, 4)).toEqual([300, 300, 300, 300]);
+  });
+
+  it('четири вноски дават четири реда с верните месеци', () => {
+    const s = depositSchedule({ ...base, deposit_at_signing: 0, deposit_months: [300, 300, 300, 300] });
+    expect(s).toHaveLength(4);
+    expect(s.map(x => x.monthName)).toEqual(['ноември', 'декември', 'януари', 'февруари']);
+    expect(s.map(x => x.month)).toEqual(['2026-11', '2026-12', '2027-01', '2027-02']);
+  });
+
+  // Номерата се пишат в rent_invoices.deposit_part — ако се разместят, вече
+  // издадени фактури сочат към друга вноска.
+  it('номерацията продължава старата: 1 подпис, 2 първи месец, нататък +1', () => {
+    const s = depositSchedule({ ...base, deposit_at_signing: 200, deposit_months: [250, 250, 250, 250] });
+    expect(s.map(x => x.part)).toEqual([1, 2, 3, 4, 5]);
+  });
+
+  it('JSON низ от базата се чете като масив', () => {
+    const s = depositSchedule({ ...base, deposit_at_signing: 0, deposit_months: '[400,400,400]' });
+    expect(s).toHaveLength(3);
+    expect(s[2].amount).toBe(400);
+  });
+
+  it('счупен JSON пада на старите колони, не чупи договора', () => {
+    const s = depositSchedule({ ...base, deposit_at_signing: 0, deposit_months: 'не-е-json', deposit_part_1: 600, deposit_part_2: 600 });
+    expect(s.map(x => x.amount)).toEqual([600, 600]);
+  });
+
+  it('масивът бие старите две колони', () => {
+    const s = depositSchedule({ ...base, deposit_at_signing: 0, deposit_months: [400, 400, 400], deposit_part_1: 600, deposit_part_2: 600 });
+    expect(s).toHaveLength(3);
+  });
+
+  it('заварен договор с part_1/part_2 работи както преди', () => {
+    const s = depositSchedule({ ...base, deposit_at_signing: 0, deposit_part_1: 600, deposit_part_2: 600 });
+    expect(s.map(x => [x.part, x.amount])).toEqual([[2, 600], [3, 600]]);
+  });
+
+  it('нулева вноска по средата не влиза в графика', () => {
+    const s = depositSchedule({ ...base, deposit_at_signing: 0, deposit_months: [600, 0, 600] });
+    expect(s.map(x => x.part)).toEqual([2, 4]);
+  });
+
+  it('повече от 12 месеца се отказват и казват колко са подадени', () => {
+    const r = validateDepositSplit({ deposit: 1300, deposit_at_signing: 0, deposit_months: new Array(13).fill(100) });
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain('12');
+    expect(r.error).toContain('13');
+  });
+
+  it('точно 12 месеца минават', () => {
+    expect(validateDepositSplit({ deposit: 1200, deposit_at_signing: 0, deposit_months: new Array(12).fill(100) }).ok).toBe(true);
+    expect(MAX_MONTHS).toBe(12);
+  });
+
+  it('сборът се проверява и с масива', () => {
+    expect(validateDepositSplit({ deposit: 1200, deposit_at_signing: 0, deposit_months: [600, 500] }).ok).toBe(false);
+    expect(validateDepositSplit({ deposit: 1200, deposit_at_signing: 200, deposit_months: [500, 500] }).ok).toBe(true);
+  });
+
+  it('клаузата изброява всички вноски, не само две', () => {
+    const c = { ...base, deposit_at_signing: 0, deposit_months: [300, 300, 300, 300] };
+    const bg = depositClauseBG(c);
+    expect(bg).toContain('на 4 (четири) вноски');
+    expect(bg).toContain('с наема за месец февруари');
+    expect(depositClauseEN(c)).toContain('in 4 (four) instalments');
+    expect(depositClauseEN(c)).toContain('with the rent for February');
+  });
+});
