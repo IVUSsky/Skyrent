@@ -13,7 +13,25 @@ const { getIssuer, issuerComplete } = require('../lib/branding');
 const { normalizeIdCard } = require('../lib/idCard');
 const { kontrolisiContractsOn, sendContractToKontrolisi } = require('../lib/kontrolisiContract');
 const { reinstateContract } = require('../lib/contractReinstate');
-const { depositSchedule, validateDepositSplit, depositPlaceholders, depositClauseBG, depositClauseEN } = require('../lib/depositSchedule');
+const { depositSchedule, validateDepositSplit, depositPlaceholders, depositClauseBG, depositClauseEN, MAX_MONTHS } = require('../lib/depositSchedule');
+
+// Вноските по депозита пътуват като масив от интерфейса и като JSON в базата.
+// Празно/липсващо → NULL, тоест „няма разбивка по месеци" (а не „нула вноски").
+function normalizeDepositMonths(v) {
+  if (v === undefined || v === null || v === '') return null;
+  let arr = v;
+  if (typeof v === 'string') {
+    try { arr = JSON.parse(v); } catch (_) { return null; }
+  }
+  if (!Array.isArray(arr)) return null;
+  // БЕЗ рязане: тихо отрязана вноска после дава подвеждащо „сборът не дава
+  // депозита". Дължината я отказва validateDepositSplit с ясно съобщение.
+  const nums = arr.map(x => {
+    const n = Number(x);
+    return Number.isFinite(n) ? Math.round(n * 100) / 100 : 0;
+  });
+  return nums.length ? JSON.stringify(nums) : null;
+}
 const { preparePdfImages, pickImage, protocolImagePaths, PHOTO_WIDTH, THUMB_WIDTH } = require('../lib/pdfPhotos');
 const { releaseProperty } = require('../lib/propertyRelease');
 const { amountToWords } = require('../lib/bgWords');
@@ -1406,6 +1424,8 @@ module.exports = function(db) {
         deposit_at_signing: fields.deposit_at_signing === undefined || fields.deposit_at_signing === '' ? null : Number(fields.deposit_at_signing),
         deposit_part_1:     fields.deposit_part_1     === undefined || fields.deposit_part_1     === '' ? null : Number(fields.deposit_part_1),
         deposit_part_2:     fields.deposit_part_2     === undefined || fields.deposit_part_2     === '' ? null : Number(fields.deposit_part_2),
+        // Масивът бие двете стари колони, когато е подаден.
+        deposit_months:     normalizeDepositMonths(fields.deposit_months),
         payment_day:   fields.payment_day  || 5,
         start_date:    fields.start_date   || null,
         end_date:      fields.end_date     || null,
@@ -1460,12 +1480,12 @@ module.exports = function(db) {
           tenant_name, tenant_address, tenant_egn, tenant_phone, tenant_email, tenant_mol,
           tenant_doc, tenant_doc_number, tenant_doc_valid_until, tenant_doc_date, tenant_doc_country, tenant_dob,
           property_address, property_description, property_area,
-          monthly_rent, currency, deposit, deposit_at_signing, deposit_part_1, deposit_part_2,
+          monthly_rent, currency, deposit, deposit_at_signing, deposit_part_1, deposit_part_2, deposit_months,
           payment_day, payment_method,
           start_date, end_date, delivery_date, conditions, notes,
           абонат_ток, абонат_вода, абонат_тец, абонат_вход,
           pdf_path, protocol_pdf_path, id_front_path, id_back_path, kind)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       `).run(
         contract.template_id, contract.property_id, contract.contract_number, contract.status,
         contract.landlord_type, contract.landlord_name, contract.landlord_address, contract.landlord_egn,
@@ -1474,7 +1494,7 @@ module.exports = function(db) {
         contract.tenant_doc, contract.tenant_doc_number, contract.tenant_doc_valid_until, contract.tenant_doc_date, contract.tenant_doc_country, contract.tenant_dob,
         contract.property_address, contract.property_description, contract.property_area,
         contract.monthly_rent, contract.currency, contract.deposit,
-        contract.deposit_at_signing, contract.deposit_part_1, contract.deposit_part_2,
+        contract.deposit_at_signing, contract.deposit_part_1, contract.deposit_part_2, contract.deposit_months,
         contract.payment_day, contract.payment_method,
         contract.start_date, contract.end_date, contract.delivery_date, contract.conditions, contract.notes,
         contract.абонат_ток, contract.абонат_вода, contract.абонат_тец, contract.абонат_вход,
@@ -1546,7 +1566,7 @@ module.exports = function(db) {
     'monthly_rent', 'currency', 'deposit', 'payment_day', 'start_date', 'end_date', 'delivery_date',
     'conditions', 'notes',
     // Разсрочването по Чл.13
-    'deposit_at_signing', 'deposit_part_1', 'deposit_part_2'];
+    'deposit_at_signing', 'deposit_part_1', 'deposit_part_2', 'deposit_months'];
 const DEPOSIT_PARTS = ['deposit_at_signing', 'deposit_part_1', 'deposit_part_2'];
   router.put('/:id', async (req, res) => {
     try {
@@ -1560,7 +1580,8 @@ const DEPOSIT_PARTS = ['deposit_at_signing', 'deposit_part_1', 'deposit_part_2']
         if (['monthly_rent', 'deposit'].includes(k)) v = v === '' || v === null ? 0 : Number(v);
         // Празна вноска = NULL (няма разбивка), не нула — иначе договор без
         // разсрочване би станал „0 при подписване" и целият депозит би изчезнал.
-        if (DEPOSIT_PARTS.includes(k)) v = v === '' || v === null ? null : Number(v);
+        if (k === 'deposit_months') v = normalizeDepositMonths(v);
+        else if (DEPOSIT_PARTS.includes(k)) v = v === '' || v === null ? null : Number(v);
         if (k === 'payment_day') v = v === '' || v === null ? contract.payment_day : Number(v);
         if ([...DEPOSIT_PARTS, 'monthly_rent', 'deposit', 'payment_day'].includes(k) && v !== null && Number.isNaN(v)) {
           return res.status(400).json({ error: `Невалидна стойност за ${k}` });
@@ -1573,6 +1594,10 @@ const DEPOSIT_PARTS = ['deposit_at_signing', 'deposit_part_1', 'deposit_part_2']
       // иначе би минала, а сборът да се разпадне.
       const merged = { ...contract };
       for (const k of EDITABLE) if (b[k] !== undefined) merged[k] = b[k] === '' || b[k] === null ? null : b[k];
+      if (b.deposit_months !== undefined) merged.deposit_months = normalizeDepositMonths(b.deposit_months);
+      // Нови месечни вноски изместват старите две колони — иначе заварените
+      // стойности остават в базата и объркват всеки, който чете направо SQL.
+      if (merged.deposit_months) { merged.deposit_part_1 = null; merged.deposit_part_2 = null; }
       const splitCheck = validateDepositSplit(merged);
       if (!splitCheck.ok) return res.status(400).json({ error: splitCheck.error });
       // Смяна на бланката (напр. наемна → интернет): видът следва шаблона

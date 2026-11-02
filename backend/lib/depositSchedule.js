@@ -20,10 +20,37 @@ const BG_MONTHS = [
 ];
 
 // Номерата на вноските се пишат в rent_invoices.deposit_part — по тях се
-// познава коя вноска вече е фактурирана.
+// познава коя вноска вече е фактурирана. 1 = при подписване, после по една на
+// наемен месец: 2 = първият, 3 = вторият, 4 = третият… Номерацията е същата,
+// каквато беше при двете фиксирани вноски, затова вече издадени фактури остават
+// верни.
 const PART_AT_SIGNING = 1;
 const PART_RENT_1     = 2;
 const PART_RENT_2     = 3;
+const partForMonth = (i) => PART_RENT_1 + i;   // i = 0 за първия наемен месец
+
+// Повече от година разсрочване не е разсрочване, а втори наем.
+const MAX_MONTHS = 12;
+
+// Месечните вноски: `deposit_months` е JSON масив със сумите по наемни месеци.
+// Заварените договори нямат такава колона и се четат от deposit_part_1/2.
+// Връща масив от числа или null, ако изобщо няма зададена разбивка по месеци.
+function monthlyParts(contract = {}) {
+  const raw = contract.deposit_months;
+  if (raw !== null && raw !== undefined && raw !== '') {
+    let arr = raw;
+    if (typeof raw === 'string') {
+      try { arr = JSON.parse(raw); } catch (_) { arr = null; }
+    }
+    // НЕ се реже тук — проверката трябва да види истинската дължина, за да
+    // каже „повече от 12 месеца", вместо подвеждащото „сборът не дава депозита".
+    if (Array.isArray(arr)) return arr.map(v => round2(num(v) || 0));
+  }
+  const p1 = num(contract.deposit_part_1);
+  const p2 = num(contract.deposit_part_2);
+  if (p1 === null && p2 === null) return null;
+  return [round2(p1 || 0), round2(p2 || 0)];
+}
 
 const round2 = (n) => Math.round(Number(n) * 100) / 100;
 // В стотинки — за да не се трупа грешка при събиране на 166.67 + 166.67 + 166.66.
@@ -48,6 +75,16 @@ function rentMonth(startDate, offset) {
   };
 }
 
+// Дели сума на n равни вноски в стотинки; остатъкът отива на първите, за да
+// е сборът точен. 500 на 3 → [166.67, 166.67, 166.66].
+function splitEvenly(total, n) {
+  n = Math.max(0, Math.min(MAX_MONTHS, Math.trunc(Number(n) || 0)));
+  if (!n) return [];
+  const c = cents(total || 0);
+  const base = Math.floor(c / n), extra = c - base * n;
+  return Array.from({ length: n }, (_, i) => round2((base + (i < extra ? 1 : 0)) / 100));
+}
+
 // Вноските с НЕнулева сума, в реда на падежа.
 // [{ part, amount, when: 'signing'|'rent', month: '2026-05'|null, monthName, label }]
 function depositSchedule(contract = {}) {
@@ -55,17 +92,11 @@ function depositSchedule(contract = {}) {
   if (!(total > 0)) return [];
 
   const atSigningRaw = num(contract.deposit_at_signing);
-  const p1Raw = num(contract.deposit_part_1);
-  const p2Raw = num(contract.deposit_part_2);
+  const months = monthlyParts(contract);
 
-  // Нито едно от трите не е зададено → заварен договор, всичко при подписване.
-  const unset = atSigningRaw === null && p1Raw === null && p2Raw === null;
+  // Нищо не е зададено → заварен договор, всичко при подписване.
+  const unset = atSigningRaw === null && months === null;
   const atSigning = unset ? total : round2(atSigningRaw || 0);
-  const p1 = unset ? 0 : round2(p1Raw || 0);
-  const p2 = unset ? 0 : round2(p2Raw || 0);
-
-  const m1 = rentMonth(contract.start_date, 0);
-  const m2 = rentMonth(contract.start_date, 1);
 
   const out = [];
   if (atSigning > 0) {
@@ -74,33 +105,39 @@ function depositSchedule(contract = {}) {
       month: null, monthName: null, label: 'при подписване на договора',
     });
   }
-  for (const [part, amount, m] of [[PART_RENT_1, p1, m1], [PART_RENT_2, p2, m2]]) {
-    if (amount > 0) {
-      out.push({
-        part, amount, when: 'rent',
-        month: m ? m.ym : null,
-        monthName: m ? m.name : null,
-        label: m ? `с наема за месец ${m.name}` : 'с наема',
-      });
-    }
-  }
+  (months || []).slice(0, MAX_MONTHS).forEach((amount, i) => {
+    if (!(amount > 0)) return;
+    const m = rentMonth(contract.start_date, i);
+    out.push({
+      part: partForMonth(i), amount, when: 'rent',
+      month: m ? m.ym : null,
+      monthName: m ? m.name : null,
+      label: m ? `с наема за месец ${m.name}` : 'с наема',
+    });
+  });
   return out;
 }
 
 // Трите суми трябва да дават точно депозита — иначе Чл.13 обещава едно, а
 // фактурите вадят друго. Празна разбивка е валидна (заварено поведение).
-function validateDepositSplit({ deposit, deposit_at_signing, deposit_part_1, deposit_part_2 }) {
+function validateDepositSplit(contract = {}) {
+  const { deposit, deposit_at_signing } = contract;
   // Отрицателен депозит няма смисъл и дотук минаваше: полето е `number` без
   // долна граница и стрелката/колелцето го вкарват под нулата. Хваща се тук,
   // защото оттам нататък всичко останало е вярно смятане върху грешно число.
   if (Number(deposit || 0) < 0) return { ok: false, error: 'Депозитът не може да е отрицателен' };
 
   const atSigningRaw = num(deposit_at_signing);
-  const p1Raw = num(deposit_part_1);
-  const p2Raw = num(deposit_part_2);
-  if (atSigningRaw === null && p1Raw === null && p2Raw === null) return { ok: true };
+  const months = monthlyParts(contract);
+  if (atSigningRaw === null && months === null) return { ok: true };
 
-  const parts = [atSigningRaw || 0, p1Raw || 0, p2Raw || 0];
+  // Преди сбора — иначе отрязаните вноски дават подвеждащо „сборът не дава
+  // депозита", а истинският проблем е броят.
+  if (months && months.length > MAX_MONTHS) {
+    return { ok: false, error: `Депозитът не може да се дели на повече от ${MAX_MONTHS} месеца (подадени са ${months.length})` };
+  }
+
+  const parts = [atSigningRaw || 0, ...(months || [])];
   if (parts.some(v => v < 0)) return { ok: false, error: 'Вноските по депозита не могат да са отрицателни' };
 
   const total = cents(deposit || 0);
@@ -201,6 +238,6 @@ function depositClauseEN(contract = {}) {
 
 module.exports = {
   depositSchedule, validateDepositSplit, depositPlaceholders, rentMonth,
-  depositClauseBG, depositClauseEN,
-  PART_AT_SIGNING, PART_RENT_1, PART_RENT_2, BG_MONTHS,
+  depositClauseBG, depositClauseEN, monthlyParts, splitEvenly,
+  PART_AT_SIGNING, PART_RENT_1, PART_RENT_2, MAX_MONTHS, BG_MONTHS,
 };

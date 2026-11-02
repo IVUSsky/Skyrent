@@ -448,7 +448,11 @@ function runTenantMigrations(db) {
    // (виж lib/depositSchedule.js). Затова НЕ се попълват с подразбиране.
    'deposit_at_signing REAL',
    'deposit_part_1 REAL',
-   'deposit_part_2 REAL'
+   'deposit_part_2 REAL',
+   // Разсрочване на повече от два месеца: JSON масив със сумите по наемни
+   // месеци. deposit_part_1/2 остават само за заварените договори — четат се,
+   // когато тази колона е празна (виж lib/depositSchedule.js).
+   'deposit_months TEXT'
   ].forEach(col => { try { db.exec(`ALTER TABLE contracts ADD COLUMN ${col}`); } catch(_) {} });
   // Архивираните договори са качени вече подписани — сканът им Е подписаният
   // екземпляр. Еднократно ги отбелязваме като такива (флаг в settings, иначе
