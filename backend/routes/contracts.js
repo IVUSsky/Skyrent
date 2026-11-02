@@ -36,6 +36,7 @@ const { preparePdfImages, pickImage, protocolImagePaths, PHOTO_WIDTH, THUMB_WIDT
 const { releaseProperty } = require('../lib/propertyRelease');
 const { amountToWords } = require('../lib/bgWords');
 const { amountToWordsEN, fmtAmountEN } = require('../lib/enWords');
+const { findDuplicates, planMerge, sortedName, phoneKey, emailKey, egnKey } = require('../lib/partyDedupe');
 const { termMonths, termBG, termEN } = require('../lib/contractTerm');
 
 const FONT_REGULAR = path.join(__dirname, '../fonts/arial.ttf');
@@ -1317,8 +1318,23 @@ module.exports = function(db) {
     if (!t.name || !String(t.name).trim()) return;
     try {
       const name = String(t.name).trim();
-      const ex = (t.egn && db.prepare('SELECT id FROM tenant_directory WHERE egn=?').get(t.egn))
-              || db.prepare('SELECT id FROM tenant_directory WHERE name=?').get(name);
+      // Дотук съвпадението беше по ТОЧНО ЕГН или ТОЧНО име — затова
+      // „JOVANOVIĆ LUKA" и „LUKA JOVANOVIC" станаха два записа. Сега се сверява
+      // и по подредено име, телефон и имейл. Съвпадение само по контакт НЕ е
+      // достатъчно, ако двата записа спорят за ЕГН — виж lib/partyDedupe.js.
+      let ex = (t.egn && db.prepare('SELECT id FROM tenant_directory WHERE egn=?').get(t.egn))
+            || db.prepare('SELECT id FROM tenant_directory WHERE name=?').get(name);
+      if (!ex) {
+        const all = db.prepare('SELECT id, name, egn, phone, email FROM tenant_directory').all();
+        const key = sortedName(name), ph = phoneKey(t.phone), em = emailKey(t.email), eg = egnKey(t.egn);
+        ex = all.find(r => {
+          const rEgn = egnKey(r.egn);
+          if (eg && rEgn && eg !== rEgn) return false;      // спор за самоличност
+          if (sortedName(r.name) === key) return true;
+          return !!(key && ((ph && phoneKey(r.phone) === ph) || (em && emailKey(r.email) === em))
+                    && sortedName(r.name) === key);
+        }) || null;
+      }
       if (ex) {
         db.prepare(`UPDATE tenant_directory SET
             egn=COALESCE(NULLIF(egn,''),NULLIF(?,'')), address=COALESCE(NULLIF(address,''),NULLIF(?,'')),
@@ -1337,6 +1353,55 @@ module.exports = function(db) {
       }
     } catch (e) { console.warn('party upsert failed:', e.message); }
   }
+  // Кои записи в указателя изглеждат един и същ субект.
+  // Само чете — сливането е отделно действие.
+  router.get('/parties/duplicates', (req, res) => {
+    try {
+      const all = db.prepare('SELECT * FROM tenant_directory').all();
+      const groups = findDuplicates(all);
+      res.json({
+        total: all.length,
+        groups,
+        sure: groups.filter(g => g.confidence === 'сигурно').length,
+        review: groups.filter(g => g.confidence !== 'сигурно').length,
+      });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  // Слива избрани записи в един. Оцелелият пази своите непразни стойности,
+  // празните се допълват от другите, а различните изписвания на името влизат
+  // в бележка — иначе търсенето по стария правопис спира да работи.
+  //
+  // Няма чужди ключове към tenant_directory (договорите пазят имената си като
+  // текст), затова сливането не оставя висящи връзки.
+  router.post('/parties/merge', (req, res) => {
+    try {
+      const keepId = Number(req.body?.keep_id);
+      const mergeIds = (req.body?.merge_ids || []).map(Number).filter(n => n && n !== keepId);
+      if (!keepId || !mergeIds.length) return res.status(400).json({ error: 'Трябват keep_id и поне един merge_id' });
+
+      const keep = db.prepare('SELECT * FROM tenant_directory WHERE id=?').get(keepId);
+      if (!keep) return res.status(404).json({ error: 'Записът за запазване не е намерен' });
+      const others = mergeIds.map(id => db.prepare('SELECT * FROM tenant_directory WHERE id=?').get(id)).filter(Boolean);
+      if (!others.length) return res.status(404).json({ error: 'Няма намерени записи за сливане' });
+
+      const { fields, note } = planMerge(keep, others);
+      const cols = Object.keys(fields);
+      const tx = db.transaction(() => {
+        if (cols.length) {
+          db.prepare(`UPDATE tenant_directory SET ${cols.map(c => c + '=?').join(', ')}, updated_at=CURRENT_TIMESTAMP WHERE id=?`)
+            .run(...cols.map(c => fields[c]), keepId);
+        }
+        for (const o of others) db.prepare('DELETE FROM tenant_directory WHERE id=?').run(o.id);
+      });
+      tx();
+      res.json({
+        ok: true, kept: keepId, merged: others.map(o => o.id), note,
+        party: db.prepare('SELECT * FROM tenant_directory WHERE id=?').get(keepId),
+      });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
   router.post('/parties', (req, res) => {
     try {
       const b = req.body || {};

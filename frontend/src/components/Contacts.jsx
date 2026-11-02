@@ -16,6 +16,9 @@ export default function Contacts({ API = '' }) {
   const [loading, setLoading] = useState(true)
   const [form, setForm] = useState(null)   // null | {} (add/edit)
   const [err, setErr] = useState(null)
+  const [dupes, setDupes] = useState(null)      // null = не е търсено
+  const [dupOpen, setDupOpen] = useState(false)
+  const [merging, setMerging] = useState(null)
 
   const load = () => {
     setLoading(true)
@@ -23,7 +26,25 @@ export default function Contacts({ API = '' }) {
       .then(d => { setRows(Array.isArray(d) ? d : []); setLoading(false) })
       .catch(() => setLoading(false))
   }
-  useEffect(() => { load() }, [])
+  // Дубликатите се смятат на сървъра (lib/partyDedupe.js) — там е и пазачът
+  // срещу сливане на фирма с човек.
+  const loadDupes = () => apiFetch(`${API}/api/contracts/parties/duplicates`)
+    .then(r => r.json()).then(setDupes).catch(() => setDupes(null))
+  useEffect(() => { load(); loadDupes() }, [])
+
+  const merge = (keepId, ids) => {
+    setMerging(keepId)
+    apiFetch(`${API}/api/contracts/parties/merge`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ keep_id: keepId, merge_ids: ids }),
+    }).then(r => r.json().then(d => ({ ok: r.ok, d })))
+      .then(({ ok, d }) => {
+        setMerging(null)
+        if (!ok) { setErr(d.error || 'Грешка при сливане'); return }
+        setErr(null); load(); loadDupes()
+      })
+      .catch(() => { setMerging(null); setErr('Грешка при връзка') })
+  }
 
   const save = () => {
     if (!form.name?.trim()) { setErr('Името е задължително'); return }
@@ -74,6 +95,64 @@ export default function Contacts({ API = '' }) {
         <button onClick={() => { setForm(empty()); setErr(null) }}
           className="px-3 py-2 rounded-lg text-sm font-semibold bg-indigo-600 text-white hover:bg-indigo-700 whitespace-nowrap">+ Контакт</button>
       </div>
+
+      {/* Дубликати. Сигурните се сливат с един бутон; тези „за преглед" носят
+          причината, защото там често са различни субекти с общ телефон. */}
+      {dupes && dupes.groups.length > 0 && (
+        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3">
+          <button onClick={() => setDupOpen(o => !o)} className="w-full flex items-center justify-between text-left">
+            <span className="text-sm font-semibold text-amber-900">
+              ⚠️ Възможни дубликати: {dupes.sure} сигурни
+              {dupes.review ? ` · ${dupes.review} за преглед` : ''}
+            </span>
+            <span className="text-amber-700 text-xs">{dupOpen ? 'скрий' : 'покажи'}</span>
+          </button>
+
+          {dupOpen && dupes.groups.map((g, gi) => {
+            const sure = g.confidence === 'сигурно'
+            return (
+              <div key={gi} className={`mt-3 rounded-lg border p-3 bg-white ${sure ? 'border-emerald-200' : 'border-red-200'}`}>
+                <div className="flex items-center gap-2 mb-2">
+                  <span className={`text-[11px] px-2 py-0.5 rounded font-semibold ${sure ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-700'}`}>
+                    {sure ? 'сигурно' : 'за преглед'}
+                  </span>
+                  <span className="text-xs text-gray-500">съвпада по: {g.reasons.join(', ')}</span>
+                </div>
+
+                {g.warnings.map((w, i) => (
+                  <div key={i} className="text-[11px] text-red-700 mb-1">⚠️ {w}</div>
+                ))}
+
+                <div className="space-y-1">
+                  {g.items.map(it => (
+                    <div key={it.id} className="flex items-center gap-2 text-xs border-t border-gray-100 pt-1">
+                      <span className="font-medium text-gray-800 flex-1">#{it.id} {it.name}</span>
+                      <span className="text-gray-500">{it.egn || '—'}</span>
+                      <span className="text-gray-500">{it.phone || '—'}</span>
+                      <span className="text-gray-500 truncate max-w-[160px]">{it.email || '—'}</span>
+                      <button
+                        disabled={merging === it.id}
+                        onClick={() => {
+                          const ids = g.items.filter(x => x.id !== it.id).map(x => x.id)
+                          const msg = sure
+                            ? `Запазвам #${it.id} „${it.name}" и сливам в него ${ids.length} запис(а).`
+                              + ` Празните полета се допълват, другите изписвания на името влизат в бележка. Продължавам?`
+                            : [`ВНИМАНИЕ: групата е „за преглед" — може да са РАЗЛИЧНИ субекти.`,
+                               ...g.warnings,
+                               `Наистина ли сливам в #${it.id} „${it.name}"?`].join('\n')
+                          if (window.confirm(msg)) merge(it.id, ids)
+                        }}
+                        className={`px-2 py-1 rounded text-[11px] font-medium whitespace-nowrap ${sure ? 'bg-emerald-600 text-white hover:bg-emerald-700' : 'bg-white border border-red-300 text-red-700 hover:bg-red-50'} disabled:opacity-50`}>
+                        {merging === it.id ? '…' : 'запази този'}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
 
       <div className="text-xs text-gray-400 mb-3">{rows.length} контакта · {withEmail} с имейл</div>
 
