@@ -287,6 +287,18 @@ function buildFields(contract, issuer) {
   };
 }
 
+
+// Описът на имота + снимките на всеки артикул. Ползва се и от договора (в
+// приложения протокол), и от отделния протокол.
+function loadInventory(db, propertyId) {
+  if (!propertyId) return [];
+  const items = db.prepare('SELECT * FROM property_inventory WHERE property_id=? ORDER BY category, sort_order, name').all(propertyId);
+  for (const it of items) {
+    it.photos = db.prepare("SELECT id, type, filename, original_name FROM inventory_files WHERE inventory_id=? AND type='photo'").all(it.id);
+  }
+  return items;
+}
+
 // Generate PDF from template text
 // opts.appendProtocol — append the bundled handover protocol after signatures (default true for contracts)
 // opts.includeSignatures — render the two-column signature block at the bottom (default true)
@@ -303,7 +315,7 @@ async function generateContractPDF(contract, template, issuer, photos = [], opts
   // Прекодираме снимките ПРЕДИ рисуването — pdfkit е синхронен, а sharp не е.
   // Без това в PDF-а влизат оригиналните файлове от телефон (виж lib/pdfPhotos.js).
   let imageBufs = new Map();
-  if (appendInventory && (photos.length || inventoryItems.length)) {
+  if ((appendInventory || appendProtocol) && (photos.length || inventoryItems.length)) {
     const { grid, thumbs } = protocolImagePaths({
       photos, inventory: inventoryItems, photosDir: PHOTOS_DIR, inventoryDir: INVENTORY_DIR,
     });
@@ -578,7 +590,7 @@ async function generateContractPDF(contract, template, issuer, photos = [], opts
 
     // ── Appendix: Приемо-предавателен протокол (опционално) ─────
     if (appendProtocol) {
-      appendHandoverProtocol(doc, contract, issuer, photos, ML, MR, PW, HEADER_H);
+      appendHandoverProtocol(doc, contract, issuer, photos, ML, MR, PW, HEADER_H, inventoryItems, imageBufs);
     }
 
     doc.end();
@@ -592,6 +604,10 @@ const INVENTORY_DIR = path.join(DATA_DIR, 'inventory_files');
 
 // Колко снимки влизат в протокола. Осем = една страница в решетка 2x4.
 const PROTOCOL_MAX_PHOTOS = 8;
+
+// Етикетът без емоджи — за PDF. Arial няма тези глифове и ги рисува като
+// квадратче; на екрана емоджито остава.
+const catText = (cat) => String(CAT_LABELS[cat] || cat).replace(/^[^\p{L}]+/u, '');
 
 const CAT_LABELS = {
   'мебели':       '🛋️ Мебели',
@@ -659,7 +675,7 @@ function appendInventoryAndPhotos(doc, inventory, photos, ML, PW, HEADER_H, PH, 
       // Section header
       if (y > PH - FOOTER_H - 60) { doc.addPage(); y = HEADER_H + 10; }
       doc.font('B').fontSize(10.5).fillColor('#374151')
-         .text(CAT_LABELS[group.category] || group.category, ML, y, { width: PW });
+         .text(catText(group.category), ML, y, { width: PW });
       y = doc.y + 4;
       doc.moveTo(ML, y).lineTo(ML + PW, y).lineWidth(0.3).strokeColor('#d1d5db').stroke();
       y += 6;
@@ -769,7 +785,10 @@ function appendInventoryAndPhotos(doc, inventory, photos, ML, PW, HEADER_H, PH, 
   }
 }
 
-function appendHandoverProtocol(doc, contract, issuer, photos, ML, MR, PW, HEADER_H) {
+// inventory/imageBufs — както при отделния протокол. Приложеният в ДОГОВОРА
+// протокол дотук нямаше опис изобщо: описът се виждаше само в отделния
+// protocol_*.pdf, а подписва се договорът.
+function appendHandoverProtocol(doc, contract, issuer, photos, ML, MR, PW, HEADER_H, inventory = [], imageBufs = null) {
   doc.addPage();
   // drawPageHeader is called automatically via doc.on('pageAdded') event
 
@@ -827,16 +846,52 @@ function appendHandoverProtocol(doc, contract, issuer, photos, ML, MR, PW, HEADE
   doc.moveTo(ML, y).lineTo(ML + PW, y).lineWidth(0.3).strokeColor('#e5e7eb').stroke();
   y += 14;
 
+  // Описът на обзавеждането — това, което страните реално си предават.
+  // Компактен списък по категории; подробностите (марка, гаранция, снимка)
+  // остават в отделния протокол.
+  doc.font('B').fontSize(10).fillColor('#111827')
+     .text('Опис на обзавеждането / Inventory', ML, y, { width: PW });
+  y += 14;
+  if (inventory && inventory.length > 0) {
+    for (const cat of Object.keys(CAT_LABELS)) {
+      const items = inventory.filter(i => i.category === cat);
+      if (!items.length) continue;
+      if (y + 24 > doc.page.height - 70) { doc.addPage(); y = HEADER_H + 10; }
+      doc.font('B').fontSize(8.5).fillColor('#374151').text(catText(cat), ML, y, { width: PW });
+      y += 11;
+      for (const it of items) {
+        if (y + 11 > doc.page.height - 70) { doc.addPage(); y = HEADER_H + 10; }
+        const extra = [it.brand, it.model].filter(Boolean).join(' ');
+        doc.font('R').fontSize(8).fillColor('#4b5563')
+           .text('• ' + it.name + (extra ? ' — ' + extra : ''), ML + 8, y, { width: PW - 8, lineBreak: false });
+        y += 10;
+      }
+      y += 4;
+    }
+    doc.font('R').fontSize(7.5).fillColor('#6b7280')
+       .text('Общо ' + inventory.length + ' артикула. Страните приемат, че са в добро състояние, освен ако не е отбелязано друго.',
+             ML, y, { width: PW });
+    y += 16;
+  } else {
+    doc.font('R').fontSize(8).fillColor('#9ca3af')
+       .text('(За имота няма въведено обзавеждане / No inventory recorded)', ML, y, { width: PW });
+    y += 16;
+  }
+  doc.moveTo(ML, y).lineTo(ML + PW, y).lineWidth(0.3).strokeColor('#e5e7eb').stroke();
+  y += 14;
+
   // Photos section
   if (photos && photos.length > 0) {
-    doc.font('B').fontSize(10).fillColor('#111827').text('Снимки на имота / Property photos', ML, y, { width: PW });
+    const shown = photos.slice(0, PROTOCOL_MAX_PHOTOS);
+    doc.font('B').fontSize(10).fillColor('#111827')
+       .text('Снимки на имота / Property photos' + (photos.length > shown.length ? `  (първите ${shown.length} от ${photos.length})` : ''), ML, y, { width: PW });
     y += 16;
 
     const IMG_W = (PW - 10) / 2;
     const IMG_H = IMG_W * 0.67;
     let col = 0;
 
-    for (const photo of photos) {
+    for (const photo of shown) {
       const fp = path.join(PHOTOS_DIR, photo.filename);
       if (!fs.existsSync(fp)) continue;
 
@@ -848,7 +903,7 @@ function appendHandoverProtocol(doc, contract, issuer, photos, ML, MR, PW, HEADE
 
       const x = col === 0 ? ML : ML + IMG_W + 10;
       try {
-        doc.image(fp, x, y, { width: IMG_W, height: IMG_H, fit: [IMG_W, IMG_H] });
+        doc.image(pickImage(imageBufs, fp), x, y, { width: IMG_W, height: IMG_H, fit: [IMG_W, IMG_H] });
         doc.rect(x, y, IMG_W, IMG_H).lineWidth(0.3).strokeColor('#d1d5db').stroke();
         if (photo.caption) {
           doc.font('R').fontSize(7).fillColor('#6b7280')
@@ -1446,7 +1501,7 @@ module.exports = function(db) {
       const photos = property_id
         ? db.prepare('SELECT * FROM property_photos WHERE property_id=? ORDER BY sort_order, created_at').all(property_id)
         : [];
-      const { filepath, filename } = await generateContractPDF(contract, template, issuer, photos);
+      const { filepath, filename } = await generateContractPDF(contract, template, issuer, photos, { inventory: loadInventory(db, property_id) });
       contract.pdf_path = filename;
 
       // Auto-generate standalone Приемо-предавателен протокол PDF (само за наемни —
@@ -1526,7 +1581,7 @@ module.exports = function(db) {
       const photos = contract.property_id
         ? db.prepare('SELECT * FROM property_photos WHERE property_id=? ORDER BY sort_order, created_at').all(contract.property_id)
         : [];
-      const { filename } = await generateContractPDF(contract, template, issuer, photos);
+      const { filename } = await generateContractPDF(contract, template, issuer, photos, { inventory: loadInventory(db, contract.property_id) });
 
       // Regenerate standalone protocol (with inventory + photos)
       let protocolFilename = null;
@@ -1624,7 +1679,7 @@ const DEPOSIT_PARTS = ['deposit_at_signing', 'deposit_part_1', 'deposit_part_2']
         const issuer = getIssuer(db);
         const photos = fresh.property_id
           ? db.prepare('SELECT * FROM property_photos WHERE property_id=? ORDER BY sort_order, created_at').all(fresh.property_id) : [];
-        const { filename } = await generateContractPDF(fresh, template, issuer, photos);
+        const { filename } = await generateContractPDF(fresh, template, issuer, photos, { inventory: loadInventory(db, fresh.property_id) });
         let protocolFilename = contractKind(fresh.kind) === 'интернет' ? null : fresh.protocol_pdf_path;
         const protocolTmpl = contractKind(fresh.kind) === 'интернет' ? null
           : db.prepare("SELECT * FROM contract_templates WHERE name='Приемо-предавателен протокол'").get();
