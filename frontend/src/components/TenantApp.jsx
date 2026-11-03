@@ -1186,7 +1186,11 @@ function Apartment({ property }) {
 
   const toggle = async (d) => {
     const on = !(d.status?.on)
-    if (!on && !window.confirm(`${tr('apt.confirmOff')} „${d.name}"?`)) return
+    // При опасен уред потвърждението казва какво ще се случи, не само
+    // „сигурен ли си“ — иначе наемателят си спира тока и остава без връщане.
+    const warn = d.risk_key ? tr('apt.risk.' + d.risk_key) : ''
+    if (!on && !window.confirm(`${tr('apt.confirmOff')} „${d.name}“?${warn ? '\n\n' + warn : ''}`)) return
+    if (!on && warn && !window.confirm(tr('apt.riskConfirm'))) return
     setBusy(d.id); setErr('')
     try {
       const r = await apiFetch(`${API}/api/tenant/apartment/devices/${d.id}/control`, {
@@ -1257,6 +1261,11 @@ function Apartment({ property }) {
               </button>
             )}
           </div>
+          {d.risk_key && (
+            <div className="mt-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2">
+              {tr('apt.risk.' + d.risk_key)}
+            </div>
+          )}
           {/* Климатик през инфраред: наемателят може и да зададе температура */}
           {d.infrared && d.controllable && (
             <div className="mt-3 bg-slate-50 rounded-lg p-3">

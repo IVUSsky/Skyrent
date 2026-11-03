@@ -25,6 +25,10 @@ module.exports = function(db) {
   // идентификатора: tuya_device_id е самият контролер, а ir_remote_id е научената
   // „дистанционна“ за конкретния климатик (виж lib/tuyaIr.js).
   try { db.exec('ALTER TABLE smart_devices ADD COLUMN ir_remote_id TEXT'); } catch(_) {}
+  // Изрично отключване на опасен вид (бушон, брава, портал) за наемателя.
+  // Отделна колона, а не стойност в tenant_control, за да личи, че е
+  // съзнателно решение по конкретния уред — виж lib/tenantDeviceAccess.js.
+  try { db.exec('ALTER TABLE smart_devices ADD COLUMN tenant_control_risky INTEGER DEFAULT 0'); } catch(_) {}
 
   // ── GET /api/smart/devices — list configured devices ────────
   router.get('/devices', (req, res) => {
@@ -54,13 +58,15 @@ module.exports = function(db) {
   // ── PATCH /api/smart/devices/:id ────────────────────────────
   router.patch('/devices/:id', (req, res) => {
     try {
-      const { name, type, property_id, tenant_control, ir_remote_id } = req.body;
+      const { name, type, property_id, tenant_control, tenant_control_risky, ir_remote_id } = req.body;
       db.prepare(`UPDATE smart_devices SET name=COALESCE(?,name), type=COALESCE(?,type),
                     property_id=COALESCE(?,property_id), tenant_control=COALESCE(?,tenant_control),
+                    tenant_control_risky=COALESCE(?,tenant_control_risky),
                     ir_remote_id=COALESCE(?,ir_remote_id)
                   WHERE id=?`)
         .run(name || null, type || null, property_id || null,
              tenant_control == null ? null : (tenant_control ? 1 : 0),
+             tenant_control_risky == null ? null : (tenant_control_risky ? 1 : 0),
              ir_remote_id || null, req.params.id);
       res.json({ ok: true });
     } catch(err) { res.status(500).json({ error: err.message }); }
