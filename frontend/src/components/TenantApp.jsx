@@ -1237,6 +1237,18 @@ function Apartment({ property }) {
         </div>
       )}
 
+      {devices.length > 0 && (
+        <details className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-sm">
+          <summary className="cursor-pointer font-semibold text-blue-900">ℹ️ {tr('apt.howTitle')}</summary>
+          <ul className="mt-2 space-y-1 text-blue-900/90 text-xs list-disc pl-4">
+            <li>{tr('apt.how1')}</li>
+            <li>{tr('apt.how2')}</li>
+            <li>{tr('apt.how3')}</li>
+            <li>{tr('apt.how4')}</li>
+          </ul>
+        </details>
+      )}
+
       {err && <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg p-2 text-sm">{err}</div>}
 
       {devices.length === 0 ? (
@@ -1246,6 +1258,9 @@ function Apartment({ property }) {
           <div className="flex items-start justify-between gap-3">
             <div>
               <div className="font-semibold text-slate-800">{d.name}</div>
+              {tr('apt.what.' + d.type) !== 'apt.what.' + d.type && (
+                <div className="text-xs text-gray-400">{tr('apt.what.' + d.type)}</div>
+              )}
               <div className="text-xs text-gray-500">
                 {d.status?.online === false
                   ? <span className="text-amber-600">⚠️ {tr('apt.offline')}</span>
