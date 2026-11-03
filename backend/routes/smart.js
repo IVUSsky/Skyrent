@@ -6,30 +6,10 @@ module.exports = function(db) {
   const router = express.Router();
 
 
-  // ── DB migrations ───────────────────────────────────────────
-  try {
-    db.exec(`CREATE TABLE IF NOT EXISTS smart_devices (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      property_id INTEGER,
-      tuya_device_id TEXT UNIQUE,
-      name TEXT,
-      type TEXT DEFAULT 'breaker',
-      enabled INTEGER DEFAULT 1,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )`);
-  } catch(_) {}
-  // Разрешено ли е НАЕМАТЕЛЯТ да управлява устройството от портала. По
-  // подразбиране не — главният предпазител никога (виж lib/tenantDeviceAccess.js).
-  try { db.exec('ALTER TABLE smart_devices ADD COLUMN tenant_control INTEGER DEFAULT 0'); } catch(_) {}
-  // Климатиците БЕЗ Wi-Fi се карат през инфраред контролер. Тогава трябват два
-  // идентификатора: tuya_device_id е самият контролер, а ir_remote_id е научената
-  // „дистанционна“ за конкретния климатик (виж lib/tuyaIr.js).
-  try { db.exec('ALTER TABLE smart_devices ADD COLUMN ir_remote_id TEXT'); } catch(_) {}
-  // Изрично отключване на опасен вид (бушон, брава, портал) за наемателя.
-  // Отделна колона, а не стойност в tenant_control, за да личи, че е
-  // съзнателно решение по конкретния уред — виж lib/tenantDeviceAccess.js.
-  try { db.exec('ALTER TABLE smart_devices ADD COLUMN tenant_control_risky INTEGER DEFAULT 0'); } catch(_) {}
-
+  // Схемата на smart_devices е в db/migrations.js, не тук: този файл се
+  // сглобява с per-request db прокси БЕЗ избрана организация, затова
+  // ALTER-ите оттук никога не стигаха до org базите и колоната
+  // tenant_control липсваше на ПРОД (виж коментара в migrations.js).
   // ── GET /api/smart/devices — list configured devices ────────
   router.get('/devices', (req, res) => {
     try {
