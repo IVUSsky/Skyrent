@@ -912,6 +912,24 @@ export default function Contracts({ API }) {
       .then(d => d.ok ? showToast(`Покана изпратена — потребител ${d.username}`) : showToast('Грешка: ' + d.error, 'error'))
   }
 
+  // PDF-ът се пише веднъж при създаване. Поправка в текста (бланка или код)
+  // не стига до вече издадените договори, докато не се генерират наново.
+  const [regenerating, setRegenerating] = useState(null)
+  const regenerate = (c) => {
+    if (!confirm(`Да се генерира ли наново PDF-ът на ${c.contract_number}?
+
+Старият файл се заменя. Подписаният екземпляр (ако е качен) не се пипа.`)) return
+    setRegenerating(c.id)
+    apiFetch(`${API}/api/contracts/${c.id}/regenerate`, { method: 'POST' })
+      .then(r => r.json())
+      .then(d => {
+        setRegenerating(null)
+        if (d.ok) { showToast(`${c.contract_number} — PDF-ът е генериран наново`); load() }
+        else showToast('Грешка: ' + (d.error || 'неизвестна'), 'error')
+      })
+      .catch(e => { setRegenerating(null); showToast('Грешка: ' + e.message, 'error') })
+  }
+
   const sendContract = (c) => {
     const email = c.tenant_email || window.prompt('Въведете email адрес на наемателя:')
     if (!email) return
@@ -1328,6 +1346,10 @@ export default function Contracts({ API }) {
                               className="px-2 py-1 text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 rounded" title="Договор PDF">📄</button>
                             {kindOf(c) !== 'интернет' && <button onClick={() => apiFetch(`${API}/api/contracts/${c.id}/protocol/pdf`).then(r => r.blob()).then(b => window.open(URL.createObjectURL(b), '_blank'))}
                               className="px-2 py-1 text-xs bg-amber-50 border border-amber-200 text-amber-700 hover:bg-amber-100 rounded" title="Приемо-предавателен протокол PDF">📋</button>}
+                            <button onClick={() => regenerate(c)} disabled={regenerating === c.id}
+                              title="Генерира PDF-а наново по текущата бланка и данни. Старият файл се заменя."
+                              className="px-2 py-1 text-xs bg-gray-50 border border-gray-200 text-gray-600 hover:bg-gray-100 rounded disabled:opacity-40">
+                              {regenerating === c.id ? '…' : '🔄'}</button>
                             {c.id_front_path && (
                               <button onClick={() => apiFetch(`${API}/api/contracts/id-image/${c.id_front_path}`).then(r => r.blob()).then(b => window.open(URL.createObjectURL(b), '_blank'))}
                                 className="px-2 py-1 text-xs bg-blue-50 border border-blue-200 text-blue-700 hover:bg-blue-100 rounded" title="Лична карта — лице">🪪</button>
