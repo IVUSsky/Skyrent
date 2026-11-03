@@ -61,3 +61,27 @@ describe('моторите за щори', () => {
     expect(pickCurtainCode(null)).toBeNull();
   });
 });
+
+describe('състояние на завесата', () => {
+  // deviceStatus е мрежова, затова проверяваме самото правило, по което се
+  // чете `on` — то решава дали бутонът „Затвори" е активен.
+  const stateOf = (dps) => dps['switch'] ?? dps['switch_1']
+    ?? (dps['control'] != null ? dps['control'] === 'open' : null);
+
+  it('последната команда „open" значи отворено', () => {
+    expect(stateOf({ control: 'open', percent_state: 100 })).toBe(true);
+  });
+
+  it('„close" значи затворено — бутонът „Затвори" се изключва, не „Отвори"', () => {
+    expect(stateOf({ control: 'close', percent_state: 100 })).toBe(false);
+  });
+
+  it('бушон и клапан не се влияят', () => {
+    expect(stateOf({ switch: true })).toBe(true);
+    expect(stateOf({ switch_1: false })).toBe(false);
+  });
+
+  it('уред без нито едно от трите → неизвестно, не „изключено"', () => {
+    expect(stateOf({ watersensor_state: 'normal' })).toBeNull();
+  });
+});

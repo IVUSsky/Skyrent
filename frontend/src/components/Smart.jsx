@@ -152,6 +152,8 @@ function DeviceCard({ device, API, properties, onDelete, onTypeChange, onTenantC
     return () => clearInterval(interval)
   }, [loadStatus])
 
+  const isCurtain = String(device.type || '').toLowerCase() === 'curtain'
+
   const toggle = async (on) => {
     setToggling(true)
     setConfirmOff(false)
@@ -254,7 +256,18 @@ function DeviceCard({ device, API, properties, onDelete, onTypeChange, onTenantC
 
       {/* Controls */}
       <div className="flex gap-3">
-        {confirmOff ? (
+        {isCurtain ? (
+          <>
+            <button onClick={() => toggle(true)} disabled={toggling || isOn}
+              className={`flex-1 py-2.5 rounded-xl font-semibold text-sm ${isOn ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700 text-white'}`}>
+              🪟 Отвори
+            </button>
+            <button onClick={() => toggle(false)} disabled={toggling || isOn === false}
+              className={`flex-1 py-2.5 rounded-xl font-semibold text-sm ${isOn === false ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-slate-200 hover:bg-slate-300 text-slate-700'}`}>
+              🪟 Затвори
+            </button>
+          </>
+        ) : confirmOff ? (
           <>
             <span className="text-sm text-red-600 flex-1 self-center">Сигурен ли си?</span>
             <button onClick={() => setConfirmOff(false)}
