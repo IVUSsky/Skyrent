@@ -24,7 +24,7 @@ const RISK_NOTES = {
 const riskNote = (device) => RISK_NOTES[deviceType(device)] || null;
 // Видове, които имат смисъл за наемателя
 // `ir_ac` е климатик без Wi-Fi, каран през инфраред контролер (виж lib/tuyaIr.js)
-const TENANT_TYPES = new Set(['ac', 'ir_ac', 'climate', 'boiler', 'socket', 'light', 'valve', 'water_valve', 'heater']);
+const TENANT_TYPES = new Set(['ac', 'ir_ac', 'climate', 'boiler', 'socket', 'light', 'valve', 'water_valve', 'heater', 'curtain']);
 
 function deviceType(d) { return String(d?.type || '').trim().toLowerCase(); }
 

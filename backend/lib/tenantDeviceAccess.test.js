@@ -149,3 +149,16 @@ describe('изрично отключване на опасен уред (ап. 
     expect(assertTenantMayControl(db, 99, 1)).toMatchObject({ ok: false, status: 404 });
   });
 });
+
+describe('щори', () => {
+  it('наемателят може да ги движи — не са опасен вид', () => {
+    expect(canTenantControl(dev({ type: 'curtain', tenant_control: 1 }))).toBe(true);
+  });
+  it('без разрешение — не', () => {
+    expect(canTenantControl(dev({ type: 'curtain', tenant_control: 0 }))).toBe(false);
+  });
+  it('и не искат втора отметка', () => {
+    const { riskNote } = require('./tenantDeviceAccess');
+    expect(riskNote({ type: 'curtain' })).toBeNull();
+  });
+});
