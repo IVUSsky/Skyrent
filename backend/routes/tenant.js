@@ -37,7 +37,7 @@ const ticketStorage = multer.diskStorage({
 const ticketUpload = multer({ storage: ticketStorage, limits: { fileSize: 10 * 1024 * 1024 } });
 
 const { devicesForTenant, assertTenantMayControl } = require('../lib/tenantDeviceAccess');
-const { deviceStatus, switchDevice, configured: tuyaConfigured } = require('../lib/tuyaClient');
+const { deviceStatus, switchDevice, curtainCommand, configured: tuyaConfigured } = require('../lib/tuyaClient');
 const { acStatus: irAcStatus, acCommand: irAcCommand } = require('../lib/tuyaIr');
 
 module.exports = function(db) {
@@ -643,7 +643,9 @@ module.exports = function(db) {
             temp: wantsTemp ? req.body.temp : null,
             mode: req.body.mode,
           })
-        : await switchDevice(chk.device.tuya_device_id, req.body.on);
+        : String(chk.device.type || '').toLowerCase() === 'curtain'
+          ? await curtainCommand(chk.device.tuya_device_id, req.body.on)
+          : await switchDevice(chk.device.tuya_device_id, req.body.on);
       // Следа кой е включил какво — за спорове „не съм го пипал"
       try {
         db.prepare(`CREATE TABLE IF NOT EXISTS smart_logs (

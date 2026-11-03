@@ -1250,14 +1250,19 @@ function Apartment({ property }) {
                 {d.status?.online === false
                   ? <span className="text-amber-600">⚠️ {tr('apt.offline')}</span>
                   : d.controllable
-                    ? (d.status?.on ? '🟢 ' + tr('apt.stateOn') : '⚪️ ' + tr('apt.stateOff'))
+                    ? (d.type === 'curtain'
+                        ? (d.status?.on ? '🪟 ' + tr('apt.stateOpen') : '🪟 ' + tr('apt.stateClosed'))
+                        : (d.status?.on ? '🟢 ' + tr('apt.stateOn') : '⚪️ ' + tr('apt.stateOff')))
                     : tr('apt.readonly')}
               </div>
             </div>
             {d.controllable && d.status?.online !== false && (
               <button onClick={() => toggle(d)} disabled={busy === d.id}
                 className={`px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50 ${d.status?.on ? 'bg-slate-100 text-slate-700' : 'bg-emerald-600 text-white'}`}>
-                {busy === d.id ? tr('apt.working') : (d.status?.on ? tr('apt.off') : tr('apt.on'))}
+                {busy === d.id ? tr('apt.working')
+                  : d.type === 'curtain'
+                    ? (d.status?.on ? tr('apt.close') : tr('apt.open'))
+                    : (d.status?.on ? tr('apt.off') : tr('apt.on'))}
               </button>
             )}
           </div>

@@ -39,3 +39,25 @@ describe('кой DP код управлява включването', () => {
     expect(SWITCH_CODES.slice(0, 2)).toEqual(['switch', 'switch_1']);
   });
 });
+
+describe('моторите за щори', () => {
+  const { pickCurtainCode } = require('./tuyaClient');
+  const status = (...codes) => ({ success: true, result: codes.map(c => ({ code: c, value: 0 })) });
+
+  it('предпочита `control` (отвори/спри/затвори)', () => {
+    expect(pickCurtainCode(status('control', 'percent_control', 'work_state'))).toBe('control');
+  });
+
+  it('без `control` минава на процент', () => {
+    expect(pickCurtainCode(status('percent_control', 'position'))).toBe('percent_control');
+  });
+
+  it('бушон не е завеса', () => {
+    expect(pickCurtainCode(status('switch', 'cur_power'))).toBeNull();
+  });
+
+  it('мълчащ отговор → нищо', () => {
+    expect(pickCurtainCode({ success: false })).toBeNull();
+    expect(pickCurtainCode(null)).toBeNull();
+  });
+});

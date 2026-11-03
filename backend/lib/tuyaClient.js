@@ -111,6 +111,32 @@ async function switchCodeOf(tuyaDeviceId) {
   } catch { return null; }
 }
 
+// Моторите за щори нямат ключ: карат се с DP `control` (open/stop/close)
+// или с `percent_control` (0–100). Пращането на `switch` към тях е същата
+// грешка като с клапана — Tuya приема и не прави нищо.
+const CURTAIN_CODES = ['control', 'percent_control', 'mach_operate'];
+
+function pickCurtainCode(statusResult) {
+  if (!statusResult || statusResult.success === false) return null;
+  const list = Array.isArray(statusResult) ? statusResult : (statusResult.result || []);
+  const codes = new Set(list.map(dp => dp && dp.code).filter(Boolean));
+  return CURTAIN_CODES.find(c => codes.has(c)) || null;
+}
+
+// `open` вместо `on`: за завеса „включено" не значи нищо.
+async function curtainCommand(tuyaDeviceId, open) {
+  let code = null;
+  try {
+    code = pickCurtainCode(await tuyaRequest('GET', `/v1.0/devices/${tuyaDeviceId}/status`));
+  } catch { /* долу се връща ясен отказ */ }
+  if (!code) return { ok: false, error: 'Устройството не приема команда за отваряне/затваряне', result: null };
+  const value = code === 'percent_control' ? (open ? 100 : 0) : (open ? 'open' : 'close');
+  const data = await tuyaRequest('POST', `/v1.0/devices/${tuyaDeviceId}/commands`, {
+    commands: [{ code, value }],
+  });
+  return { ok: !!data.success, code, result: data };
+}
+
 async function switchDevice(tuyaDeviceId, on) {
   const code = await switchCodeOf(tuyaDeviceId);
   if (!code) {
@@ -124,4 +150,4 @@ async function switchDevice(tuyaDeviceId, on) {
   return { ok: !!data.success, code, result: data };
 }
 
-module.exports = { tuyaRequest, deviceStatus, switchDevice, switchCodeOf, pickSwitchCode, configured, sortedPath, SWITCH_CODES };
+module.exports = { tuyaRequest, deviceStatus, switchDevice, switchCodeOf, pickSwitchCode, curtainCommand, pickCurtainCode, CURTAIN_CODES, configured, sortedPath, SWITCH_CODES };
