@@ -75,7 +75,13 @@ async function deviceStatus(tuyaDeviceId) {
     for (const dp of (data.result || [])) dps[dp.code] = dp.value;
     return {
       online: true,
-      on: dps['switch'] ?? dps['switch_1'] ?? null,
+      // Моторът за щори няма ключ. `control` е последната ИЗПРАТЕНА команда
+      // (open/stop/close), не измерено положение — но е единственото, по което
+      // може да се каже накъде е тръгнала завесата. Без това `on` оставаше
+      // null, бутонът „Затвори" стоеше сив и щорите можеха само да се отварят.
+      on: dps['switch'] ?? dps['switch_1']
+          ?? (dps['control'] != null ? dps['control'] === 'open' : null),
+      curtain_percent: dps['percent_state'] ?? null,
       power_w: dps['cur_power'] != null ? dps['cur_power'] / 10 : null,
       voltage_v: dps['cur_voltage'] != null ? dps['cur_voltage'] / 10 : null,
       current_ma: dps['cur_current'] ?? null,
