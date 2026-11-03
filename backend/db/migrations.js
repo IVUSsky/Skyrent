@@ -1058,6 +1058,30 @@ function runTenantMigrations(db) {
   try { db.exec("ALTER TABLE property_photos ADD COLUMN sort_order INTEGER DEFAULT 0"); console.log('Migration: added property_photos.sort_order'); } catch(_) {}
   console.log('property_photos table ready');
 
+  // Смарт устройства. Схемата живееше в routes/smart.js, където се изпълнява
+  // при СГЛОБЯВАНЕТО на рутера — а там `db` е per-request прокси без избрана
+  // организация, затова ALTER-ите тихо пропадаха в catch. Резултат: колоната
+  // `tenant_control` никога не се появи на ПРОД и управлението от приложението
+  // на наемателя не работеше за НИТО едно устройство, в нито един имот
+  // (открито 03.11.2026 при ап. 4А). Мястото на миграциите е тук, където се
+  // пускат по веднъж за всяка org база.
+  db.exec(`CREATE TABLE IF NOT EXISTS smart_devices (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    property_id INTEGER,
+    tuya_device_id TEXT UNIQUE,
+    name TEXT,
+    type TEXT DEFAULT 'breaker',
+    enabled INTEGER DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+  // Разрешено ли е наемателят да го управлява от портала.
+  try { db.exec('ALTER TABLE smart_devices ADD COLUMN tenant_control INTEGER DEFAULT 0'); console.log('Migration: added smart_devices.tenant_control'); } catch(_) {}
+  // Климатик без Wi-Fi през инфраред контролер: „дистанционната" в контролера.
+  try { db.exec('ALTER TABLE smart_devices ADD COLUMN ir_remote_id TEXT'); console.log('Migration: added smart_devices.ir_remote_id'); } catch(_) {}
+  // Изрично отключване на опасен вид (бушон, брава, портал) за наемателя.
+  try { db.exec('ALTER TABLE smart_devices ADD COLUMN tenant_control_risky INTEGER DEFAULT 0'); console.log('Migration: added smart_devices.tenant_control_risky'); } catch(_) {}
+  console.log('smart_devices table ready');
+
   // Изпратени напомняния за забавен наем. Водим ги, за да не тръгне второ
   // писмо за същия месец (нищо не ядосва изряден човек повече от три
   // напомняния за един наем) и за да се вижда кога е пратено последното.
