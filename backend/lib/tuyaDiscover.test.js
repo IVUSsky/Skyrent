@@ -77,3 +77,39 @@ describe('подреждане на намереното', () => {
     expect(d.suggested_type).toBe('water_valve');
   });
 });
+
+describe('двата пътя до списъка', () => {
+  const { listAllDevicesAnyWay } = require('./tuyaDiscover');
+
+  // Проектът може да държи устройствата или в самия облак, или на свързан
+  // Smart Life акаунт. Празен отговор от единия не значи „няма устройства".
+  it('празен облачен списък → пробва свързания акаунт', async () => {
+    const seen = [];
+    const req = async (m, p) => {
+      seen.push(p);
+      if (p.includes('/v2.0/cloud/thing/device')) return { success: true, result: { list: [] } };
+      return { success: true, result: { devices: [{ id: 'bf-a', name: 'Клапан', category: 'tdq' }], has_more: false } };
+    };
+    expect((await listAllDevicesAnyWay({}, req)).map(d => d.id)).toEqual(['bf-a']);
+    expect(seen.some(p => p.includes('associated-users'))).toBe(true);
+  });
+
+  it('грешка от първия също води до втория', async () => {
+    const req = async (m, p) => p.includes('cloud/thing')
+      ? { success: false, msg: 'no permission' }
+      : { success: true, result: { devices: [{ id: 'bf-b' }], has_more: false } };
+    expect((await listAllDevicesAnyWay({}, req)).map(d => d.id)).toEqual(['bf-b']);
+  });
+
+  it('работи ли първият — вторият не се вика', async () => {
+    const seen = [];
+    const req = async (m, p) => { seen.push(p); return { success: true, result: { list: [{ id: 'bf-c' }] } }; };
+    await listAllDevicesAnyWay({}, req);
+    expect(seen.some(p => p.includes('associated-users'))).toBe(false);
+  });
+
+  it('и двата мълчат → грешката на първия, а не празен списък', async () => {
+    const req = async () => ({ success: false, msg: 'sign invalid' });
+    await expect(listAllDevicesAnyWay({}, req)).rejects.toThrow(/sign invalid/);
+  });
+});

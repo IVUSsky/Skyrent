@@ -1,7 +1,7 @@
 const express = require('express');
 const { tuyaRequest } = require('../lib/tuyaClient');
 const { listRemotes: listIrRemotes, acCommand: irAcCommand } = require('../lib/tuyaIr');
-const { listAllDevices, describeDevices } = require('../lib/tuyaDiscover');
+const { listAllDevicesAnyWay, describeDevices } = require('../lib/tuyaDiscover');
 
 module.exports = function(db) {
   const router = express.Router();
@@ -31,7 +31,7 @@ module.exports = function(db) {
   router.get('/discover', async (req, res) => {
     try {
       const known = db.prepare('SELECT tuya_device_id FROM smart_devices').all().map(r => r.tuya_device_id);
-      const raw = await listAllDevices({ max: 200 });
+      const raw = await listAllDevicesAnyWay({ max: 200 });
       const list = describeDevices(raw, known);
       res.json({ ok: true, count: list.length, devices: list });
     } catch (err) { res.status(502).json({ error: err.message }); }
