@@ -1,5 +1,5 @@
 const express = require('express');
-const { tuyaRequest } = require('../lib/tuyaClient');
+const { tuyaRequest, switchDevice, curtainCommand } = require('../lib/tuyaClient');
 const { listRemotes: listIrRemotes, acCommand: irAcCommand } = require('../lib/tuyaIr');
 const { listAllDevicesAnyWay, describeDevices } = require('../lib/tuyaDiscover');
 
@@ -138,11 +138,15 @@ module.exports = function(db) {
       const { on } = req.body; // true = on, false = off
       if (on == null) return res.status(400).json({ error: 'on (boolean) required' });
 
-      // Try switch_1 first, some devices use 'switch'
-      const data = await tuyaRequest('POST', `/v1.0/devices/${dev.tuya_device_id}/commands`, {
-        commands: [{ code: 'switch', value: !!on }]
-      });
-      console.log('[Smart] control result:', JSON.stringify(data));
+      // Кодът на командата зависи от уреда: бушонът слуша `switch`, клапанът
+      // `switch_1`, моторът за щори изобщо не е ключ. Една логика с портала.
+      const isCurtain = String(dev.type || '').toLowerCase() === 'curtain';
+      const r = isCurtain
+        ? await curtainCommand(dev.tuya_device_id, !!on)
+        : await switchDevice(dev.tuya_device_id, !!on);
+      if (!r.ok && r.error) return res.status(400).json({ error: r.error });
+      const data = r.result;
+      console.log('[Smart] control result:', r.code, JSON.stringify(data));
 
       // Log the action
       try {
