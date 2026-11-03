@@ -89,11 +89,39 @@ async function deviceStatus(tuyaDeviceId) {
   }
 }
 
-async function switchDevice(tuyaDeviceId, on) {
-  const data = await tuyaRequest('POST', `/v1.0/devices/${tuyaDeviceId}/commands`, {
-    commands: [{ code: 'switch', value: !!on }],
-  });
-  return { ok: !!data.success, result: data };
+// Кое DP управлява включването. Бушонът tongou ползва `switch`, клапанът
+// NSB01 — `switch_1`, едноканални контакти понякога `switch_led`. Четенето
+// на състоянието отдавна приема и двете (`on` по-горе), но командата пращаше
+// само `switch` — затова клапанът на ап. 4А нямаше да реагира на нищо.
+const SWITCH_CODES = ['switch', 'switch_1', 'switch_2', 'switch_led'];
+
+// Изборът е отделно от мрежата, за да се тества без Tuya.
+function pickSwitchCode(statusResult) {
+  if (!statusResult || statusResult.success === false) return null;
+  const list = Array.isArray(statusResult) ? statusResult : (statusResult.result || []);
+  const codes = new Set(list.map(dp => dp && dp.code).filter(Boolean));
+  return SWITCH_CODES.find(c => codes.has(c)) || null;
 }
 
-module.exports = { tuyaRequest, deviceStatus, switchDevice, configured, sortedPath };
+// Пита устройството кое DP има, вместо да гадае по вид. Едно допълнително
+// повикване при натискане — по-евтино от бутон, който мълчи.
+async function switchCodeOf(tuyaDeviceId) {
+  try {
+    return pickSwitchCode(await tuyaRequest('GET', `/v1.0/devices/${tuyaDeviceId}/status`));
+  } catch { return null; }
+}
+
+async function switchDevice(tuyaDeviceId, on) {
+  const code = await switchCodeOf(tuyaDeviceId);
+  if (!code) {
+    // Уред без ключ за включване — брава с пръстов отпечатък например.
+    // По-добре ясен отказ, отколкото команда, която Tuya приема и игнорира.
+    return { ok: false, error: 'Устройството няма ключ за включване/изключване', result: null };
+  }
+  const data = await tuyaRequest('POST', `/v1.0/devices/${tuyaDeviceId}/commands`, {
+    commands: [{ code, value: !!on }],
+  });
+  return { ok: !!data.success, code, result: data };
+}
+
+module.exports = { tuyaRequest, deviceStatus, switchDevice, switchCodeOf, pickSwitchCode, configured, sortedPath, SWITCH_CODES };
