@@ -92,3 +92,60 @@ describe('списък и проверка срещу база', () => {
     expect(assertTenantMayControl(db, 26, 5)).toMatchObject({ ok: false, status: 403 });
   });
 });
+
+describe('изрично отключване на опасен уред (ап. 4А — „да управлява всичко")', () => {
+  it('бушон с ДВЕТЕ отметки → наемателят го управлява', () => {
+    expect(canTenantControl(dev({ type: 'breaker', tenant_control: 1, tenant_control_risky: 1 }))).toBe(true);
+  });
+
+  it('само изричната, без общата → не', () => {
+    expect(canTenantControl(dev({ type: 'breaker', tenant_control: 0, tenant_control_risky: 1 }))).toBe(false);
+  });
+
+  it('изключен уред не се управлява, каквито и отметки да има', () => {
+    expect(canTenantControl(dev({ type: 'breaker', enabled: 0, tenant_control: 1, tenant_control_risky: 1 }))).toBe(false);
+  });
+
+  it('непознат вид не се отключва с „рисковата" отметка', () => {
+    expect(canTenantControl(dev({ type: 'нещо', tenant_control: 1, tenant_control_risky: 1 }))).toBe(false);
+  });
+
+  it('безопасните видове не искат втора отметка', () => {
+    expect(canTenantControl(dev({ type: 'ac', tenant_control_risky: 0 }))).toBe(true);
+  });
+
+  it('предупреждението обяснява ТОЧНО какво се случва с рутера', () => {
+    const { riskNote } = require('./tenantDeviceAccess');
+    expect(riskNote({ type: 'breaker' })).toMatch(/рутера/);
+    expect(riskNote({ type: 'breaker' })).toMatch(/физическо отиване/);
+    expect(riskNote({ type: 'ac' })).toBeNull();
+  });
+
+  it('порталът получава предупреждението само за това, което наемателят може', () => {
+    const db = new Database(':memory:');
+    db.exec(`CREATE TABLE smart_devices (id INTEGER PRIMARY KEY, property_id INTEGER, tuya_device_id TEXT,
+             name TEXT, type TEXT, enabled INTEGER, tenant_control INTEGER, tenant_control_risky INTEGER, ir_remote_id TEXT);
+      INSERT INTO smart_devices (id, property_id, name, type, enabled, tenant_control, tenant_control_risky) VALUES
+        (1, 26, 'Бушон 4А',   'breaker', 1, 1, 1),
+        (2, 26, 'Климатик',   'ac',      1, 1, 0),
+        (3, 26, 'Бушон вход', 'breaker', 1, 0, 0);`);
+    const list = devicesForTenant(db, 26);
+    expect(list.find(d => d.id === 1)).toMatchObject({ controllable: true });
+    expect(list.find(d => d.id === 1).risk_key).toBe('breaker');
+    expect(list.find(d => d.id === 2).risk_key).toBeNull();
+    // Вижда го (консумация), но не го управлява → няма предупреждение
+    expect(list.find(d => d.id === 3)).toMatchObject({ controllable: false, risk_key: null });
+  });
+
+  it('командата минава само при двете отметки', () => {
+    const db = new Database(':memory:');
+    db.exec(`CREATE TABLE smart_devices (id INTEGER PRIMARY KEY, property_id INTEGER, tuya_device_id TEXT,
+             name TEXT, type TEXT, enabled INTEGER, tenant_control INTEGER, tenant_control_risky INTEGER, ir_remote_id TEXT);
+      INSERT INTO smart_devices (id, property_id, name, type, enabled, tenant_control, tenant_control_risky) VALUES
+        (1, 26, 'Бушон 4А', 'breaker', 1, 1, 1),
+        (2, 26, 'Бушон вход', 'breaker', 1, 1, 0);`);
+    expect(assertTenantMayControl(db, 26, 1).ok).toBe(true);
+    expect(assertTenantMayControl(db, 26, 2)).toMatchObject({ ok: false, status: 403 });
+    expect(assertTenantMayControl(db, 99, 1)).toMatchObject({ ok: false, status: 404 });
+  });
+});

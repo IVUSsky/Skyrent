@@ -1,6 +1,13 @@
 import { apiFetch } from '../api'
 import React, { useState, useEffect, useCallback } from 'react'
 
+const RISKY_TYPES = ['breaker', 'main', 'lock', 'gate']
+const RISK_TEXT = {
+  breaker: 'Спирането на тока сваля и рутера. След това уредът няма интернет и НЕ може да се включи от приложението — трябва физическо отиване до таблото.',
+  main:    'Главен прекъсвач: спира тока на целия имот, включително хладилника и рутера.',
+  lock:    'Брава: грешно заключване може да остави човек отвън.',
+  gate:    'Портал: отваря достъп до общата част.',
+}
 const fmt = n => n != null ? Number(n).toLocaleString('bg-BG', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'
 const fmt1 = n => n != null ? Number(n).toLocaleString('bg-BG', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : '—'
 
@@ -115,7 +122,7 @@ function IrRemotePicker({ device, API }) {
   )
 }
 
-function DeviceCard({ device, API, properties, onDelete, onTypeChange, onTenantControl }) {
+function DeviceCard({ device, API, properties, onDelete, onTypeChange, onTenantControl, onTenantRisky }) {
   const [status, setStatus]     = useState(null)
   const [loading, setLoading]   = useState(false)
   const [toggling, setToggling] = useState(false)
@@ -197,9 +204,10 @@ function DeviceCard({ device, API, properties, onDelete, onTypeChange, onTenantC
         </div>
       </div>
 
-      {/* Достъп за наемателя — бушонът никога не се дава (виж lib/tenantDeviceAccess.js) */}
-      {!['breaker', 'lock', 'router'].includes(device.type) && (
-        <label className="flex items-start gap-2 mb-3 cursor-pointer text-xs">
+      {/* Достъп за наемателя. Опасните видове искат втора, изрична отметка —
+          виж lib/tenantDeviceAccess.js и инцидента с бушона на ап.9. */}
+      {device.type !== 'router' && (<>
+        <label className="flex items-start gap-2 mb-2 cursor-pointer text-xs">
           <input type="checkbox" className="mt-0.5" defaultChecked={!!device.tenant_control}
             onChange={e => onTenantControl && onTenantControl(device.id, e.target.checked)} />
           <span>
@@ -207,7 +215,22 @@ function DeviceCard({ device, API, properties, onDelete, onTypeChange, onTenantC
             <span className="block text-gray-400">Показва се в портала → таб „Апартамент". Без отметка само вижда консумацията.</span>
           </span>
         </label>
-      )}
+        {RISKY_TYPES.includes(device.type) && device.tenant_control ? (
+          <label className="flex items-start gap-2 mb-3 cursor-pointer text-xs bg-red-50 border border-red-200 rounded-lg p-2">
+            <input type="checkbox" className="mt-0.5" defaultChecked={!!device.tenant_control_risky}
+              onChange={e => {
+                if (e.target.checked && !confirm(RISK_TEXT[device.type] + '\n\nНаистина ли да се даде на наемателя?')) {
+                  e.target.checked = false; return
+                }
+                onTenantRisky && onTenantRisky(device.id, e.target.checked)
+              }} />
+            <span>
+              <span className="font-medium text-red-700">Да, и този опасен уред</span>
+              <span className="block text-red-600">{RISK_TEXT[device.type]}</span>
+            </span>
+          </label>
+        ) : null}
+      </>)}
 
       {/* Климатик без Wi-Fi: избор на „дистанционно" в инфраред контролера */}
       {device.type === 'ir_ac' && <IrRemotePicker device={device} API={API} />}
@@ -634,6 +657,13 @@ export default function Smart({ API }) {
     }).then(load)
   }
 
+  const changeTenantRisky = (id, tenant_control_risky) => {
+    apiFetch(`${API}/api/smart/devices/${id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tenant_control_risky: tenant_control_risky ? 1 : 0 }),
+    }).then(() => load())
+  }
+
   const changeTenantControl = (id, tenant_control) => {
     apiFetch(`${API}/api/smart/devices/${id}`, {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
@@ -672,7 +702,7 @@ export default function Smart({ API }) {
           {devices.map(dev =>
             dev.type === 'lock'
               ? <LockCard key={dev.id} device={dev} API={API} properties={properties} onDelete={id => setConfirmDel(id)} />
-              : <DeviceCard key={dev.id} device={dev} API={API} properties={properties} onDelete={id => setConfirmDel(id)} onTypeChange={changeType} onTenantControl={changeTenantControl} />
+              : <DeviceCard key={dev.id} device={dev} API={API} properties={properties} onDelete={id => setConfirmDel(id)} onTypeChange={changeType} onTenantControl={changeTenantControl} onTenantRisky={changeTenantRisky} />
           )}
         </div>
       )}
