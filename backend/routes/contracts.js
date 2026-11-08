@@ -11,6 +11,7 @@ const { optimizeMany, isDisplayable } = require('../lib/imageOptimize');
 const { imagesOnly, safeExt } = require('../lib/uploadFilter');
 const { getIssuer, issuerComplete } = require('../lib/branding');
 const { ensureTenant2 } = require('../lib/tenant2Party');
+const { canMove, moveNote } = require('../lib/contractMove');
 const { contactKeys, matchesContact, buildTimeline } = require('../lib/contactHistory');
 const { tidyContractText } = require('../lib/contractText');
 const { normalizeIdCard } = require('../lib/idCard');
@@ -1874,6 +1875,21 @@ const DEPOSIT_PARTS = ['deposit_at_signing', 'deposit_part_1', 'deposit_part_2']
         sets.push('template_id=?'); vals.push(tpl.id);
         sets.push('kind=?'); vals.push(contractKind(tpl.kind));
       }
+      // Преместване на друг имот. Нарочно НЕ е в EDITABLE: минава през
+      // проверка, за да не се окажат два действащи договора на един имот.
+      if (b.property_id !== undefined && String(b.property_id) !== String(contract.property_id)) {
+        const target = b.property_id
+          ? db.prepare('SELECT * FROM properties WHERE id=?').get(Number(b.property_id)) : null;
+        const activeThere = target
+          ? db.prepare("SELECT * FROM contracts WHERE property_id=? AND status='active'").all(target.id) : [];
+        const verdict = canMove(contract, target, activeThere);
+        if (!verdict.ok) return res.status(409).json({ error: verdict.error });
+        const from = contract.property_id
+          ? db.prepare('SELECT * FROM properties WHERE id=?').get(contract.property_id) : null;
+        sets.push('property_id=?'); vals.push(target.id);
+        sets.push('notes=?');       vals.push(moveNote(contract, from, target));
+      }
+
       if (!sets.length) return res.status(400).json({ error: 'Няма полета за промяна' });
       db.prepare(`UPDATE contracts SET ${sets.join(', ')} WHERE id=?`).run(...vals, contract.id);
       const fresh = db.prepare('SELECT * FROM contracts WHERE id=?').get(contract.id);
