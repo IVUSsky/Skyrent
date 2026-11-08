@@ -5,7 +5,7 @@ const mkey = d => (d || '').slice(0, 7);
 const period = t => t.месец || mkey(t.дата);
 const sig = (check, pid, m) => `${check}:${pid == null ? '' : pid}:${m || ''}`;
 
-function runChecks({ transactions = [], properties = [], expenses = [], acks = [] }) {
+function runChecks({ transactions = [], properties = [], expenses = [], acks = [], contracts = [], today = new Date().toISOString().slice(0, 10) }) {
   const ackSet = new Map(acks.map(a => [a.signature, a.status]));
   const out = [];
   const push = (o) => { o.signature = o.signature || sig(o.check, o.property_id, o.месец); out.push(o); };
@@ -128,6 +128,56 @@ function runChecks({ transactions = [], properties = [], expenses = [], acks = [
       if (rent > 0 && Math.abs(med - rent) / rent > 0.25) push({ check: 'rent_vs_record', severity: 'low', property_id: p.id, месец: null,
         title: `Наем ≠ запис — ${p.адрес}`, detail: `медиана плащане ${Math.round(med)}€ vs запис ${rent}€`, tx_ids: [], fix: null });
     }
+  }
+
+  // Два действащи договора на един имот с ЗАСТЪПВАЩИ СЕ периоди.
+  // Тиха грешка: нищо не я показва, а наемът, фактурите и напомнянията се
+  // водят по ИМОТ. Излиза наяве чак когато някой „не си плати" или когато
+  // прекратяването освободи жилището на друг наемател.
+  // Намерена на 08.11.2026 на два имота в ПРОД базата.
+  const activeByProp = {};
+  for (const c of contracts) {
+    if (String(c.status || '').toLowerCase() !== 'active') continue;
+    if (!c.property_id) continue;
+    (activeByProp[c.property_id] = activeByProp[c.property_id] || []).push(c);
+  }
+  const periodsOverlap = (a, b) => {
+    const as = a.start_date || '', ae = a.end_date || '9999-12-31';
+    const bs = b.start_date || '', be = b.end_date || '9999-12-31';
+    return as <= be && bs <= ae;
+  };
+  const contractTenant = (c) => String(c.tenant_name || '').trim() || '(без име)';
+  const addrOf = (pid) => (properties.find(x => String(x.id) === String(pid)) || {}).адрес || ('имот ' + pid);
+
+  for (const [pid, arr] of Object.entries(activeByProp)) {
+    if (arr.length < 2) continue;
+    for (let i = 0; i < arr.length; i++) for (let j = i + 1; j < arr.length; j++) {
+      if (!periodsOverlap(arr[i], arr[j])) continue;
+      const ids = [arr[i].id, arr[j].id].sort((x, y) => x - y);
+      const same = contractTenant(arr[i]) === contractTenant(arr[j]);
+      push({
+        check: same ? 'duplicate_contract' : 'overlapping_contracts',
+        severity: 'high', property_id: Number(pid), месец: null,
+        signature: `overlap:${ids[0]}:${ids[1]}`,
+        title: same ? `Един договор, вписан два пъти — ${addrOf(pid)}`
+                    : `Два действащи договора на един имот — ${addrOf(pid)}`,
+        detail: `${contractTenant(arr[i])} (${arr[i].start_date || '?'}–${arr[i].end_date || 'безсрочен'}) и `
+              + `${contractTenant(arr[j])} (${arr[j].start_date || '?'}–${arr[j].end_date || 'безсрочен'})`,
+        tx_ids: [], contract_ids: ids, fix: null,
+      });
+    }
+  }
+
+  // Изтекъл договор, който още се води действащ — наемателят отдавна си е
+  // тръгнал, а имотът стои зает и не влиза в обявите.
+  for (const c of contracts) {
+    if (String(c.status || '').toLowerCase() !== 'active') continue;
+    if (!c.end_date || c.end_date >= today) continue;
+    push({ check: 'expired_still_active', severity: 'med', property_id: c.property_id ?? null, месец: null,
+      signature: `expired:${c.id}`,
+      title: `Изтекъл договор, още „действащ" — ${addrOf(c.property_id)}`,
+      detail: `${contractTenant(c)} · изтекъл на ${c.end_date}`,
+      tx_ids: [], contract_ids: [c.id], fix: null });
   }
 
   // filter acknowledged

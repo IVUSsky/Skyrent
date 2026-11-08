@@ -270,3 +270,70 @@ describe('runChecks — ack suppression', () => {
     expect(first(out, 'rent_no_property')).toBeTruthy();
   });
 });
+
+describe('договори на един имот', () => {
+  const props = [{ id: 20, адрес: 'Пз. Болнична 7, ап.А' }];
+  const base = { transactions: [], properties: props, expenses: [], acks: [], today: '2026-11-08' };
+  const C = (o) => ({ status: 'active', property_id: 20, ...o });
+
+  it('два РАЗЛИЧНИ наемателя със застъпващи се периоди → висока тревога', () => {
+    const f = runChecks({ ...base, contracts: [
+      C({ id: 26, tenant_name: 'Гьоркем Йълдърън', start_date: '2025-11-03', end_date: '2026-11-03' }),
+      C({ id: 25, tenant_name: 'Венцислав Фотев', start_date: '2026-02-12', end_date: '2027-02-12' }),
+    ] }).filter(x => x.check === 'overlapping_contracts');
+    expect(f).toHaveLength(1);
+    expect(f[0].severity).toBe('high');
+    expect(f[0].contract_ids).toEqual([25, 26]);
+    expect(f[0].title).toMatch(/ап\.А/);
+  });
+
+  it('същото име два пъти → вписан е два пъти, друго съобщение', () => {
+    const f = runChecks({ ...base, contracts: [
+      C({ id: 1, tenant_name: 'ȘERBAN ȘTEFAN', start_date: '2026-01-01', end_date: '2026-12-31' }),
+      C({ id: 2, tenant_name: 'ȘERBAN ȘTEFAN', start_date: '2026-01-01', end_date: '2026-12-31' }),
+    ] });
+    expect(f.some(x => x.check === 'duplicate_contract')).toBe(true);
+    expect(f.some(x => x.check === 'overlapping_contracts')).toBe(false);
+  });
+
+  it('последователни наематели БЕЗ застъпване не са проблем', () => {
+    const f = runChecks({ ...base, contracts: [
+      C({ id: 1, tenant_name: 'Стар', start_date: '2025-01-01', end_date: '2025-12-31' }),
+      C({ id: 2, tenant_name: 'Нов',  start_date: '2026-01-01', end_date: '2026-12-31' }),
+    ] });
+    expect(f.filter(x => x.check === 'overlapping_contracts')).toHaveLength(0);
+  });
+
+  it('безсрочен договор се застъпва с всичко след началото си', () => {
+    const f = runChecks({ ...base, contracts: [
+      C({ id: 1, tenant_name: 'Безсрочен', start_date: '2025-01-01', end_date: null }),
+      C({ id: 2, tenant_name: 'Нов', start_date: '2026-01-01', end_date: '2026-12-31' }),
+    ] });
+    expect(f.filter(x => x.check === 'overlapping_contracts')).toHaveLength(1);
+  });
+
+  it('прекратеният не се брои', () => {
+    const f = runChecks({ ...base, contracts: [
+      C({ id: 1, tenant_name: 'А', start_date: '2026-01-01', end_date: '2026-12-31', status: 'terminated' }),
+      C({ id: 2, tenant_name: 'Б', start_date: '2026-01-01', end_date: '2026-12-31' }),
+    ] });
+    expect(f.filter(x => x.check === 'overlapping_contracts')).toHaveLength(0);
+  });
+
+  it('изтекъл, но още „действащ" излиза отделно', () => {
+    const f = runChecks({ ...base, contracts: [
+      C({ id: 26, tenant_name: 'Гьоркем', start_date: '2025-11-03', end_date: '2026-11-03' }),
+    ] }).filter(x => x.check === 'expired_still_active');
+    expect(f).toHaveLength(1);
+    expect(f[0].detail).toMatch(/изтекъл на 2026-11-03/);
+  });
+
+  it('действащ договор в срок не вдига тревога', () => {
+    const f = runChecks({ ...base, contracts: [C({ id: 1, tenant_name: 'А', start_date: '2026-01-01', end_date: '2027-01-01' })] });
+    expect(f.filter(x => x.check === 'expired_still_active')).toHaveLength(0);
+  });
+
+  it('без подадени договори старите проверки си работят', () => {
+    expect(() => runChecks({ transactions: [], properties: props, expenses: [], acks: [] })).not.toThrow();
+  });
+});

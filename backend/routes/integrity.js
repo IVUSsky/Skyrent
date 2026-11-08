@@ -10,6 +10,13 @@ module.exports = (db) => {
     properties: db.prepare('SELECT * FROM properties').all(),
     expenses: db.prepare('SELECT * FROM expense_invoices').all(),
     acks: db.prepare('SELECT signature, status FROM integrity_acks').all(),
+    // Договорите влизат заради проверките за застъпващи се и изтекли
+    // договори. try/catch: проверката не бива да пада заради тях.
+    contracts: (() => {
+      try {
+        return db.prepare('SELECT id, property_id, status, tenant_name, start_date, end_date FROM contracts').all();
+      } catch { return []; }
+    })(),
   });
 
   // GET /api/integrity  (?all=1 включва acked)
