@@ -14,7 +14,9 @@ module.exports = (db) => {
     // договори. try/catch: проверката не бива да пада заради тях.
     contracts: (() => {
       try {
-        return db.prepare('SELECT id, property_id, status, tenant_name, start_date, end_date FROM contracts').all();
+        // `kind` е задължително: без него наемен договор и интернет абонамент
+        // за един и същ човек изглеждат като един договор, вписан два пъти.
+        return db.prepare('SELECT id, property_id, status, kind, tenant_name, start_date, end_date FROM contracts').all();
       } catch { return []; }
     })(),
   });

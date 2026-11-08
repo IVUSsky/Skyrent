@@ -135,11 +135,18 @@ function runChecks({ transactions = [], properties = [], expenses = [], acks = [
   // водят по ИМОТ. Излиза наяве чак когато някой „не си плати" или когато
   // прекратяването освободи жилището на друг наемател.
   // Намерена на 08.11.2026 на два имота в ПРОД базата.
+  // Групира се по имот И ПО ВИД. Наемен договор и интернет абонамент за един
+  // и същ човек на един имот са нормални и съжителстват нарочно — интернет
+  // препродажбата работи точно така. Първата версия на това правило ги
+  // сравняваше само по име и обяви Иширков 24 ап.9 за „вписан два пъти";
+  // Иво щеше да обедини два редовни договора заради моя фалшив сигнал.
+  const kindOf = (c) => String(c.kind || 'наем').toLowerCase();
   const activeByProp = {};
   for (const c of contracts) {
     if (String(c.status || '').toLowerCase() !== 'active') continue;
     if (!c.property_id) continue;
-    (activeByProp[c.property_id] = activeByProp[c.property_id] || []).push(c);
+    const key = `${c.property_id}|${kindOf(c)}`;
+    (activeByProp[key] = activeByProp[key] || []).push(c);
   }
   const periodsOverlap = (a, b) => {
     const as = a.start_date || '', ae = a.end_date || '9999-12-31';
@@ -149,8 +156,9 @@ function runChecks({ transactions = [], properties = [], expenses = [], acks = [
   const contractTenant = (c) => String(c.tenant_name || '').trim() || '(без име)';
   const addrOf = (pid) => (properties.find(x => String(x.id) === String(pid)) || {}).адрес || ('имот ' + pid);
 
-  for (const [pid, arr] of Object.entries(activeByProp)) {
+  for (const [key, arr] of Object.entries(activeByProp)) {
     if (arr.length < 2) continue;
+    const pid = key.split('|')[0];
     for (let i = 0; i < arr.length; i++) for (let j = i + 1; j < arr.length; j++) {
       if (!periodsOverlap(arr[i], arr[j])) continue;
       const ids = [arr[i].id, arr[j].id].sort((x, y) => x - y);
