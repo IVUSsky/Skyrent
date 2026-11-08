@@ -11,6 +11,7 @@ const { optimizeMany, isDisplayable } = require('../lib/imageOptimize');
 const { imagesOnly, safeExt } = require('../lib/uploadFilter');
 const { getIssuer, issuerComplete } = require('../lib/branding');
 const { ensureTenant2 } = require('../lib/tenant2Party');
+const { contactKeys, matchesContact, buildTimeline } = require('../lib/contactHistory');
 const { tidyContractText } = require('../lib/contractText');
 const { normalizeIdCard } = require('../lib/idCard');
 const { kontrolisiContractsOn, sendContractToKontrolisi } = require('../lib/kontrolisiContract');
@@ -1517,6 +1518,48 @@ module.exports = function(db) {
     const s = v == null ? '' : String(v);
     return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
   };
+  // История на контакта: кога какво сме си разменили с този човек.
+  // Данните стоят в пет таблици и никоя не сочи към указателя — затова
+  // се сверява по ЕГН/имейл/телефон, както при дубликатите.
+  router.get('/parties/:id/history', (req, res) => {
+    try {
+      const party = db.prepare('SELECT * FROM tenant_directory WHERE id=?').get(req.params.id);
+      if (!party) return res.status(404).json({ error: 'Контактът не е намерен' });
+      const keys = contactKeys(party);
+      const q = (sql, ...a) => { try { return db.prepare(sql).all(...a); } catch { return []; } };
+
+      // Договорите дават и имотите, по които този човек е бил наемател —
+      // напомнянията и фактурите се водят по ИМОТ, не по човек.
+      const contracts = q(`SELECT c.*, p.адрес AS property_address
+           FROM contracts c LEFT JOIN properties p ON p.id = c.property_id`)
+        .filter(c => matchesContact(keys, c)
+          || matchesContact(keys, { tenant_name: c.tenant2_name, tenant_egn: c.tenant2_egn, tenant_email: c.tenant2_email }));
+      const propIds = [...new Set(contracts.map(c => c.property_id).filter(Boolean))];
+      const inList = propIds.length ? propIds.join(',') : '-1';
+
+      // Напомнянията се сверяват и по адреса, на който са пратени —
+      // така чуждо напомняне по същия имот не влиза в тази история.
+      const reminders = q(`SELECT * FROM rent_reminders WHERE property_id IN (${inList})`)
+        .filter(r => matchesContact(keys, r) || keys.emails.size === 0);
+
+      // Само наемните фактури на този човек — не всичко по имота.
+      const invoices = q(`SELECT * FROM rent_invoices WHERE property_id IN (${inList})`)
+        .filter(i => matchesContact(keys, { tenant_name: i.tenant_name, name: i.recipient_name })
+                  || keys.name === '' );
+
+      let tickets = [], chats = [];
+      const userIds = [...new Set(contracts.map(c => c.tenant_user_id).filter(Boolean))];
+      if (userIds.length) {
+        const ul = userIds.join(',');
+        tickets = q(`SELECT * FROM support_tickets WHERE user_id IN (${ul})`);
+        chats   = q(`SELECT * FROM tenant_chat_messages WHERE tenant_user_id IN (${ul})`);
+      }
+
+      const events = buildTimeline({ reminders, contracts, invoices, tickets, chats });
+      res.json({ ok: true, party: { id: party.id, name: party.name }, count: events.length, events });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
   router.get('/parties/export.csv', (req, res) => {
     if (req.user?.role === 'broker') return res.status(403).json({ error: 'Само за администратори' });
     const rows = db.prepare('SELECT * FROM tenant_directory ORDER BY name COLLATE NOCASE').all();

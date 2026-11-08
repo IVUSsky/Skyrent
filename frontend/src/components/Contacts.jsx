@@ -28,6 +28,22 @@ export default function Contacts({ API = '' }) {
   }
   // Дубликатите се смятат на сървъра (lib/partyDedupe.js) — там е и пазачът
   // срещу сливане на фирма с човек.
+  // История на контакта — събира се от напомняния, фактури, договори,
+  // заявки и разговори. Зарежда се чак при отваряне: пет заявки на ред
+  // в списъка биха го забавили за нищо.
+  const [history, setHistory] = useState(null)
+  const [histBusy, setHistBusy] = useState(false)
+
+  const openHistory = (r) => {
+    setHistory({ party: r, events: null })
+    setHistBusy(true)
+    apiFetch(`${API}/api/contracts/parties/${r.id}/history`)
+      .then(x => x.json())
+      .then(d => setHistory({ party: r, events: d.events || [], error: d.error || null }))
+      .catch(e => setHistory({ party: r, events: [], error: e.message }))
+      .finally(() => setHistBusy(false))
+  }
+
   const loadDupes = () => apiFetch(`${API}/api/contracts/parties/duplicates`)
     .then(r => r.json()).then(setDupes).catch(() => setDupes(null))
   useEffect(() => { load(); loadDupes() }, [])
@@ -177,6 +193,7 @@ export default function Contacts({ API = '' }) {
                       <td className="px-3 py-2 text-gray-600">{r.email || <span className="text-gray-300">—</span>}</td>
                       <td className="px-3 py-2 text-gray-600">{r.phone || <span className="text-gray-300">—</span>}</td>
                       <td className="px-3 py-2 text-right whitespace-nowrap">
+                        <button onClick={() => openHistory(r)} className="text-gray-600 hover:underline mr-3">История</button>
                         <button onClick={() => { setForm({ ...r }); setErr(null) }} className="text-indigo-600 hover:underline mr-3">Редактирай</button>
                         <button onClick={() => del(r.id)} className="text-red-500 hover:underline">Изтрий</button>
                       </td>
@@ -186,6 +203,46 @@ export default function Contacts({ API = '' }) {
               </table>
             </div>
           )}
+
+      {/* История на контакта */}
+      {history && (
+        <div className="fixed inset-0 bg-black/40 flex items-start justify-center z-50 p-4 overflow-y-auto" onClick={() => setHistory(null)}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl my-8" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200">
+              <div>
+                <h3 className="text-base font-bold text-gray-800">{history.party.name}</h3>
+                <div className="text-xs text-gray-500">
+                  {histBusy ? 'Събира се…' : `${(history.events || []).length} събития`}
+                </div>
+              </div>
+              <button onClick={() => setHistory(null)} className="text-gray-400 hover:text-gray-700 text-xl px-2">×</button>
+            </div>
+            {history.error && <div className="m-4 bg-red-50 border border-red-200 text-red-700 rounded-lg p-2 text-sm">{history.error}</div>}
+            {!histBusy && history.events && !history.events.length && (
+              <div className="p-8 text-center text-gray-500 text-sm">
+                Още няма нищо записано за този контакт.
+              </div>
+            )}
+            <div className="divide-y divide-gray-100 max-h-[65vh] overflow-y-auto">
+              {(history.events || []).map((e, i) => (
+                <div key={i} className="px-5 py-3 flex gap-3">
+                  <div className="text-lg leading-none pt-0.5">{e.icon}</div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium text-gray-800">{e.title}</div>
+                    {e.detail && <div className="text-xs text-gray-500 mt-0.5 break-words">{e.detail}</div>}
+                    {e.assistant && <div className="text-[11px] text-amber-700 mt-0.5">с AI помощника, не лично с теб</div>}
+                    {e.by && <div className="text-[11px] text-gray-400 mt-0.5">изпратил: {e.by}</div>}
+                  </div>
+                  <div className="text-xs text-gray-400 whitespace-nowrap">{String(e.at).slice(0, 16).replace('T', ' ')}</div>
+                </div>
+              ))}
+            </div>
+            <div className="px-5 py-3 border-t border-gray-200 text-[11px] text-gray-400">
+              Писма от твоята лична поща и отговори по имейл не се виждат тук — Skyrent не ги получава.
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Add/Edit модал */}
       {form && (
