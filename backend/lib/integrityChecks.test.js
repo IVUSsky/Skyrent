@@ -337,3 +337,41 @@ describe('договори на един имот', () => {
     expect(() => runChecks({ transactions: [], properties: props, expenses: [], acks: [] })).not.toThrow();
   });
 });
+
+describe('наем и интернет не са дубликат', () => {
+  const props = [{ id: 2, адрес: 'Иширков 24, ап.9' }];
+  const base = { transactions: [], properties: props, expenses: [], acks: [], today: '2026-11-08' };
+
+  it('един наемател с наемен договор И интернет абонамент → чисто', () => {
+    const f = runChecks({ ...base, contracts: [
+      { id: 39, property_id: 2, status: 'active', kind: 'наем', tenant_name: 'ȘERBAN ȘTEFAN', start_date: '2026-07-16', end_date: '2027-09-18' },
+      { id: 48, property_id: 2, status: 'active', kind: 'интернет', tenant_name: 'ȘERBAN ȘTEFAN', start_date: '2026-09-15', end_date: null },
+    ] });
+    expect(f.filter(x => x.check === 'duplicate_contract')).toHaveLength(0);
+    expect(f.filter(x => x.check === 'overlapping_contracts')).toHaveLength(0);
+  });
+
+  it('два НАЕМНИ договора на един имот пак се хващат', () => {
+    const f = runChecks({ ...base, contracts: [
+      { id: 1, property_id: 2, status: 'active', kind: 'наем', tenant_name: 'Един', start_date: '2026-01-01', end_date: '2026-12-31' },
+      { id: 2, property_id: 2, status: 'active', kind: 'наем', tenant_name: 'Друг', start_date: '2026-06-01', end_date: '2027-06-01' },
+    ] });
+    expect(f.filter(x => x.check === 'overlapping_contracts')).toHaveLength(1);
+  });
+
+  it('два ИНТЕРНЕТ договора на един имот също', () => {
+    const f = runChecks({ ...base, contracts: [
+      { id: 1, property_id: 2, status: 'active', kind: 'интернет', tenant_name: 'Един', start_date: '2026-01-01', end_date: null },
+      { id: 2, property_id: 2, status: 'active', kind: 'интернет', tenant_name: 'Един', start_date: '2026-06-01', end_date: null },
+    ] });
+    expect(f.filter(x => x.check === 'duplicate_contract')).toHaveLength(1);
+  });
+
+  it('договор без вид се води наемен', () => {
+    const f = runChecks({ ...base, contracts: [
+      { id: 1, property_id: 2, status: 'active', tenant_name: 'Един', start_date: '2026-01-01', end_date: '2026-12-31' },
+      { id: 2, property_id: 2, status: 'active', kind: 'наем', tenant_name: 'Един', start_date: '2026-01-01', end_date: '2026-12-31' },
+    ] });
+    expect(f.filter(x => x.check === 'duplicate_contract')).toHaveLength(1);
+  });
+});
