@@ -6,6 +6,7 @@ const { getAddonChargesForProperty, markDepositsCharged } = require('../lib/addo
 const { notifyTenant } = require('../lib/notify');
 const { nextInvoiceNumber, peekNextInvoiceNumber, counterKey } = require('../lib/invoiceNumber');
 const { parseRecipients } = require('../lib/email');
+const { normalizeSentAt } = require('../lib/sentAt');
 const { readSettings: monthlySettings, writeSettings: writeMonthlySettings, runMonthlyInvoicing } = require('../lib/monthlyInvoiceCron');
 const { vatSummary, vatRows } = require('../lib/vatSummary');
 const { getIssuer, issuerComplete, brandEmailHtml } = require('../lib/branding');
@@ -1174,6 +1175,21 @@ module.exports = function(db) {
     const r = await sendInvoiceEmail(db, inv, req.body?.email);
     if (!r.ok) return res.status(r.status || 500).json({ error: r.error });
     res.json({ ok: true, sent_to: r.sent_to });
+  });
+
+  // Корекция на „изпратена на“. Изпращането по-горе вдига sent_at на „сега“ и
+  // не води история, затова препращането на стара фактура на втори адрес трие
+  // кога тя е тръгнала към наемателя. Тук датата се връща ръчно — без да се
+  // пипа PDF-ът и без да се праща нищо. Тяло: { sent_at: '2026-11-01 07:00:01' }
+  // или { sent_at: null } за „неизпратена“.
+  router.patch('/:id/sent-at', (req, res) => {
+    if (req.user?.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+    const inv = db.prepare('SELECT id, sent_at FROM rent_invoices WHERE id = ?').get(req.params.id);
+    if (!inv) return res.status(404).json({ error: 'Not found' });
+    const r = normalizeSentAt(req.body?.sent_at);
+    if (!r.ok) return res.status(400).json({ error: r.error });
+    db.prepare('UPDATE rent_invoices SET sent_at = ? WHERE id = ?').run(r.value, inv.id);
+    res.json({ ok: true, sent_at: r.value, was: inv.sent_at });
   });
 
   // Update invoice (regenerates PDF). Accepts total (с ДДС) + vat_rate and
