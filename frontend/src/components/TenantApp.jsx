@@ -31,6 +31,7 @@ export default function TenantApp({ userName, onLogout, mustChangePassword }) {
   })
   const [me, setMe] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState(false)
   const [showPwd, setShowPwd] = useState(!!mustChangePassword)
   const [toast, setToast] = useState(null)
   const [installPrompt, setInstallPrompt] = useState(null)
@@ -79,12 +80,20 @@ export default function TenantApp({ userName, onLogout, mustChangePassword }) {
     localStorage.setItem('skyrent_install_dismissed', '1')
   }
 
+  // Неуспешен отговор НЕ е „наемател без договор“. Преди тук и 401, и 500 се
+  // парсваха като `me` → без contracts → Home казваше „няма активен договор“
+  // на човек, който е платил. При изтекла сесия apiFetch вече вика App да
+  // покаже входа; за всичко друго има екран с „Опитай пак“.
   const loadMe = () => {
     setLoading(true)
+    setLoadError(false)
     apiFetch(`${API}/api/tenant/me`)
-      .then(r => r.json())
+      .then(r => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`)
+        return r.json()
+      })
       .then(data => { setMe(data); setLoading(false) })
-      .catch(() => setLoading(false))
+      .catch(() => { setLoadError(true); setLoading(false) })
   }
 
   useEffect(() => { loadMe() }, [])
@@ -128,6 +137,18 @@ export default function TenantApp({ userName, onLogout, mustChangePassword }) {
 
   if (loading) {
     return <div className="min-h-screen flex items-center justify-center text-slate-500">{tr('common.loading')}</div>
+  }
+
+  if (loadError) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center gap-4 px-6 text-center" style={{ background: '#F4F1EA' }}>
+        <p className="text-slate-600 text-sm max-w-xs">{tr('home.loadError')}</p>
+        <div className="flex gap-2">
+          <button onClick={loadMe} className="bg-slate-800 hover:bg-slate-900 text-white text-sm font-semibold px-4 py-2 rounded-full">{tr('common.retry')}</button>
+          <button onClick={onLogout} className="border border-slate-300 text-slate-600 text-sm px-4 py-2 rounded-full">{tr('common.logout')}</button>
+        </div>
+      </div>
+    )
   }
 
   // Наемният договор е водещ за началния екран; интернет договорът (Sky като

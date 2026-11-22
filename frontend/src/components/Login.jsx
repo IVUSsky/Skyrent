@@ -40,7 +40,7 @@ const C = {
   lineSoft:'rgba(236,230,215,0.07)',
 }
 
-export default function Login({ API, onLogin, onBack }) {
+export default function Login({ API, onLogin, onBack, sessionExpired }) {
   useFonts()
   const [step, setStep]         = useState('credentials')  // 'credentials' | 'totp' | 'signup'
   const [username, setUsername] = useState('')
@@ -56,7 +56,11 @@ export default function Login({ API, onLogin, onBack }) {
   const [honeypot, setHoneypot]     = useState('')        // анти-бот скрито поле
   const [acceptTerms, setAcceptTerms] = useState(false)   // приемане на Общи условия (задължително)
   const [unverifiedEmail, setUnverifiedEmail] = useState(null) // вход блокиран — непотвърден
-  const [notice, setNotice]         = useState(null)      // банер от ?verify= в имейл линка
+  // Банер: от ?verify= в имейл линка, или защото App ни прати тук след
+  // изтекла сесия — човекът е бил вътре и трябва да знае защо е навън.
+  const [notice, setNotice]         = useState(() => sessionExpired
+    ? { type: 'info', msg: 'Сесията изтече — моля, влезте отново.' }
+    : null)
   const codeRef = useRef(null)
 
   useEffect(() => { if (step === 'totp') setTimeout(() => codeRef.current?.focus(), 50) }, [step])
@@ -226,8 +230,8 @@ export default function Login({ API, onLogin, onBack }) {
           <div className="sky-card sky-rise" style={{ animationDelay: '.24s' }}>
             {notice && (
               <div style={{ marginBottom: 14, padding: '10px 14px', borderRadius: 8, fontSize: 13,
-                background: notice.type === 'ok' ? 'rgba(122,162,122,.15)' : 'rgba(200,80,80,.15)',
-                color: notice.type === 'ok' ? '#bfe3bf' : '#f0b4b4', border: '1px solid rgba(255,255,255,.1)' }}>
+                background: notice.type === 'ok' ? 'rgba(122,162,122,.15)' : notice.type === 'info' ? 'rgba(201,162,75,.15)' : 'rgba(200,80,80,.15)',
+                color: notice.type === 'ok' ? '#bfe3bf' : notice.type === 'info' ? '#e9d3a0' : '#f0b4b4', border: '1px solid rgba(255,255,255,.1)' }}>
                 {notice.msg}
               </div>
             )}
