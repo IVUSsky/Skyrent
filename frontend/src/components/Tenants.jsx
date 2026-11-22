@@ -668,11 +668,16 @@ function TenantTable({
                 <td className="px-3 py-3 text-xs max-w-[180px]">
                   {editingContact === prop.id ? (
                     <div className="flex flex-col gap-1">
+                      {/* multiple — фактурата може да отива на няколко адреса
+                          (parseRecipients реже по „,“ и „;“). Без него браузърът
+                          огражда в червено всичко с запетая, макар да се записва. */}
                       <input
                         type="email"
+                        multiple
+                        title="Един или няколко адреса, разделени със запетая"
                         value={contactForm.email}
                         onChange={e => setContactForm(f => ({ ...f, email: e.target.value }))}
-                        placeholder="email@example.com"
+                        placeholder="email@example.com, втори@example.com"
                         className="border border-blue-300 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
                       />
                       <input
