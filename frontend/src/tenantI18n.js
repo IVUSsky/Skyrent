@@ -101,6 +101,7 @@ const DICT = {
   'common.tenant':   ['наемател', 'tenant', 'арендатор', 'орендар'],
   'common.save':     ['Запази', 'Save', 'Сохранить', 'Зберегти'],
   'common.error':    ['Грешка', 'Error', 'Ошибка', 'Помилка'],
+  'common.retry':    ['Опитай пак', 'Try again', 'Повторить', 'Спробувати ще'],
   // Internet
   'net.title':       ['Достъп до Wi-Fi', 'Wi-Fi Access', 'Доступ к Wi-Fi', 'Доступ до Wi-Fi'],
   'net.active':      ['✅ Активен', '✅ Active', '✅ Активен', '✅ Активний'],
@@ -173,6 +174,7 @@ const DICT = {
   'chat.placeholder':  ['Напиши съобщение…', 'Write a message…', 'Напишите сообщение…', 'Напишіть повідомлення…'],
   'chat.error':        ['Грешка: ', 'Error: ', 'Ошибка: ', 'Помилка: '],
   // Home
+  'home.loadError':    ['Данните не можаха да се заредят. Проверете връзката и опитайте пак.', 'Your data could not be loaded. Check your connection and try again.', 'Не удалось загрузить данные. Проверьте соединение и попробуйте снова.', 'Не вдалося завантажити дані. Перевірте зв’язок і спробуйте ще раз.'],
   'home.noContract':   ['Все още няма активен договор за имот, свързан с Вашия профил.', 'There is no active contract for a property linked to your profile yet.', 'Пока нет активного договора на объект, связанный с вашим профилем.', 'Поки немає активного договору на житло, пов’язане з вашим профілем.'],
   'home.contactUs':    ['Свържете се с екипа на Sky Capital за повече информация.', 'Contact the Sky Capital team for more information.', 'Свяжитесь с командой Sky Capital для подробностей.', 'Зв’яжіться з командою Sky Capital для деталей.'],
   'home.q1':           ['Колко дължа?', 'How much do I owe?', 'Сколько я должен?', 'Скільки я винен?'],

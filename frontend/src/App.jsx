@@ -184,6 +184,7 @@ export default function App() {
   const [activeTab, setActiveTab]       = useState('invoices')
   const [authenticated, setAuthenticated] = useState(!!localStorage.getItem('skyrent_token'))
   const [showLogin, setShowLogin]         = useState(false)
+  const [sessionExpired, setSessionExpired] = useState(false) // банер „Сесията изтече“ във входа
   const [role, setRole]                 = useState(parseRole)
   const [userName, setUserName]         = useState(localStorage.getItem('skyrent_name') || '')
   const [mustChangePwd, setMustChangePwd] = useState(localStorage.getItem('skyrent_must_change_pwd') === '1')
@@ -282,6 +283,7 @@ export default function App() {
       localStorage.removeItem('skyrent_must_change_pwd')
       setMustChangePwd(false)
     }
+    setSessionExpired(false)
     setAuthenticated(true)
     setActiveTab(data?.role === 'admin' ? 'dashboard' : 'contracts')
   }
@@ -294,6 +296,17 @@ export default function App() {
     setRole(null)
     setMustChangePwd(false)
   }
+
+  // Изтекла сесия (apiFetch видя сесиен 401) → изход и направо формата за
+  // вход с обяснение. Не на маркетинговата страница: наемател, отворил
+  // портала в браузъра (без ?app=1), иначе попада там и не разбира защо.
+  // Срокът НЕ се проверява по `exp` в браузъра — грешен часовник на телефона
+  // би изхвърлял човека при всяко отваряне. Сървърът решава.
+  useEffect(() => {
+    const h = () => { handleLogout(); setShowLogin(true); setSessionExpired(true) }
+    window.addEventListener('skyrent:auth-expired', h)
+    return () => window.removeEventListener('skyrent:auth-expired', h)
+  }, [])
 
   // Публичен каталог/обяви — достъпни без login, преди всичко друго.
   // /imoti → каталог; /obiava/<org>-<id> → обява; ?listing= (backward-compat).
@@ -328,11 +341,12 @@ export default function App() {
     // маркетинговата страница, вместо да го пита за парола.
     const fromApp = new URLSearchParams(window.location.search).has('app')
     return (showLogin || fromApp)
-      ? <Login API={API} onLogin={handleLogin} onBack={() => {
+      ? <Login API={API} sessionExpired={sessionExpired} onLogin={handleLogin} onBack={() => {
           // В режим „приложение“ адресът носи ?app=1 — махаме го, иначе
           // „Назад“ връща пак формата за вход и изходът е заключен.
           if (fromApp) window.history.replaceState(null, '', '/')
           setShowLogin(false)
+          setSessionExpired(false)
         }} />
       : <LandingPage onEnter={() => setShowLogin(true)} />
   }
