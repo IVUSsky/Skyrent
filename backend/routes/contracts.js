@@ -1833,6 +1833,9 @@ module.exports = function(db) {
     'property_address', 'property_description', 'property_area',
     'monthly_rent', 'currency', 'deposit', 'payment_day', 'start_date', 'end_date', 'delivery_date',
     'conditions', 'notes',
+    // Партидите се копират от имота при създаване. Поправка в имота после не
+    // стигаше до договора, а оттук нямаше как да се оправят — само пресъздаване.
+    'абонат_ток', 'абонат_вода', 'абонат_тец', 'абонат_вход',
     // Разсрочването по Чл.13
     'deposit_at_signing', 'deposit_part_1', 'deposit_part_2', 'deposit_months'];
 const DEPOSIT_PARTS = ['deposit_at_signing', 'deposit_part_1', 'deposit_part_2'];
