@@ -6,6 +6,14 @@
 const Database = require('better-sqlite3');
 const express = require('express');
 const http = require('http');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+// ID_DIR се изчислява при зареждане на модула — DATA_DIR трябва да е зададен преди require.
+const DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'sky-contract-test-'));
+process.env.DATA_DIR = DATA_DIR;
+const ID_DIR = path.join(DATA_DIR, 'id_cards');
+fs.mkdirSync(ID_DIR, { recursive: true });
 const makeRouter = require('./contracts');
 
 let db, server, base;
@@ -19,7 +27,8 @@ beforeEach(async () => {
       kind TEXT, template_id INTEGER, pdf_path TEXT, signed_pdf_path TEXT, protocol_pdf_path TEXT,
       payment_day INTEGER, monthly_rent REAL, deposit REAL,
       deposit_at_signing REAL, deposit_part_1 REAL, deposit_part_2 REAL, deposit_months TEXT,
-      абонат_ток TEXT, абонат_вода TEXT, абонат_тец TEXT, абонат_вход TEXT);
+      абонат_ток TEXT, абонат_вода TEXT, абонат_тец TEXT, абонат_вход TEXT,
+      id_front_path TEXT, id_back_path TEXT);
     CREATE TABLE contract_templates (id INTEGER PRIMARY KEY, name TEXT, kind TEXT);
     INSERT INTO contract_templates (id, name, kind) VALUES (7, 'Наем', 'наем');
     INSERT INTO properties (id, адрес, абонат_ток) VALUES (5, 'бл.64', '310262395207');
@@ -72,4 +81,32 @@ test('празна партида се записва като NULL', async () =
 test('договорът не пише обратно в имота', async () => {
   await put(51, { абонат_ток: '999999999999', regenerate: false });
   expect(db.prepare('SELECT абонат_ток FROM properties WHERE id=5').get().абонат_ток).toBe('310262395207');
+});
+
+// ── Снимка на нова лична карта към съществуващ договор ─────────────────────
+test('снимка на ЛК, качена през /extract-id, се закача към договора', async () => {
+  fs.writeFileSync(path.join(ID_DIR, '123_front_lk.jpg'), 'x');
+  const r = await put(51, { id_front_path: '123_front_lk.jpg', regenerate: false });
+  expect(r.status).toBe(200);
+  expect(db.prepare('SELECT id_front_path FROM contracts WHERE id=51').get().id_front_path).toBe('123_front_lk.jpg');
+});
+
+test('несъществуващ файл → 400, нищо не се записва', async () => {
+  const r = await put(51, { id_front_path: 'няма.jpg', regenerate: false });
+  expect(r.status).toBe(400);
+  expect(db.prepare('SELECT id_front_path FROM contracts WHERE id=51').get().id_front_path).toBeNull();
+});
+
+test('път с ../ се свежда до име на файл (без излизане от папката)', async () => {
+  fs.writeFileSync(path.join(ID_DIR, 'ok.jpg'), 'x');
+  const r = await put(51, { id_front_path: '../../etc/ok.jpg', regenerate: false });
+  expect(r.status).toBe(200);
+  expect(db.prepare('SELECT id_front_path FROM contracts WHERE id=51').get().id_front_path).toBe('ok.jpg');
+});
+
+test('празно откача снимката', async () => {
+  db.prepare("UPDATE contracts SET id_back_path='b.jpg' WHERE id=51").run();
+  const r = await put(51, { id_back_path: '', regenerate: false });
+  expect(r.status).toBe(200);
+  expect(db.prepare('SELECT id_back_path FROM contracts WHERE id=51').get().id_back_path).toBeNull();
 });

@@ -124,12 +124,13 @@ function cleanDocNumber(v) {
     .replace(/[\s\-–—.]/g, '')
     .trim().toUpperCase();
 }
-// Българска ЛК: точно 9 цифри. Паспорт/чужд документ: 6-12 букви и цифри.
+// Българска ЛК: 9 цифри (стар образец) или 2 латински букви + 7 цифри (образец
+// 2024 — „AB1234567"; буквите са част от номера). Паспорт/чужд: 6-12 букви и цифри.
 function looksLikeDocNumber(v, { bulgarian = true } = {}) {
   const s = cleanDocNumber(v);
   if (!s) return false;
   if (isDateLike(v)) return false;
-  return bulgarian ? /^\d{9}$/.test(s) : /^[A-Z0-9]{6,12}$/.test(s);
+  return bulgarian ? /^(\d{9}|[A-Z]{2}\d{7})$/.test(s) : /^[A-Z0-9]{6,12}$/.test(s);
 }
 
 // ── Подреждане на извлечените данни ────────────────────────────────────────
@@ -163,7 +164,7 @@ function normalizeIdCard(raw = {}) {
   } else if (claimed) {
     // Класическата грешка: в номера е попаднала дата (валидност/издаване)
     if (isDateLike(raw.id_number)) {
-      warnings.push('В полето за номер на документа беше разчетена дата — номерът е на лицевата страна долу дясно (9 цифри). Въведи го ръчно.');
+      warnings.push('В полето за номер на документа беше разчетена дата — номерът е на лицевата страна (9 цифри или 2 букви + 7 цифри). Въведи го ръчно.');
       const d = normalizeDate(raw.id_number);
       if (!out.id_valid_until && d) out.id_valid_until = d;
     } else {

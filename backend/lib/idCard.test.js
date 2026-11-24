@@ -35,6 +35,12 @@ describe('дата или номер', () => {
     expect(normalizeDate('12.05.2030')).toBe('2030-05-12');
     expect(normalizeDate('2030-5-1')).toBe('2030-05-01');
   });
+  it('българска ЛК образец 2024: 2 букви + 7 цифри', () => {
+    expect(looksLikeDocNumber('AB1234567', { bulgarian: true })).toBe(true);
+    expect(looksLikeDocNumber('№ AB 1234567', { bulgarian: true })).toBe(true);
+    expect(looksLikeDocNumber('A12345678', { bulgarian: true })).toBe(false);
+    expect(looksLikeDocNumber('ABC123456', { bulgarian: true })).toBe(false);
+  });
   it('паспортен номер с букви минава само в режим „не български"', () => {
     expect(looksLikeDocNumber('X1234567', { bulgarian: true })).toBe(false);
     expect(looksLikeDocNumber('X1234567', { bulgarian: false })).toBe(true);
@@ -89,6 +95,11 @@ describe('подреждане на извлечените данни', () => {
   it('нормален номер минава и се чисти от разделители', () => {
     const { data, warnings } = normalizeIdCard({ ...base, id_number: '№ 641 228 123' });
     expect(data.id_number).toBe('641228123');
+    expect(warnings).toEqual([]);
+  });
+  it('номер от карта образец 2024 (AB + 7 цифри) минава без предупреждение', () => {
+    const { data, warnings } = normalizeIdCard({ ...base, id_number: 'AB 1234567' });
+    expect(data.id_number).toBe('AB1234567');
     expect(warnings).toEqual([]);
   });
   it('номер, съвпадащ с дата от документа → изчиства се', () => {

@@ -1600,7 +1600,7 @@ export default function Contracts({ API }) {
                       {idWarnings.map((w, i) => <li key={i}>⚠️ {w}</li>)}
                     </ul>
                   )}
-                  <p className="text-[11px] text-amber-700 mt-2">⚠️ Прегледай извлечените данни (особено ЕГН и номера на документа) преди да запазиш. Номерът на българска лична карта е 9 цифри и стои на лицевата страна долу дясно; ако снимаш и гърба, той се сверява с машинно четимата зона. Снимките на ЛК се пазят към досието на договора.</p>
+                  <p className="text-[11px] text-amber-700 mt-2">⚠️ Прегледай извлечените данни (особено ЕГН и номера на документа) преди да запазиш. Номерът на българска лична карта е 9 цифри (нов образец: 2 букви + 7 цифри, напр. AB1234567) и стои на лицевата страна; ако снимаш и гърба, той се сверява с машинно четимата зона. Снимките на ЛК се пазят към досието на договора.</p>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -1631,7 +1631,7 @@ export default function Contracts({ API }) {
                   <div>
                     <label className="block text-xs font-medium text-gray-600 mb-1">Номер на документа</label>
                     <input type="text" value={newForm.tenant_doc_number} onChange={e=>setNewForm(f=>({...f,tenant_doc_number:e.target.value}))}
-                      placeholder="123456789 (9 цифри, лицева страна долу дясно)"
+                      placeholder="123456789 или AB1234567 (лицева страна)"
                       className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
                   </div>
                   <div>
