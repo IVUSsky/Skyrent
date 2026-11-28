@@ -19,6 +19,7 @@ export const ALL_TABS = [
   { id: 'support',   label: '💬 Разговори',   roles: ['admin'],            tier: 'standard', group: 'system',  icon: '▧', name: 'Разговори' },
   { id: 'contacts',  label: '📇 Контакти',    roles: ['admin'],            tier: 'standard', group: 'system',  icon: '▨', name: 'Контакти' },
   { id: 'import',    label: '📥 Банка',       roles: ['admin'],            tier: 'standard', group: 'income',  icon: '⇄', name: 'Банков импорт', capability: 'bank_import' },
+  { id: 'annual',    label: '📑 Годишен отчет', roles: ['admin'],          tier: 'standard', group: 'finance', icon: '◫', name: 'Годишен отчет', capability: 'bank_import' },
   { id: 'investor',  label: '📊 Анализ',      roles: ['admin'],            tier: 'advanced', group: 'finance', icon: '◧', name: 'Анализ' },
   { id: 'history',   label: '📈 История',     roles: ['admin'],            tier: 'advanced', group: 'finance', icon: '↗', name: 'История' },
   { id: 'loans',     label: 'Кредити',        roles: ['admin'],            tier: 'advanced', group: 'finance', icon: '⊖', name: 'Кредити' },

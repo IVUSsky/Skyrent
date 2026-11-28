@@ -24,6 +24,7 @@ const Chl50Report    = lazy(() => import('./components/Chl50Report'))
 const List           = lazy(() => import('./components/List'))
 const Dashboard      = lazy(() => import('./components/Dashboard'))
 const InvestorView   = lazy(() => import('./components/InvestorView'))
+const AnnualReport   = lazy(() => import('./components/AnnualReport'))
 const Loans          = lazy(() => import('./components/Loans'))
 const History        = lazy(() => import('./components/History'))
 const Import         = lazy(() => import('./components/Import'))
@@ -522,6 +523,7 @@ export default function App() {
         <Suspense fallback={<TabFallback/>}>
           {validTab === 'dashboard' && <Dashboard API={API} onNavigate={navigateTo} />}
           {validTab === 'investor'  && <InvestorView API={API} />}
+          {validTab === 'annual'    && <AnnualReport API={API} />}
           {validTab === 'portfolio' && <Portfolio API={API} role={role} />}
           {validTab === 'deeds' && <Deeds API={API} />}
           {validTab === 'owners'    && <Owners API={API} />}
