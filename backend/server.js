@@ -266,6 +266,7 @@ async function main() {
   app.use('/api/import',     requireCapability('bank_import'), require('./routes/import')(db));
   app.use('/api/settings',   require('./routes/settings')(db));
   app.use('/api/onboarding', require('./routes/onboarding')(db));
+  app.use('/api/reports',    require('./routes/reports')(db));
   app.use('/api/tax-report', require('./routes/taxReport')(db));
   app.use('/api/white-label', require('./routes/whiteLabel')(db));
   app.use('/api/owners', requireCapability('multi_owner'), require('./routes/owners')(db));
